@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlencode
 
-from .base import HttpFn, NotifierAdapter, multipart_form
+from .base import HttpFn, NotifierAdapter, multipart_form, require_reply, truncated
 
 API = "https://api.pushover.net/1/messages.json"
 PRIORITIES = ["-2", "-1", "0", "1"]
@@ -24,6 +24,8 @@ PRIORITY_LABELS = [
     "High - bypasses your quiet hours",
 ]
 DEFAULT_PRIORITY = "1"
+TITLE_LIMIT = 250
+MESSAGE_LIMIT = 1024
 
 
 class PushoverNotifier(NotifierAdapter):
@@ -63,15 +65,26 @@ class PushoverNotifier(NotifierAdapter):
         "required": ["api_token", "user_key"],
     }
 
-    async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None) -> None:
-        """Posts the message, as multipart with the snapshot or form-encoded without."""
-        priority = str(config.get("priority", "")).strip()
+    async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None, *, urgent: bool = True) -> None:
+        """Posts the message, as multipart with the snapshot or form-encoded without.
+
+        A notice that is not urgent goes at normal priority, or lower where the
+        configured priority is lower. The title is cut to the 250 characters
+        Pushover takes and the message to 1024.
+
+        Raises:
+            RuntimeError: If Pushover rejects the alert, or does not answer with status 1.
+        """
+        priority = str(config.get("priority", ""))
+        priority = priority if priority in PRIORITIES else DEFAULT_PRIORITY
+        if not urgent:
+            priority = str(min(int(priority), 0))
         fields = {
-            "token": str(config["api_token"]).strip(),
-            "user": str(config["user_key"]).strip(),
-            "title": title,
-            "message": body,
-            "priority": priority if priority in PRIORITIES else DEFAULT_PRIORITY,
+            "token": config["api_token"],
+            "user": config["user_key"],
+            "title": truncated(title, TITLE_LIMIT),
+            "message": truncated(body, MESSAGE_LIMIT),
+            "priority": priority,
         }
         if image:
             headers, payload = multipart_form(fields, "attachment", "snapshot.jpg", image)
@@ -79,7 +92,6 @@ class PushoverNotifier(NotifierAdapter):
             headers = {"Content-Type": "application/x-www-form-urlencoded"}
             payload = urlencode(fields).encode()
         status, resp = await http("POST", API, headers=headers, data=payload, timeout=15.0)
-        if status >= 400:
-            errors = resp.get("errors") if isinstance(resp, dict) else None
-            detail = "; ".join(errors) if isinstance(errors, list) else None
-            raise RuntimeError(f"Pushover rejected the alert: {detail or f'HTTP {status}'}")
+        answered = resp if isinstance(resp, dict) else {}
+        errors = answered.get("errors")
+        require_reply("Pushover", "the alert", status, answered.get("status") == 1, "; ".join(errors) if isinstance(errors, list) else None)

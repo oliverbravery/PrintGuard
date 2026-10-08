@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterable, AsyncIterator
 from urllib.parse import urlparse
 
 import numpy as np
+import websockets
 
-from printguard.engine.platform import Frame
+from printguard.engine.platform import Frame, Notice, Redirects
 
 
 class FakeSource:
@@ -41,6 +43,7 @@ class FakeSocket:
     def __init__(self, url: str, arrived: Any) -> None:
         self.url = url
         self.arrived = arrived
+        self.public_only = False
         self.sent: list[str] = []
         self.closed = False
 
@@ -50,6 +53,29 @@ class FakeSocket:
     async def close(self) -> None:
         self.closed = True
         self.arrived("closed", "")
+
+
+@asynccontextmanager
+async def redirected_socket() -> AsyncIterator[tuple[str, list[str]]]:
+    """Serves a WebSocket address on loopback that redirects to a second one.
+
+    Yields:
+        The address that redirects, and the path of every handshake that
+        reached the address it points at.
+    """
+    reached: list[str] = []
+
+    async def elsewhere(connection: websockets.ServerConnection) -> None:
+        reached.append(connection.request.path)
+
+    async with websockets.serve(elsewhere, "127.0.0.1", 0) as target:
+        def redirect(connection: websockets.ServerConnection, request: Any) -> Any:
+            response = connection.respond(302, "")
+            response.headers["Location"] = f"ws://127.0.0.1:{target.sockets[0].getsockname()[1]}/api/ws"
+            return response
+
+        async with websockets.serve(elsewhere, "127.0.0.1", 0, process_request=redirect) as declared:
+            yield f"ws://127.0.0.1:{declared.sockets[0].getsockname()[1]}", reached
 
 
 class FakeFileStore:
@@ -69,7 +95,42 @@ class FakeFileStore:
         return self.blobs[key]
 
     async def remove(self, key: str) -> None:
+        await asyncio.sleep(0)
         self.blobs.pop(key, None)
+
+
+class FakePluginRuntime:
+    """A plugin runtime that runs nothing, so an engine counts as running plugins."""
+
+    def attach(self, request: Any, failed: Any) -> None:
+        pass
+
+    def on_event(self, event: dict[str, Any]) -> None:
+        pass
+
+    async def reload(self, running: Any, failed_gates: Any) -> None:
+        pass
+
+    async def serve(self, plugin_id: str, request: dict[str, Any]) -> None:
+        return None
+
+    async def authorise(self, request: dict[str, Any]) -> None:
+        return None
+
+    def gate_paths(self) -> tuple[str, ...]:
+        return ()
+
+    async def close(self) -> None:
+        pass
+
+
+NOTIFIER_REPLIES: dict[str, tuple[int, Any]] = {
+    "ntfy": (200, {"id": "sPs71M8A2T", "time": 1, "event": "message", "topic": "topic"}),
+    "://disc/": (204, ""),
+    "api.pushover.net": (200, {"status": 1, "request": "r"}),
+    "api.telegram.org": (200, {"ok": True, "result": {}}),
+}
+"""What each alert service answers a delivery with, by what the address the tests reach it on holds."""
 
 
 class FakePlatform:
@@ -81,9 +142,10 @@ class FakePlatform:
     version = "2.1.0"
     update_repo = "o/r"
     update_asset: str | None = None
-    plugin_runtime = None
+    secrets: frozenset[str] = frozenset()
 
     def __init__(self, infer_s: float = 0.05, failing: bool = False) -> None:
+        self.plugin_runtime: Any = FakePluginRuntime()
         self.infer_s = infer_s
         self.failing = failing
         self.device_status = "Printing"
@@ -103,10 +165,15 @@ class FakePlatform:
         self.state: dict[str, Any] = {}
         self.inference_runtime = "auto"
         self.files = FakeFileStore()
+        self.notices: list[Notice] = []
 
     async def configure(self, settings: dict[str, Any]) -> None:
         """Records the selected inference runtime."""
         self.inference_runtime = settings["inference_runtime"]
+
+    def take_notices(self) -> list[Notice]:
+        notices, self.notices = self.notices, []
+        return notices
 
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
         self.inference_started.set()
@@ -120,25 +187,49 @@ class FakePlatform:
         return list(self.devices)
 
     async def open_camera(self, camera_id: str, source: dict[str, Any]) -> FakeSource:
+        if source["kind"] == "device" and source["device_id"] not in [device["device_id"] for device in self.devices]:
+            raise OSError(f"no device at {source['device_id']}")
         return FakeSource(float(source.get("fps", 15.0)))
 
     async def release_camera(self, camera_id: str, source: dict[str, Any]) -> None:
         self.released_cameras.append(camera_id)
 
-    async def open_socket(self, url: str, arrived: Any) -> "FakeSocket":
+    async def open_socket(self, url: str, arrived: Any, public_only: bool = False) -> "FakeSocket":
         socket = FakeSocket(url, arrived)
+        socket.public_only = public_only
         self.sockets.append(socket)
         arrived("open", "")
         return socket
 
-    async def http(self, method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
+    async def http(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        data: bytes | AsyncIterable[bytes] | None = None,
+        binary: bool = False,
+        timeout: float = 10.0,
+        redirects: Redirects = "follow",
+        max_bytes: int | None = None,
+        public_only: bool = False,
+    ) -> tuple[int, Any]:
+        if hasattr(data, "__aiter__"):
+            data = b"".join([chunk async for chunk in data])
         self.http_calls.append((method, url))
-        self.http_requests.append({"method": method, "url": url, **kwargs})
+        self.http_requests.append(
+            {"method": method, "url": url, "headers": headers, "json": json, "data": data, "binary": binary,
+             "timeout": timeout, "redirects": redirects, "max_bytes": max_bytes, "public_only": public_only}
+        )
         hostname = urlparse(url).hostname or ""
         if url in self.responses:
             return self.responses[url]
         if hostname == "api.github.com":
             return 200, self.releases
+        for service, reply in NOTIFIER_REPLIES.items():
+            if service in url:
+                return reply
         if hostname == "sentry.io" or hostname.endswith(".sentry.io"):
             return self.report_status, {}
         if method == "POST" and "/api/job" in url:
@@ -146,6 +237,10 @@ class FakePlatform:
             await asyncio.sleep(self.action_delay_s)
         if self.reject_actions and method == "POST" and "/api/job" in url:
             raise RuntimeError("printer refused")
+        if method == "POST" and ("/api/job" in url or "/api/printer/" in url):
+            return 204, ""
+        if method == "POST" and url.endswith("/api/files/local"):
+            return 201, {"files": {}, "done": True, "effectiveSelect": True, "effectivePrint": True}
         return 200, {"state": self.device_status, "progress": {"completion": 40.0}, "job": {"file": {"name": "benchy.gcode"}}}
 
     async def encode_jpeg(self, rgb: np.ndarray) -> bytes | None:

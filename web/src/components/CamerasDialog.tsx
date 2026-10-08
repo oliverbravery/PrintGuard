@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { listVideoInputs } from "../media";
 import { useStore } from "../store";
 import type { Camera, CameraSource } from "../types";
-import { publishStream, published, stopPublishing } from "../stream";
-import { sourceLabel } from "./CameraRail";
+import { publishStream, published } from "../stream";
+import { cameraStatus, sourceLabel } from "./CameraRail";
+import { ConfirmButton } from "./ConfirmButton";
 import { CropEditor } from "./CropEditor";
 import { Dialog } from "./Dialog";
 import { NameField } from "./NameField";
@@ -11,8 +12,21 @@ import { SaveStatus } from "./SaveStatus";
 import { Slider } from "./Slider";
 import { type Tab, TabPanel, Tabs } from "./Tabs";
 
+const UNCAPPED_DETECT_FPS = 60;
+
 function slug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "camera";
+}
+
+function useRegistered(onRegistered: () => void) {
+  const { engine, isPending } = useStore();
+  const registering = isPending("camera.add");
+  const cameras = engine?.cameras.length ?? 0;
+  const camerasWhenSent = useRef(cameras);
+  useEffect(() => {
+    if (registering) camerasWhenSent.current = cameras;
+    else if (cameras > camerasWhenSent.current) onRegistered();
+  }, [registering]);
 }
 
 function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
@@ -21,47 +35,50 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const owner = camera.printer_id ? engine?.printers.find((p) => p.id === camera.printer_id) : null;
   const managed = Boolean(owner) || Boolean(camera.declared);
+  const removalHint = owner
+    ? "Managed by its printer integration, remove the printer to remove this camera."
+    : camera.declared
+      ? "Passed in by the deployment, remove its devices entry to remove this camera."
+      : null;
+  const detectFpsCeiling = Math.min(UNCAPPED_DETECT_FPS, Math.ceil(camera.max_fps));
 
   useEffect(() => {
     if (focus) {
       setOpen(true);
-      ref.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      ref.current?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
     }
   }, [focus]);
 
   return (
     <div ref={ref} className="panel overflow-hidden">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
-        <span className={`led ${camera.online ? "led-on" : "led-off"}`} title={camera.online ? "online" : camera.standby ? "standby" : "offline"} />
+        <span role="img" aria-label={cameraStatus(camera)} className={`led ${camera.online ? "led-on" : "led-off"}`} title={cameraStatus(camera)} />
         <div className="min-w-0 grow basis-40 leading-tight">
           <div className="text-sm font-medium truncate">{camera.name}</div>
           <div className="mono text-[0.62rem] text-text-2 truncate">{sourceLabel(camera.source)}</div>
+          {camera.reason && <div className="text-[0.68rem] text-bad">{camera.reason}</div>}
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <span className="mono text-[0.68rem] text-text-1">{camera.max_fps.toFixed(0)} fps</span>
           {camera.source.path && published.has(camera.source.path) && (
             <span className="chip chip-accent">publishing</span>
           )}
-          {owner && <span className="chip" title="Managed by its printer integration, remove the printer to remove this camera">via {owner.name}</span>}
-          {camera.declared && (
-            <span className="chip" title="Passed in by the deployment, remove its devices entry to remove this camera">passed in</span>
-          )}
+          {owner && <span className="chip">via {owner.name}</span>}
+          {camera.declared && <span className="chip">passed in</span>}
           <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setOpen((v) => !v)}>
             {open ? "Hide" : "Edit"}
           </button>
           {!managed && (
-            <button
-              className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
-              disabled={isPending("camera.remove")}
-              onClick={() => {
-                if (camera.source.path) stopPublishing(camera.source.path);
-                send({ cmd: "camera.remove", id: camera.id });
-              }}
+            <ConfirmButton
+              className="!py-1 !px-2.5 !text-[0.62rem]"
+              disabled={isPending("camera.remove", camera.id)}
+              onConfirm={() => send({ cmd: "camera.remove", id: camera.id })}
             >
-              {isPending("camera.remove") ? "Removing…" : "Remove"}
-            </button>
+              {isPending("camera.remove", camera.id) ? "Removing…" : "Remove"}
+            </ConfirmButton>
           )}
         </div>
+        {removalHint && <p className="basis-full text-[0.66rem] text-text-2">{removalHint}</p>}
       </div>
       {open && (
         <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">
@@ -88,7 +105,18 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
             min={0}
             max={2}
             step={0.1}
+            hint="This preview sharpens the picture at the size it's drawn here, so it looks stronger than what the model gets."
             onChange={(v) => updateCamera(camera.id, { sharpness: v })}
+          />
+          <Slider
+            label="Detection rate"
+            value={Math.min(camera.detect_fps, detectFpsCeiling)}
+            min={0.5}
+            max={detectFpsCeiling}
+            step={0.5}
+            format={(v) => `${v} fps`}
+            hint="Lower it to lighten the load on the hub. A defect then takes longer to confirm."
+            onChange={(v) => updateCamera(camera.id, { detect_fps: v >= detectFpsCeiling ? UNCAPPED_DETECT_FPS : v })}
           />
           <div className="space-y-1.5">
             <span className="label">Rotation</span>
@@ -97,6 +125,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
                 <button
                   key={deg}
                   className={`btn flex-1 !py-1.5 !text-[0.66rem] ${(camera.rotation ?? 0) === deg ? "!border-accent !text-accent" : ""}`}
+                  aria-pressed={(camera.rotation ?? 0) === deg}
                   onClick={() => updateCamera(camera.id, { rotation: deg })}
                 >
                   {deg}°
@@ -111,7 +140,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
             onChange={(crop) => updateCamera(camera.id, { crop })}
           />
           <div className="flex justify-end pt-1">
-            <SaveStatus />
+            <SaveStatus scope={`camera:${camera.id}`} />
           </div>
         </div>
       )}
@@ -161,18 +190,33 @@ function PrinterCameras() {
 }
 
 function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSource) => void; hint?: string }) {
-  const { discovered, discovering, discover, isPending } = useStore();
+  const { discovered, discovering, discover, isPending, reconnecting } = useStore();
   const busy = isPending("camera.add");
   const [name, setName] = useState("");
   const [deviceId, setDeviceId] = useState("");
   useEffect(() => {
+    if (!reconnecting) discover();
+  }, [reconnecting]);
+  useRegistered(() => {
+    setName("");
+    setDeviceId("");
     discover();
-  }, []);
+  });
   const devices = (discovered ?? []).filter((s) => s.kind === "device");
+  const register = () => {
+    const device = devices.find((d) => d.device_id === deviceId)!;
+    onAdd(name || device.label || "Camera", { kind: "device", device_id: deviceId, label: device.label });
+  };
   return (
-    <div className="space-y-3">
+    <form
+      className="space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        register();
+      }}
+    >
       {discovering && <p className="mono text-[0.7rem] text-text-2 boot-cursor">scanning devices</p>}
-      {!discovering && !devices.length && (
+      {discovered && !devices.length && (
         <>
           <p className="mono text-[0.7rem] text-text-2">no unregistered cameras found</p>
           {hint && <p className="text-xs text-text-1">{hint}</p>}
@@ -180,7 +224,7 @@ function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSou
       )}
       {devices.length > 0 && (
         <>
-          <select className="field" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
+          <select className="field" aria-label="Camera" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
             <option value="">Select a camera…</option>
             {devices.map((d) => (
               <option key={d.device_id} value={d.device_id}>
@@ -188,27 +232,20 @@ function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSou
               </option>
             ))}
           </select>
-          <input className="field" placeholder="Name (e.g. Ender 3 nozzle cam)" value={name} onChange={(e) => setName(e.target.value)} />
-          <button
-            className="btn btn-primary w-full"
-            disabled={!deviceId || busy}
-            onClick={() => {
-              const device = devices.find((d) => d.device_id === deviceId)!;
-              onAdd(name || device.label || "Camera", { kind: "device", device_id: deviceId, label: device.label });
-            }}
-          >
+          <input className="field" aria-label="Name" placeholder="Name (e.g. Ender 3 nozzle cam)" value={name} onChange={(e) => setName(e.target.value)} />
+          <button className="btn btn-primary w-full" type="submit" disabled={!deviceId || busy}>
             {busy ? "Measuring fps…" : "Register camera"}
           </button>
         </>
       )}
-    </div>
+    </form>
   );
 }
 
 type AddTab = "url" | "machine" | "browser";
 
 function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: CameraSource) => void }) {
-  const { send, toast, isPending } = useStore();
+  const { send, toast, isPending, addPublishedCamera } = useStore();
   const desktopApp = "pywebview" in window;
   const [tab, setTab] = useState<AddTab>("url");
   const [name, setName] = useState("");
@@ -216,6 +253,12 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useRegistered(() => {
+    setName("");
+    setUrl("");
+    setDeviceId("");
+  });
 
   useEffect(() => {
     if (tab === "browser" && !desktopApp) {
@@ -228,15 +271,15 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
   const publish = async () => {
     setBusy(true);
     try {
-      const path = `dev-${slug(name || "camera")}`;
+      const path = `dev-${slug(name || "camera")}-${Date.now().toString(36)}`;
       const { hlsPlayable } = await publishStream(path, deviceId, (reason) =>
         toast("error", `publishing stopped: ${reason}`),
       );
       if (!hlsPlayable) {
-        toast("alert", "this browser records VP8, so monitoring works and you can preview it here, but other devices can't view this camera");
+        toast("alert", "This browser records VP8, which the dashboard can't play, so this camera is monitored but has no live view. Chrome, Edge and Safari record H.264.");
       }
       await new Promise((r) => setTimeout(r, 800));
-      send({ cmd: "camera.add", name: name || "Published camera", source: { kind: "path", path } });
+      addPublishedCamera(name || "Published camera", path);
     } catch (err) {
       toast("error", `publish failed: ${err}`);
     } finally {
@@ -256,6 +299,7 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
           <button
             key={key}
             className={`btn !py-1.5 !px-3 !text-[0.66rem] ${tab === key ? "!border-accent !text-accent" : ""}`}
+            aria-pressed={tab === key}
             onClick={() => setTab(key)}
           >
             {label}
@@ -263,24 +307,29 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
         ))}
       </div>
       {tab === "url" && (
-        <div className="space-y-3">
-          <input className="field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+        <form
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            send({ cmd: "camera.add", name: name || "Stream", source: { kind: "url", url: url.trim() } });
+          }}
+        >
+          <input className="field" aria-label="Name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
           <input
             className="field"
+            aria-label="Stream URL"
+            inputMode="url"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             placeholder="rtsp:// rtmp:// http:// or whep:// stream URL"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
           />
-          <button
-            className="btn btn-primary w-full"
-            disabled={!url.trim() || isPending("camera.add")}
-            onClick={() => {
-              send({ cmd: "camera.add", name: name || "Stream", source: { kind: "url", url: url.trim() } });
-            }}
-          >
+          <button className="btn btn-primary w-full" type="submit" disabled={!url.trim() || isPending("camera.add")}>
             {isPending("camera.add") ? "Registering…" : "Register stream"}
           </button>
-        </div>
+        </form>
       )}
       {tab === "machine" && (
         <div className="space-y-3">
@@ -295,12 +344,18 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
         </div>
       )}
       {tab === "browser" && (
-        <div className="space-y-3">
+        <form
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void publish();
+          }}
+        >
           <p className="text-xs text-text-1">
             Streams this device's camera to the hub. It reconnects if the hub restarts and resumes
             when you reopen this page on this device.
           </p>
-          <select className="field" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
+          <select className="field" aria-label="Camera" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
             <option value="">Select a camera…</option>
             {devices.map((d, i) => (
               <option key={d.deviceId} value={d.deviceId}>
@@ -308,11 +363,11 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
               </option>
             ))}
           </select>
-          <input className="field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <button className="btn btn-primary w-full" disabled={!deviceId || busy || isPending("camera.add")} onClick={publish}>
+          <input className="field" aria-label="Name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+          <button className="btn btn-primary w-full" type="submit" disabled={!deviceId || busy || isPending("camera.add")}>
             {busy ? "Publishing…" : isPending("camera.add") ? "Registering…" : "Publish & register"}
           </button>
-        </div>
+        </form>
       )}
     </div>
   );

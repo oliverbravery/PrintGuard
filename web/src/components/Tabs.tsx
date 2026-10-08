@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type ReactNode, useEffect, useRef } from "react";
+import { type KeyboardEvent, type ReactNode, type Ref, useEffect, useRef } from "react";
 import { useScrollEdges } from "../scroll";
 
 export interface Tab<T extends string> {
@@ -54,7 +54,7 @@ export function Tabs<T extends string>({
           aria-controls={`${prefix}-panel-${t.id}`}
           tabIndex={value === t.id ? 0 : -1}
           onClick={() => onChange(t.id)}
-          className={`-mb-px shrink-0 cursor-pointer whitespace-nowrap border-b-2 px-3 py-2.5 text-xs transition-colors ${
+          className={`-mb-px shrink-0 cursor-pointer whitespace-nowrap border-b-2 px-3 py-2.5 pointer-coarse:min-h-11 text-xs transition-colors ${
             value === t.id ? "border-accent text-text-0" : "border-transparent text-text-2 hover:text-text-1"
           }`}
         >
@@ -65,9 +65,21 @@ export function Tabs<T extends string>({
   );
 }
 
-export function TabPanel({ prefix, id, className, children }: { prefix: string; id: string; className?: string; children: ReactNode }) {
+export function TabPanel({
+  prefix,
+  id,
+  className,
+  ref,
+  children,
+}: {
+  prefix: string;
+  id: string;
+  className?: string;
+  ref?: Ref<HTMLDivElement>;
+  children: ReactNode;
+}) {
   return (
-    <div role="tabpanel" id={`${prefix}-panel-${id}`} aria-labelledby={`${prefix}-tab-${id}`} tabIndex={0} className={className}>
+    <div ref={ref} role="tabpanel" id={`${prefix}-panel-${id}`} aria-labelledby={`${prefix}-tab-${id}`} tabIndex={0} className={className}>
       {children}
     </div>
   );

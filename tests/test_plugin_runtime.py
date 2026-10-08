@@ -17,10 +17,12 @@ from pathlib import Path
 import pytest
 from fakes import FakePlatform
 
+from printguard.engine import plugins as engine_plugins
 from printguard.engine.engine import Engine
 
 OCTOPRINT = {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}
-from printguard.engine.registry import Plugin
+from printguard.engine.registry import Camera, Plugin
+from printguard.server import plugins as server_plugins
 from printguard.server.plugins import Sandbox, WasmPluginRuntime
 
 CALL = {"kind": "event", "event": {"event": "alert", "score": 0.9}, "request": {}, "state": {}, "store": {}}
@@ -87,6 +89,85 @@ def test_worker_cannot_import_its_way_out(runtime: WasmPluginRuntime) -> None:
         call(runtime, "import * as std from 'qjs:std'; plugin.on('alert', () => std.out.puts('mine'));")
 
 
+def test_worker_cannot_name_the_sandbox_around_it(runtime: WasmPluginRuntime) -> None:
+    """The worker is compiled apart from the shim, so it sees globals and nothing else."""
+    names = ["__io", "__input", "__effects", "__hooks", "__assets", "ctx", "print", "console"]
+    output = call(
+        runtime,
+        f"const seen = {{}}; for (const name of {json.dumps(names)}) seen[name] = eval('typeof ' + name);"
+        "plugin.on('alert', (event, ctx) => { ctx.store = seen; });",
+    )
+
+    assert output["store"] == dict.fromkeys(names, "undefined")
+
+
+def test_a_worker_has_the_globals_the_docs_list_and_no_others(runtime: WasmPluginRuntime) -> None:
+    """QuickJS's command line leaves ``gc``, ``scriptArgs``, ``argv0`` and ``execArgv`` behind."""
+    language = ["parseInt", "parseFloat", "isNaN", "isFinite", "decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent", "escape", "unescape", "undefined", "eval", "globalThis"]
+    output = call(
+        runtime,
+        f"const language = {json.dumps(language)};"
+        "const beside = Object.getOwnPropertyNames(globalThis).filter((name) => !/^[A-Z]/.test(name) && !language.includes(name));"
+        "plugin.on('alert', (event, ctx) => { ctx.store = { beside: beside.sort() }; });",
+    )
+
+    assert output["store"] == {"beside": ["atob", "btoa", "navigator", "performance", "queueMicrotask"]}
+
+
+async def test_a_worker_cannot_write_a_line_of_its_own_into_the_hub_log(runtime: WasmPluginRuntime, caplog: pytest.LogCaptureFixture) -> None:
+    """A newline in ``ctx.log`` started a fresh line, which a plugin could dress as the hub's own."""
+    worker = "plugin.on('alert', (event, ctx) => ctx.log('hello\\n2026-10-07 12:00:00 WARNING printguard.server.app: forged\\r\\u2028\\x1b[2Jend'));"
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, {**WORKER_MANIFEST, "permissions": ["state:read"], "reasons": {"state:read": "to hear alerts"}}, worker)
+        with caplog.at_level("INFO", logger="printguard.server.plugins"):
+            engine.emit({"event": "alert", "monitor_id": "m", "score": 0.9, "action": "none"})
+            await asyncio.sleep(0.5)
+    finally:
+        await engine.stop()
+
+    logged = [record.getMessage() for record in caplog.records if record.name == "printguard.server.plugins" and "hello" in record.getMessage()]
+    assert logged == ["plugin guard: hello 2026-10-07 12:00:00 WARNING printguard.server.app: forged   [2Jend"]
+
+
+async def test_a_store_nested_too_deep_is_refused_and_the_hub_goes_on_saving(runtime: WasmPluginRuntime) -> None:
+    """A store 2,000 objects deep fitted in 16 KB and failed every save of the state file after it."""
+    worker = "plugin.on('alert', (event, ctx) => { const top = {}; let at = top; for (let i = 0; i < event.score; i++) at = at.a = {}; ctx.store = { kept: event.score, top }; });"
+    platform = HostedPlatform(runtime)
+    saved: list[str] = []
+    platform.save_state = lambda state: saved.append(json.dumps(state, indent=2))
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        await install_and_accept(engine, {**WORKER_MANIFEST, "permissions": ["state:read"], "reasons": {"state:read": "to hear alerts"}}, worker)
+        for depth in (engine_plugins.MAX_DEPTH - 2, 2000):
+            engine.emit({"event": "alert", "monitor_id": "m", "score": depth, "action": "none"})
+            await asyncio.sleep(0.5)
+        engine.save()
+
+        assert engine.plugins.get("guard").config["kept"] == engine_plugins.MAX_DEPTH - 2, "the deep store replaced the one that fitted"
+        with pytest.raises(RuntimeError, match=f"nested more than {engine_plugins.MAX_DEPTH} deep"):
+            await engine.request({"cmd": "plugin.update", "id": "guard", "patch": {"store": {"written": json.loads('{"a":' * 40 + "1" + "}" * 40), "removed": []}}})
+    finally:
+        await engine.stop()
+
+    assert saved
+
+
+def test_a_dynamic_import_never_resolves(runtime: WasmPluginRuntime) -> None:
+    """``import()`` is an expression, so it parses. The driver exits before it can load anything."""
+    output = call(
+        runtime,
+        """
+        import('qjs:std').then((std) => { std.out.seek(0); std.out.puts('{"store":{"forged":true},"effects":[],"result":true}'); });
+        plugin.on('alert', (event, ctx) => { ctx.store.mine = true; });
+        """,
+    )
+
+    assert output == {"store": {"mine": True}, "effects": [], "result": None}
+
+
 def test_worker_has_no_filesystem_and_no_network(runtime: WasmPluginRuntime) -> None:
     output = call(
         runtime,
@@ -149,8 +230,8 @@ WORKER_MANIFEST = {
     "id": "guard",
     "name": "Guard",
     "version": "1.0.0",
-    "permissions": ["monitor:control", "routes", "gate"],
-    "reasons": {"monitor:control": "to retune", "routes": "to serve", "gate": "to authorise"},
+    "permissions": ["state:read", "monitor:control", "routes", "gate"],
+    "reasons": {"state:read": "to hear alerts", "monitor:control": "to retune", "routes": "to serve", "gate": "to authorise"},
     "events": ["alert"],
 }
 
@@ -193,7 +274,7 @@ async def engine_with_worker(runtime: WasmPluginRuntime):
 
 async def test_a_worker_reacts_to_an_alert_and_its_command_is_carried_out(runtime: WasmPluginRuntime) -> None:
     async with engine_with_worker(runtime) as engine:
-        await engine.handle({"cmd": "monitor.add", "monitor": {"name": "m", "camera_id": "c"}})
+        await engine.handle({"cmd": "monitor.add", "monitor": {"name": "m"}})
         monitor_id = next(iter(engine.monitors))
 
         engine.emit({"event": "alert", "monitor_id": monitor_id, "score": 0.91, "action": "pause"})
@@ -226,6 +307,164 @@ async def test_a_plugin_that_fails_is_disabled_rather_than_left_running(runtime:
 
         plugin = engine.plugins.get("guard")
         assert plugin.enabled is False and plugin.failure
+
+
+GATE_REQUEST = {"method": "GET", "path": "/", "query": {}, "headers": {"cookie": "session=ok"}, "body": None}
+GATE = "plugin.gate((request) => request.headers.cookie.includes('session=ok'));"
+GATE_MANIFEST = {"id": "doorman", "version": "1.0.0", "permissions": ["gate"], "reasons": {"gate": "to sign you in"}}
+
+
+async def test_a_gate_that_fails_goes_on_refusing_until_somebody_deals_with_it(runtime: WasmPluginRuntime) -> None:
+    """Disabling a failed gate must not be the thing that opens the hub."""
+    platform = HostedPlatform(runtime)
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        await install_and_accept(engine, GATE_MANIFEST, GATE)
+        assert await runtime.authorise(GATE_REQUEST) is True
+        assert await runtime.authorise({**GATE_REQUEST, "headers": {}}) is False, "a gate that threw let the request through"
+        plugin = engine.plugins.get("doorman")
+        assert plugin.enabled is False and plugin.failure
+        assert await runtime.authorise(GATE_REQUEST) is False, "the hub opened once its gate had been disabled"
+    finally:
+        await engine.stop()
+
+    restarted = Engine(platform)
+    await restarted.start()
+    try:
+        assert await runtime.authorise(GATE_REQUEST) is False, "a restart opened a hub whose gate had failed"
+        await restarted.handle({"cmd": "plugin.update", "id": "doorman", "patch": {"enabled": True}})
+        assert await runtime.authorise(GATE_REQUEST) is True
+        await runtime.authorise({**GATE_REQUEST, "headers": {}})
+        await restarted.handle({"cmd": "plugin.remove", "id": "doorman"})
+        assert await runtime.authorise(GATE_REQUEST) is None
+    finally:
+        await restarted.stop()
+
+
+def test_a_worker_cannot_replace_what_serialises_its_answer(runtime: WasmPluginRuntime) -> None:
+    output = call(runtime, "JSON.stringify = () => '[]'; plugin.on('alert', (event, ctx) => ctx.log('heard'));")
+
+    assert output["effects"] == [{"kind": "log", "text": "heard"}]
+
+
+@pytest.mark.parametrize(
+    "forgery",
+    ["Array.prototype.toJSON = () => 5;", "Object.prototype.toJSON = () => [];", "Object.prototype.toJSON = () => 'ok';"],
+)
+def test_an_answer_of_the_wrong_shape_is_the_worker_failing(runtime: WasmPluginRuntime, forgery: str) -> None:
+    with pytest.raises(RuntimeError, match="nothing usable"):
+        call(runtime, forgery)
+
+
+async def test_a_worker_forging_its_effects_is_disabled_and_the_others_keep_ticking(
+    runtime: WasmPluginRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every plugin's timer is one task, so an answer that breaks it stops them all."""
+    monkeypatch.setattr(engine_plugins, "MIN_TICK_S", 0.2)
+    timer = {"version": "1.0.0", "permissions": [], "reasons": {}, "tick_s": 0.2}
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, {**timer, "id": "honest"}, "plugin.on('tick', (event, ctx) => { ctx.store.ticks = (ctx.store.ticks || 0) + 1; });")
+        await install_and_accept(engine, {**timer, "id": "forger"}, "Array.prototype.toJSON = () => 5; plugin.on('tick', (event, ctx) => ctx.log('x'));")
+        await asyncio.sleep(1.0)
+        forger = engine.plugins.get("forger")
+        seen = engine.plugins.get("honest").config.get("ticks", 0)
+        await asyncio.sleep(1.0)
+
+        assert forger.enabled is False and forger.failure, "a worker that forged its answer was left running"
+        assert engine.plugins.get("honest").config["ticks"] > seen, "one plugin's forged answer stopped every plugin's timer"
+    finally:
+        await engine.stop()
+
+
+async def test_a_gate_forging_its_answer_refuses_rather_than_erroring(runtime: WasmPluginRuntime) -> None:
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, GATE_MANIFEST, "Object.prototype.toJSON = () => []; plugin.gate(() => true);")
+        assert await runtime.authorise(GATE_REQUEST) is False
+        plugin = engine.plugins.get("doorman")
+        assert plugin.enabled is False and plugin.failure
+        assert await runtime.authorise(GATE_REQUEST) is False, "the hub opened once its forging gate had been disabled"
+    finally:
+        await engine.stop()
+
+
+async def test_a_flood_of_requests_cannot_disable_a_healthy_gate(
+    runtime: WasmPluginRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Waiting for a thread is the hub's delay, not the gate's, so it is not a failure."""
+    monkeypatch.setattr(server_plugins, "QUEUE_TIMEOUT_S", 0.02)
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, GATE_MANIFEST, GATE)
+        verdicts = await asyncio.gather(*(runtime.authorise(GATE_REQUEST) for _ in range(600)))
+        plugin = engine.plugins.get("doorman")
+        after = await runtime.authorise(GATE_REQUEST)
+    finally:
+        await engine.stop()
+
+    assert False in verdicts, "nothing queued long enough to be dropped, so this tested nothing"
+    assert plugin.enabled and not plugin.failure, "requests queueing behind each other disabled the gate"
+    assert after is True, "the hub stayed locked once the flood had passed"
+
+
+def test_a_worker_writing_too_much_is_cut_off_before_the_hub_holds_it(
+    runtime: WasmPluginRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    held: list[int] = []
+    take = server_plugins.Capped.__call__
+
+    def watched(self: server_plugins.Capped, chunk: bytes) -> int | None:
+        verdict = take(self, chunk)
+        held.append(len(self.data))
+        return verdict
+
+    monkeypatch.setattr(server_plugins.Capped, "__call__", watched)
+
+    with pytest.raises(RuntimeError, match="more than 512 KB"):
+        call(runtime, "plugin.on('alert', (event, ctx) => { ctx.store.big = 'x'.repeat(2 * 1024 * 1024); });")
+
+    assert 0 < max(held) <= server_plugins.MAX_OUTPUT_BYTES, "the hub buffered more than a worker may return"
+
+
+async def test_a_link_effect_reaches_only_the_commands_that_talk_to_plugins(runtime: WasmPluginRuntime) -> None:
+    """The action names the command, so anything else would reach every ``plugin.*`` one."""
+    performed: list[dict] = []
+    runtime.attach(lambda command: _record(performed, command), lambda plugin_id, reason: None)
+    plugin = make_plugin("", granted=["link:consume"], permissions=["link:consume"])
+
+    await runtime._perform(
+        plugin,
+        [
+            {"kind": "link", "action": "remove", "request": {}},
+            {"kind": "link", "action": "update", "request": {"to": "demo"}},
+            {"kind": "link", "action": "call", "request": {"to": "other", "channel": "now"}},
+        ],
+    )
+
+    assert [c["cmd"] for c in performed] == ["plugin.call"], "a link effect ran a command that is not a link"
+
+
+async def test_a_worker_holding_nothing_hears_nothing_the_dashboard_shows(runtime: WasmPluginRuntime) -> None:
+    names = ["result", "device", "alert", "warning", "error"]
+    listener = {"id": "listener", "version": "1.0.0", "permissions": [], "events": names}
+    hears = f"for (const name of {json.dumps(names)}) plugin.on(name, (event, ctx) => {{ ctx.store[name] = event; }});"
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, listener, hears)
+        engine.emit({"event": "result", "monitor_id": "m1", "score": 0.93})
+        engine.emit({"event": "device", "printer_id": "p1", "job": "prototype_v7.gcode"})
+        engine.emit({"event": "error", "message": "ntfy notification failed"})
+        await asyncio.sleep(0.6)
+
+        assert engine.plugins.get("listener").config == {}
+    finally:
+        await engine.stop()
 
 
 async def test_a_worker_cannot_borrow_another_plugins_network_grant(runtime: WasmPluginRuntime) -> None:
@@ -305,12 +544,13 @@ async def test_a_worker_reports_progress_and_defects_through_the_alert_channels(
     await engine.start()
     try:
         await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}}})
+        engine.cameras.add(Camera(id="c1", name="Bench cam", source={"kind": "fake"}, max_fps=15.0))
         await engine.handle({"cmd": "monitor.add", "monitor": {"name": "Bench", "camera_id": "c1"}})
         monitor_id = next(iter(engine.monitors))
         await install_and_accept(engine, REPORTS_MANIFEST, REPORTS)
         await engine.handle({"cmd": "plugin.update", "id": "progress-reports",
-                             "patch": {"config": {"on": {monitor_id: True}, "every": {monitor_id: 1},
-                                                  "sent": {monitor_id: 0}, "jobs": {monitor_id: None}}}})
+                             "patch": {"store": {"written": {"on": {monitor_id: True}, "every": {monitor_id: 1},
+                                                                 "sent": {monitor_id: 0}, "jobs": {monitor_id: None}}, "removed": []}}})
 
         engine.emit({"event": "result", "monitor_id": monitor_id, "camera_id": "c1", "score": 0.9,
                      "prediction": "failure", "ts": 1.0})
@@ -399,7 +639,7 @@ async def test_a_worker_can_act_on_a_single_inference_over_its_own_threshold(run
         await engine.handle({"cmd": "printer.add", "printer": {"name": "P", **OCTOPRINT}})
         printer_id = next(iter(engine.printers.items))
         await install_and_accept(engine, RISK_MANIFEST, RISK_WORKER)
-        await engine.handle({"cmd": "plugin.update", "id": "risk", "patch": {"config": {"limit": 0.8, "printer": printer_id}}})
+        await engine.handle({"cmd": "plugin.update", "id": "risk", "patch": {"store": {"written": {"limit": 0.8, "printer": printer_id}, "removed": []}}})
 
         for score in (0.10, 0.55, 0.91, 0.95):
             engine.emit({"event": "result", "monitor_id": "m1", "camera_id": "c1", "score": score, "ts": 1.0})
@@ -407,5 +647,206 @@ async def test_a_worker_can_act_on_a_single_inference_over_its_own_threshold(run
 
         assert engine.plugins.get("risk").config["hits"] == 2, "scores under the plugin's own limit were acted on"
         assert [m for m, url in platform.http_calls if "/api/job" in url].count("POST") == 1, "the printer was not paused once"
+    finally:
+        await engine.stop()
+
+
+STATE_COUNTER = {
+    "id": "counter",
+    "version": "1.0.0",
+    "permissions": ["state:read", "notify"],
+    "reasons": {"state:read": "to count", "notify": "to say so"},
+    "events": ["state"],
+}
+
+
+@pytest.mark.parametrize(
+    "worker",
+    [
+        "plugin.on('state', (event, ctx) => { ctx.store.n = (ctx.store.n || 0) + 1; });",
+        "plugin.on('state', (event, ctx) => { ctx.store.n = (ctx.store.n || 0) + 1; ctx.notify('hi'); });",
+    ],
+)
+async def test_a_workers_own_commands_do_not_wake_its_state_handler(runtime: WasmPluginRuntime, worker: str) -> None:
+    """``state`` is a once a second event, so a handler's own save or effect cannot be what delivers the next one."""
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    effects: list[dict] = []
+    engine.add_sink(lambda event: effects.append(event) if event.get("event") == "plugin_effect" else None)
+    try:
+        await install_and_accept(engine, STATE_COUNTER, worker)
+        await asyncio.sleep(0.2)
+        effects.clear()
+        before = engine.plugins.get("counter").config.get("n", 0)
+        await asyncio.sleep(2.5)
+        ran = engine.plugins.get("counter").config.get("n", 0) - before
+    finally:
+        await engine.stop()
+
+    assert ran <= 4, f"the state handler ran {ran} times in 2.5 s"
+    assert len(effects) <= 4
+
+
+SLOW_WORKER = """
+plugin.on('alert', (event, ctx) => { let x = 0; for (let i = 0; i < 200000; i++) x += i; });
+plugin.on('result', (event, ctx) => { ctx.store.changed = true; });
+"""
+
+SLOW_MANIFEST = {
+    "id": "slow",
+    "version": "1.0.0",
+    "permissions": ["state:read"],
+    "reasons": {"state:read": "to hear alerts"},
+    "events": ["alert", "result"],
+}
+
+
+async def test_a_call_that_changed_nothing_does_not_undo_a_save_made_while_it_ran(runtime: WasmPluginRuntime) -> None:
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, SLOW_MANIFEST, SLOW_WORKER)
+        engine.emit({"event": "alert", "monitor_id": "m", "score": 0.9, "action": "none"})
+        while "slow" not in runtime._busy:
+            await asyncio.sleep(0)
+        await engine.request({"cmd": "plugin.update", "id": "slow", "patch": {"store": {"written": {"on": True}, "removed": []}}})
+        await asyncio.sleep(1.0)
+
+        assert engine.plugins.get("slow").config == {"on": True}, "a worker that changed nothing wrote its old copy back"
+    finally:
+        await engine.stop()
+
+
+async def test_a_worker_that_changes_one_key_does_not_undo_a_save_to_another_made_while_it_ran(runtime: WasmPluginRuntime) -> None:
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        worker = "plugin.on('result', (event, ctx) => { let x = 0; for (let i = 0; i < 200000; i++) x += i; ctx.store.changed = true; });"
+        await install_and_accept(engine, SLOW_MANIFEST, worker)
+        engine.emit({"event": "result", "monitor_id": "m", "camera_id": "c", "score": 0.1})
+        while "slow" not in runtime._busy:
+            await asyncio.sleep(0)
+        await engine.request({"cmd": "plugin.update", "id": "slow", "patch": {"store": {"written": {"on": True}, "removed": []}}})
+        await asyncio.sleep(1.0)
+
+        assert engine.plugins.get("slow").config == {"on": True, "changed": True}
+    finally:
+        await engine.stop()
+
+
+async def test_events_emitted_in_one_step_do_not_each_start_a_call_on_a_busy_worker(runtime: WasmPluginRuntime) -> None:
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, SLOW_MANIFEST, SLOW_WORKER)
+        engine.emit({"event": "alert", "monitor_id": "m", "score": 0.9, "action": "none"})
+        engine.emit({"event": "result", "monitor_id": "m", "camera_id": "c", "score": 0.1})
+        await asyncio.sleep(1.0)
+
+        assert engine.plugins.get("slow").config == {}, "a worker still busy with one event was handed the next"
+    finally:
+        await engine.stop()
+
+
+async def test_a_worker_that_changes_its_store_still_has_it_saved(runtime: WasmPluginRuntime) -> None:
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, SLOW_MANIFEST, SLOW_WORKER)
+        engine.emit({"event": "result", "monitor_id": "m", "camera_id": "c", "score": 0.1})
+        await asyncio.sleep(0.6)
+
+        assert engine.plugins.get("slow").config == {"changed": True}
+    finally:
+        await engine.stop()
+
+
+async def test_a_second_answer_to_one_question_is_ignored_but_a_made_up_one_is_not(runtime: WasmPluginRuntime) -> None:
+    """Every open dashboard tab answers a call plugin.js serves, so all but the first arrive late."""
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    events: list[dict] = []
+    engine.add_sink(events.append)
+    try:
+        consumer = {
+            "id": "np-widget", "version": "1.0.0",
+            "permissions": ["link:consume"], "reasons": {"link:consume": "to draw it"},
+            "consumes": ["spotify:now-playing"],
+        }
+        await install_and_accept(engine, SERVER_MANIFEST, "plugin.on('state', () => {});")
+        await install_and_accept(engine, consumer, "plugin.on('answer', () => {});")
+        await engine.handle({"cmd": "plugin.call", "id": "np-widget", "to": "spotify", "channel": "now-playing", "tag": "np"})
+        asked = next(e for e in events if e.get("event") == "call")
+        answer = {"cmd": "plugin.answer", "id": "spotify", "call_id": asked["call_id"], "channel": "now-playing", "body": {"track": "Blue"}}
+        await engine.handle({**answer, "req_id": 1})
+        await engine.handle({**answer, "req_id": 2})
+        await engine.handle({**answer, "call_id": "made-up", "req_id": 3})
+        await engine.handle({**answer, "id": "np-widget", "req_id": 4})
+    finally:
+        await engine.stop()
+
+    assert len([e for e in events if e.get("event") == "answer"]) == 1
+    errors = {e["req_id"] for e in events if e.get("event") == "error" and e.get("req_id") in (1, 2, 3, 4)}
+    assert errors == {3, 4}, "a late duplicate was reported, or a made-up answer was not"
+
+
+def zipped(members: dict[str, str], compression: int = zipfile.ZIP_DEFLATED) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression) as archive:
+        for name, body in members.items():
+            archive.writestr(name, body)
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize("manifest", ["[]", "null", '"text"', "7"])
+def test_a_manifest_that_is_not_an_object_is_refused_cleanly(manifest: str) -> None:
+    with pytest.raises(ValueError, match="not a JSON object"):
+        engine_plugins.unpack(zipped({"plugin.json": manifest, "plugin.js": "plugin.render(() => null);"}))
+
+
+@pytest.mark.parametrize("compression", [zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA])
+def test_a_zip_member_compressed_with_anything_but_deflate_is_refused_unread(compression: int) -> None:
+    """bzip2 and lzma members are inflated whole whatever size they declare."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("plugin.json", json.dumps({"id": "demo", "version": "1.0.0"}))
+        archive.writestr(zipfile.ZipInfo("plugin.js"), "plugin.render(() => null);", compress_type=compression)
+
+    with pytest.raises(ValueError, match="compression"):
+        engine_plugins.unpack(buffer.getvalue())
+
+
+def test_a_stored_or_deflated_zip_still_unpacks() -> None:
+    for compression in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+        manifest, sources, _, _ = engine_plugins.unpack(
+            zipped({"plugin.json": json.dumps({"id": "demo"}), "plugin.js": "plugin.render(() => null);"}, compression)
+        )
+        assert manifest == {"id": "demo"} and sources == {"plugin.js": "plugin.render(() => null);"}
+
+
+@pytest.mark.parametrize("name", ["plugin.js", "worker.js", "panel.html"])
+async def test_an_update_that_cannot_read_a_source_file_fails_rather_than_dropping_it(name: str) -> None:
+    sha = "a" * 40
+    raw = f"https://raw.githubusercontent.com/you/plug/{sha}"
+    platform = FakePlatform()
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        files = {"plugin.js": "plugin.render(() => null);", "worker.js": "plugin.on('alert', () => {});", "panel.html": "<p>hi</p>"}
+        platform.responses[f"{raw}/plugin.json"] = (200, {**WORKER_MANIFEST, "id": "two-halves", "events": ["alert"]})
+        for file, body in files.items():
+            platform.responses[f"{raw}/{file}"] = (200, body)
+        source = {"kind": "github", "repo": "you/plug", "path": "", "ref": sha}
+        await engine.request({"cmd": "plugin.install", "source": source})
+        assert sorted(engine.plugins.get("two-halves").sources) == sorted(files)
+
+        platform.responses[f"{raw}/{name}"] = (503, "upstream connect error")
+        with pytest.raises(RuntimeError, match="503"):
+            await engine.request({"cmd": "plugin.install", "source": source})
+        assert sorted(engine.plugins.get("two-halves").sources) == sorted(files)
+
+        platform.responses[f"{raw}/{name}"] = (404, "404: Not Found")
+        await engine.request({"cmd": "plugin.install", "source": source})
+        assert sorted(engine.plugins.get("two-halves").sources) == sorted(set(files) - {name})
     finally:
         await engine.stop()

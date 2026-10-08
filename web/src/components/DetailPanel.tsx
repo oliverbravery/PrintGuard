@@ -1,6 +1,7 @@
-import { useEffect, useRef } from "react";
+import { alertOutcome } from "../history";
 import { useStore } from "../store";
 import type { Monitor } from "../types";
+import { ConfirmButton } from "./ConfirmButton";
 import { Sheet } from "./Dialog";
 import { Feed } from "./Feed";
 import { DeviceChip } from "./MonitorTile";
@@ -25,18 +26,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export function DetailPanel({ monitor }: { monitor: Monitor }) {
   const { engine, history, send, openDetail, openStats, openDialog, isPending, updateMonitor } = useStore();
   const settingsPanels = usePluginSurface("settings", monitor.id);
-  const removeRef = useRef(false);
   const removing = isPending("monitor.remove");
-
-  useEffect(() => {
-    if (removeRef.current && !removing) close();
-  }, [removing]);
 
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
   const printers = engine?.printers ?? [];
   const points = history[monitor.id] ?? [];
-  const score = points.at(-1)?.score ?? 0;
+  const score = camera?.online && monitor.watching ? (points.at(-1)?.score ?? 0) : null;
   const close = () => openDetail(null);
 
   return (
@@ -58,7 +54,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
         </div>
         {monitor.alert && (
           <p className="mono text-[0.7rem] text-bad mt-2">
-            defect at {(monitor.alert.score * 100).toFixed(0)}%, action {monitor.alert.action}
+            {[`defect at ${(monitor.alert.score * 100).toFixed(0)}%`, alertOutcome(monitor.alert.action)].filter(Boolean).join(", ")}
           </p>
         )}
         <button className="btn w-full mt-3" onClick={() => openStats(monitor.id)}>
@@ -78,7 +74,9 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
           <Toggle label="Watch this monitor" on={monitor.enabled} onChange={(v) => updateMonitor(monitor.id, { enabled: v })} />
           {monitor.enabled && monitor.watching === false && (
             <p className="mono text-[0.7rem] text-text-2">
-              standby, printer is {printer?.device_state?.status ?? "not printing"}, inference resumes when it prints
+              {camera
+                ? `standby, printer is ${printer?.device_state?.status ?? "not printing"}, inference resumes when it prints`
+                : "no camera, so nothing is being watched"}
             </p>
           )}
           {monitor.enabled && monitor.watching !== false && printer && !printer.online && (
@@ -102,19 +100,19 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
             label="Alert threshold"
             value={monitor.threshold}
             min={0.05}
-            max={1}
+            max={0.95}
             step={0.01}
-            hint="The score a frame must reach to count as a defect. Raise to cut false alarms; lower to catch subtler failures."
+            hint="The score a frame must reach to count as a defect. Raise to cut false alarms. Lower to catch subtler failures."
             onChange={(v) => updateMonitor(monitor.id, { threshold: v })}
           />
           <Slider
             label="Consecutive detections to alert"
             value={monitor.consecutive}
             min={1}
-            max={15}
+            max={30}
             step={1}
             format={String}
-            hint="Flagged frames in a row before it acts. Raise to ride out brief blips; lower to react faster."
+            hint="Flagged frames in a row before it acts. Raise to ride out brief blips. Lower to react faster."
             onChange={(v) => updateMonitor(monitor.id, { consecutive: v })}
           />
         </div>
@@ -152,7 +150,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
 
       <Section title="Printer">
         <div className="space-y-3">
-          <select className="field" value={monitor.printer_id} onChange={(e) => updateMonitor(monitor.id, { printer_id: e.target.value })}>
+          <select className="field" aria-label="Printer" value={monitor.printer_id} onChange={(e) => updateMonitor(monitor.id, { printer_id: e.target.value })}>
             <option value="">No printer (alerts only)</option>
             {printers.map((p) => (
               <option key={p.id} value={p.id}>
@@ -167,18 +165,11 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
       </Section>
 
       <div className="flex items-center gap-2.5 px-5 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-        <SaveStatus />
+        <SaveStatus scope={`monitor:${monitor.id}`} />
         <div className="flex-1" />
-        <button
-          className="btn btn-danger"
-          disabled={removing}
-          onClick={() => {
-            removeRef.current = true;
-            send({ cmd: "monitor.remove", id: monitor.id });
-          }}
-        >
+        <ConfirmButton disabled={removing} onConfirm={() => send({ cmd: "monitor.remove", id: monitor.id })}>
           {removing ? "Deleting…" : "Delete"}
-        </button>
+        </ConfirmButton>
       </div>
     </Sheet>
   );

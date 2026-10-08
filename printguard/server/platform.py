@@ -15,26 +15,38 @@ import subprocess
 import sys
 import threading
 import time
+import zlib
 from fractions import Fraction
 from functools import partial
 from importlib import metadata
 from pathlib import Path
 from typing import Any, AsyncIterable, Callable
+from urllib.parse import urlsplit
 
 import av
 import httpx
 import numpy as np
 import websockets
 from av.video.reformatter import VideoReformatter
-from ..engine import vision
-from ..engine.platform import Frame
+from ..engine import logs, vision
+from ..engine.adapters import redirect_message
+from ..engine.platform import PLUGIN_HEADER, Frame, Notice, Redirects
+from ..engine.reports import scrub_url, url_secrets
 from .bambu_camera import open_bambu_jpeg_stream
+from .events import parse_json, require_finite
 from .inference import Inference
 from .mediamtx import MediaMTX, pull_source
 from .plugins import WasmPluginRuntime
+from .public_network import PublicOnlyTransport, connect_to_public
 from .publish import H264Push
+from .state_file import StateFile, prepare_data_directory
 
 FPS_SAMPLE_FRAMES = 25
+FPS_SAMPLE_S = 5.0
+READER_STOP_WAIT_S = 6.0
+"""How long a closed source's reader is given to end before its camera is
+opened again: a read that times out and the pause before a reconnect."""
+
 MEASURE_WARMUP_S = 1.0
 OPEN_WAIT_S = 25.0
 CAMERA_CONSENT_WAIT_S = 60.0
@@ -60,8 +72,17 @@ V4L2_CAPABILITY = "16x32s32xIII12x"
 """struct v4l2_capability in full, since the kernel writes all of it, unpacking
 only card, version, capabilities and device_caps."""
 
+CLASSIFY_MAX_PIXELS = 50_000_000
+"""Most pixels a supplied image may have: a few kilobytes of JPEG can describe a
+frame that decodes to gigabytes, and an 8K frame is 33 million."""
+
 SOCKET_TIMEOUT_S = 10.0
 SOCKET_MAX_BYTES = 256 * 1024
+SOCKET_FLOOD_FRAMES = 300
+SOCKET_FLOOD_WINDOW_S = 10.0
+"""Frames one plugin socket may receive in a window before it is closed. Each
+frame becomes an event for every dashboard and the plugin's worker, so a server
+sending them at wire speed would otherwise set the hub's pace."""
 DEVICE_SIZE_CAP = 1280 * 720
 DEVICE_PIXEL_FORMATS = {"420v": "nv12", "420f": "nv12", "yuvs": "yuyv422", "2vuy": "uyvy422"}
 """AVFoundation format subtypes mapped to ffmpeg pixel formats. avfoundation
@@ -145,42 +166,38 @@ def _v4l2_devices() -> list[tuple[str, str]]:
 def _video_devices() -> list[tuple[str, str]]:
     """Names the host's attachable video capture devices as (device_id, label).
 
-    libavdevice only exposes device discovery through its log stream, so the
-    names are parsed from a capture of the listing call's messages, raised to
-    INFO for the duration. Screens are excluded - a capture of the host's own
-    display is never a printer camera. Listing needs no camera permission;
-    only opening a device does.
+    Screens are excluded - a capture of the host's own display is never a
+    printer camera. Listing needs no camera permission; only opening a device
+    does. DirectShow gives every device a path of its own beside the name it
+    shows, and opens it by either, so on Windows the path is the id and two
+    cameras of one model stay two cameras. AVFoundation's only other name is a
+    position in the list, which moves whenever a camera is plugged in, so on
+    macOS a device is still opened by the name it shows.
     """
     if sys.platform.startswith("linux"):
         return _v4l2_devices()
-    import av.logging
-
-    spec, container_format = ("", "avfoundation") if sys.platform == "darwin" else ("video=dummy", "dshow")
-    previous = av.logging.get_level()
-    av.logging.set_level(av.logging.INFO)
+    backend = "avfoundation" if sys.platform == "darwin" else "dshow"
     try:
-        with av.logging.Capture(local=True) as logs:
-            try:
-                av.open(spec, format=container_format, options={"list_devices": "true"})
-            except av.error.FFmpegError:
-                pass
-    finally:
-        av.logging.set_level(previous)
-    logger.debug("device listing captured %d lines: %r", len(logs), [message for _lv, _n, message in logs])
-    names: list[str] = []
-    in_video_section = False
-    for _level, _name, message in logs:
-        line = message.strip()
-        if sys.platform == "darwin":
-            if line.endswith("video devices:"):
-                in_video_section = True
-            elif line.endswith("audio devices:"):
-                in_video_section = False
-            elif in_video_section and (match := re.match(r"\[\d+\] (.+)", line)) and not match[1].startswith("Capture screen"):
-                names.append(match[1])
-        elif match := re.match(r'"(.+)" \(video', line):
-            names.append(match[1])
-    return [(name, name) for name in names]
+        devices = av.device.enumerate_input_devices(backend)
+    except av.error.FFmpegError as exc:
+        logger.debug("%s could not list its devices: %s", backend, exc)
+        return []
+    logger.debug("%s lists %s", backend, [(device.name, device.description, device.media_types) for device in devices])
+    cameras = [
+        device
+        for device in devices
+        if "video" in device.media_types and not device.description.startswith("Capture screen")
+    ]
+    shown = [device.description for device in cameras]
+    return [
+        (
+            device.description if backend == "avfoundation" else device.name,
+            f"{device.description} ({shown[:position].count(device.description) + 1})"
+            if shown.count(device.description) > 1
+            else device.description,
+        )
+        for position, device in enumerate(cameras)
+    ]
 
 
 def _device_input(device_id: str) -> tuple[str, str]:
@@ -297,6 +314,26 @@ def _authorize_macos_camera() -> None:
     )
 
 
+def _decodable_video_stream(container: Any) -> Any:
+    """Picks a container's first video stream, refusing one nothing can decode.
+
+    Args:
+        container: An opened PyAV input container.
+
+    Returns:
+        The stream.
+
+    Raises:
+        RuntimeError: If FFmpeg can demux the stream but has no decoder for it,
+            as for an SVG. PyAV then has no codec context, and decoding through
+            that ends the process.
+    """
+    stream = container.streams.video[0]
+    if stream.codec_context is None:
+        raise RuntimeError("no decoder for this stream")
+    return stream
+
+
 class AVSource:
     """Continuously decodes a stream, keeping only the freshest frame.
 
@@ -304,12 +341,24 @@ class AVSource:
     returning a fresh readable MJPEG byte stream (used for sources that speak a
     bespoke protocol, e.g. Bambu's chamber camera). When publish_url is set,
     each decoded frame is also transcoded to H.264 and pushed there, so sources
-    MediaMTX cannot pull itself reach viewers as HLS.
+    MediaMTX cannot pull itself reach viewers as HLS. A push that fails costs
+    the live view alone: it runs on a thread of its own, so capture carries on
+    feeding detection, the failure is reported once through ``report``, and the
+    push is tried again every RECONNECT_DELAY_S. ``finished`` is called from the reader's thread as it ends,
+    and ``shown_as`` is the address errors name when the source is one the hub
+    made up, such as the MediaMTX path a pulled camera is read from.
+
+    A container's declared rate is taken for a network stream or a device and
+    measured for a byte stream, whose raw MJPEG demuxer answers 25 whatever the
+    camera sends. Measuring ends after FPS_SAMPLE_FRAMES frames or FPS_SAMPLE_S
+    seconds, whichever comes first, so a camera sending one frame a second is
+    not waited on for half a minute.
 
     Frames are converted to RGB through one reused single-threaded scaler,
     for the reason H264Push documents, and one conversion at a time: a scaler
     is a single FFmpeg context, and the scheduler and a snapshot request can
-    both ask for the freshest frame at once.
+    both ask for the freshest frame at once. The conversion's own thread holds
+    that turn, since a cancelled ``grab`` leaves its thread still converting.
     """
 
     def __init__(
@@ -318,8 +367,14 @@ class AVSource:
         publish_url: str | None = None,
         container_format: str | None = None,
         open_options: tuple[dict[str, str], ...] | None = None,
+        report: Callable[[str, bool], None] = lambda message, recovered: None,
+        finished: Callable[[], None] = lambda: None,
+        shown_as: str | None = None,
     ) -> None:
         self._source = source
+        self._shown_as = shown_as if shown_as is not None else scrub_url(source) if isinstance(source, str) else None
+        self._report = report
+        self._finished = finished
         self._publish_url = publish_url
         self._container_format = container_format
         self._open_options = open_options or DEVICE_OPEN_OPTIONS
@@ -329,11 +384,12 @@ class AVSource:
         self._latest: tuple[av.VideoFrame, float, float] | None = None
         self._latest_rgb: Frame | None = None
         self._reformatter = VideoReformatter()
-        self._converting = asyncio.Lock()
+        self._converting = threading.Lock()
         self._seq = 0
         self._stop = False
         self._monitoring = True
         self._demand_until = 0.0
+        self._publish_failed = False
         self._wake = threading.Event()
         self._wake.set()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -377,7 +433,7 @@ class AVSource:
             for options in self._open_options:
                 try:
                     return av.open(self._source, format=self._container_format, options=options, timeout=5.0), None
-                except OSError as exc:
+                except av.error.FFmpegError as exc:
                     last = exc
             raise last if last else RuntimeError(f"could not open {self._source!r}")
         options = {}
@@ -399,27 +455,37 @@ class AVSource:
             pipe: Any = None
             try:
                 container, pipe = self._open()
-                stream = container.streams.video[0]
+                stream = _decodable_video_stream(container)
                 declared = float(stream.average_rate or 0)
-                if not self.fps and 0 < declared <= 240:
+                if isinstance(self._source, str) and not self.fps and 0 < declared <= 240:
                     self.fps = min(60.0, declared)
                 if self._publish_url:
                     rate = stream.guessed_rate or stream.average_rate
-                    push = H264Push(self._publish_url, int(rate) if rate and 0 < rate <= 60 else 15)
+                    push = H264Push(
+                        self._publish_url, int(rate) if rate and 0 < rate <= 60 else 15, RECONNECT_DELAY_S, self._published
+                    )
                 self._decode(container, stream, push)
             except Exception as exc:
-                self.last_error = str(exc)
-                logger.debug("camera source %r read failed: %s", self._source, exc)
+                self.last_error = self._without_credentials(str(exc))
+                logger.debug("camera source read failed: %s", self.last_error)
             finally:
+                self.online = False
                 if container is not None:
                     container.close()
                 if push is not None:
                     push.close()
                 if pipe is not None:
                     pipe.close()
-            self.online = False
+                self._latest = self._latest_rgb = None
             if not self._stop and self._demanded():
                 time.sleep(RECONNECT_DELAY_S)
+        self._finished()
+
+    def _without_credentials(self, message: str) -> str:
+        """Scrubs the source address out of an error PyAV raised, which quotes it in full."""
+        if not isinstance(self._source, str):
+            return message
+        return message.replace(self._source, self._shown_as)
 
     def _decode(self, container: Any, stream: Any, push: H264Push | None) -> None:
         """Keeps the freshest frame until the source ends, transcoding if asked.
@@ -436,6 +502,9 @@ class AVSource:
                 for frame in container.decode(stream):
                     if self._stop or not self._demanded():
                         return
+                    if self._container_format is not None:
+                        # a device's raw frames point into buffers the close unmaps
+                        frame.make_writable()
                     self._seq += 1
                     self._latest = (frame, float(self._seq), time.time())
                     self.online = True
@@ -443,35 +512,117 @@ class AVSource:
                         push.send(frame)
                     if not self.fps and time.monotonic() >= warmup_until:
                         samples.append(time.monotonic())
-                        if len(samples) == FPS_SAMPLE_FRAMES and samples[-1] > samples[0]:
+                        measured_for = samples[-1] - samples[0]
+                        if measured_for > 0 and (len(samples) == FPS_SAMPLE_FRAMES or measured_for >= FPS_SAMPLE_S):
                             self.fps = max(1.0, min(60.0, (len(samples) - 1) / (samples[-1] - samples[0])))
                 return
             except av.error.BlockingIOError:
+                if not self._demanded():
+                    return
                 time.sleep(0.02)
 
+    def _published(self, error: Exception | None) -> None:
+        """Takes what became of a frame sent to the live view, from the push's thread."""
+        if error is not None and not self._publish_failed:
+            self._publish_failed = True
+            self.last_error = f"live view unavailable: {error}"
+            self._report(f"{self.last_error}. Detection carries on without it", False)
+        elif error is None and self._publish_failed:
+            self._publish_failed = False
+            self._report("live view restored", True)
+
     async def grab(self) -> Frame | None:
-        """Converts and returns the freshest decoded frame."""
+        """Converts and returns the freshest decoded frame.
+
+        Returns:
+            The frame, or None while capture is on standby or reconnecting: the
+            last frame it decoded before then is no longer what the camera sees.
+        """
         latest = self._latest
-        if latest is None:
+        if latest is None or not self.online:
             return None
+        return await asyncio.to_thread(self._converted, latest)
+
+    def _converted(self, latest: tuple[av.VideoFrame, float, float]) -> Frame:
+        """Converts a decoded frame to RGB on the calling thread, or hands back the one already converted."""
         frame, seq, ts = latest
-        async with self._converting:
+        with self._converting:
             if self._latest_rgb is not None and self._latest_rgb.seq == seq:
                 return self._latest_rgb
-            rgb = await asyncio.to_thread(self._to_rgb, frame)
-            result = Frame(rgb=rgb, seq=seq, ts=ts)
+            result = Frame(rgb=self._reformatter.reformat(frame, format="rgb24", threads=1).to_ndarray(), seq=seq, ts=ts)
             if self._latest is latest:
                 self._latest_rgb = result
             return result
 
-    def _to_rgb(self, frame: av.VideoFrame) -> np.ndarray:
-        return self._reformatter.reformat(frame, format="rgb24", threads=1).to_ndarray()
-
     def close(self) -> None:
-        """Stops the reader thread."""
+        """Asks the reader thread to stop."""
         self._stop = True
         self.online = False
         self._wake.set()
+
+    def stopped(self, timeout: float) -> bool:
+        """Waits for the reader thread to end, reporting whether it has.
+
+        A read inside libavdevice cannot be interrupted, so a device that
+        opens and never delivers a frame holds its thread and its capture
+        session for good.
+        """
+        self._thread.join(timeout)
+        return not self._thread.is_alive()
+
+
+class ConnectWithoutRedirects(websockets.connect):
+    """A WebSocket handshake that ends at the address it was given."""
+
+    def process_redirect(self, exc: Exception) -> Exception:
+        """Hands a redirect back as the refusal it arrived as, never the address to try next."""
+        return exc
+
+
+async def _read_within(resp: httpx.Response, max_bytes: int) -> bytes:
+    """Reads a response body, giving up once it passes a size.
+
+    Args:
+        resp: A response whose body has not been read.
+        max_bytes: The most the body may come to once inflated.
+
+    Returns:
+        The body, inflated if it came as gzip.
+
+    Raises:
+        RuntimeError: If the body is larger, raised while it is still arriving,
+            or came in an encoding the request did not ask for.
+    """
+    encoding = resp.headers.get("Content-Encoding", "identity").lower()
+    if encoding not in ("gzip", "identity"):
+        raise RuntimeError("the answer is in an encoding that was not asked for")
+    inflate = zlib.decompressobj(zlib.MAX_WBITS | 16) if encoding == "gzip" else None
+    body = bytearray()
+    async for chunk in resp.aiter_raw():
+        body += inflate.decompress(chunk, max_bytes + 1 - len(body)) if inflate else chunk
+        if len(body) > max_bytes:
+            raise RuntimeError(f"the answer is larger than {max_bytes // 1024} KB")
+    return bytes(body)
+
+
+def _parsed(content: bytes, encoding: str | None, binary: bool) -> Any:
+    """Turns a response body into what ``Platform.http`` hands back.
+
+    Args:
+        content: The body as bytes.
+        encoding: The charset the response declared.
+        binary: Whether the caller asked for the bytes themselves.
+
+    Returns:
+        Base64 for a binary reply, parsed JSON where the body is JSON, and the
+        text otherwise, a body holding NaN or Infinity included.
+    """
+    if binary:
+        return base64.b64encode(content).decode()
+    try:
+        return require_finite(parse_json(content))
+    except ValueError:
+        return content.decode(encoding or "utf-8", "replace")
 
 
 class WebSocket:
@@ -482,17 +633,32 @@ class WebSocket:
         self._reader: asyncio.Task[None] | None = None
 
     def read(self, arrived: Callable[[str, str], None]) -> None:
-        """Starts reporting frames, and reports the close whatever ends it."""
+        """Starts reporting frames, and reports the close whatever ends it.
+
+        A socket sent more than ``SOCKET_FLOOD_FRAMES`` frames inside
+        ``SOCKET_FLOOD_WINDOW_S`` is closed, and its ``closed`` carries the reason.
+        """
 
         async def pump() -> None:
             arrived("open", "")
+            flooded = ""
+            window_ends, frames = 0.0, 0
             try:
                 async for frame in self._connection:
+                    now = time.monotonic()
+                    if now >= window_ends:
+                        window_ends, frames = now + SOCKET_FLOOD_WINDOW_S, 0
+                    frames += 1
+                    if frames > SOCKET_FLOOD_FRAMES:
+                        flooded = f"it was sent more than {SOCKET_FLOOD_FRAMES} frames in {SOCKET_FLOOD_WINDOW_S:.0f} seconds"
+                        break
                     arrived("message", frame if isinstance(frame, str) else frame.decode("utf-8", "replace"))
             except Exception as exc:
                 logger.info("plugin socket ended: %s", exc)
             finally:
-                arrived("closed", "")
+                arrived("closed", flooded)
+            if flooded:
+                self._connection.transport.abort()
 
         self._reader = asyncio.ensure_future(pump())
 
@@ -523,14 +689,29 @@ class DiskFileStore:
         """Where a key's bytes live, for serving straight from disk."""
         return self.root / key
 
+    @staticmethod
+    def _create_private(path: Path) -> Any:
+        """Opens a file for writing that nobody but the hub's user may read.
+
+        Held to the mode before anything is written too, since one left behind
+        by a hub that was killed keeps the mode it had.
+        """
+        path.touch(mode=0o600)
+        path.chmod(0o600)
+        return path.open("wb")
+
     async def store(self, key: str, chunks: AsyncIterable[bytes]) -> int:
-        """Writes a file from its chunks, replacing any under that key."""
+        """Writes a file from its chunks, replacing any under that key.
+
+        Each write runs on a worker thread: an upload can be hundreds of
+        megabytes onto an SD card, and the event loop also carries detection.
+        """
         partial = self.path(f"{key}.part")
         size = 0
         try:
-            with partial.open("wb") as handle:
+            with await asyncio.to_thread(self._create_private, partial) as handle:
                 async for chunk in chunks:
-                    handle.write(chunk)
+                    await asyncio.to_thread(handle.write, chunk)
                     size += len(chunk)
             partial.replace(self.path(key))
         except BaseException:
@@ -553,12 +734,21 @@ class ServerPlatform:
     update_repo = "oliverbravery/PrintGuard"
 
     def __init__(
-        self, model_dir: Path, data_dir: Path, mediamtx_api: str, mediamtx_rtsp: str, update_asset: str | None = None
+        self,
+        model_dir: Path,
+        data_dir: Path,
+        mediamtx_api: str,
+        mediamtx_rtsp: str,
+        update_asset: str | None = None,
+        mediamtx_login: tuple[str, str] | None = None,
+        mediamtx_hls: str = "",
     ) -> None:
         self.version = metadata.version("printguard")
         self.update_asset = update_asset
         self.host = deployment(update_asset is not None)
-        data_dir.mkdir(parents=True, exist_ok=True)
+        prepare_data_directory(data_dir)
+        prepare_data_directory(data_dir / "prints")
+        self.files = DiskFileStore(data_dir / "prints")
         self._model_dir = model_dir
         self._inference: Inference | None = None
         self.workers = 1
@@ -566,18 +756,28 @@ class ServerPlatform:
         meta = json.loads((model_dir / "metadata.json").read_text())
         protos = json.loads((model_dir / "prototypes.json").read_text())["prototypes"]
         self.assets = vision.assets_from_dicts(meta, protos)
-        self._state_path = data_dir / "state.json"
         self._client = httpx.AsyncClient(follow_redirects=True)
-        self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._client)
+        self._public_client = httpx.AsyncClient(transport=PublicOnlyTransport())
+        self._mediamtx_client = httpx.AsyncClient(trust_env=False)
+        self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._mediamtx_client, mediamtx_login)
+        self.secrets = frozenset(url_secrets(mediamtx_api) | url_secrets(mediamtx_rtsp) | url_secrets(mediamtx_hls) | set((mediamtx_login or ())[1:]))
         self._sources: dict[str, AVSource] = {}
+        self._closing: dict[str, AVSource] = {}
+        self._notices: list[Notice] = []
+        self._state_file = StateFile(
+            data_dir / "state.json", lambda message, recovered: self._notices.append(Notice(message, recovered))
+        )
         self._declares_devices = os.environ.get("PRINTGUARD_CAMERAS") == "auto"
         self.plugin_runtime = None if os.environ.get("PRINTGUARD_PLUGINS") == "off" else WasmPluginRuntime()
-        self.files = DiskFileStore(data_dir / "prints")
         if self.plugin_runtime is None:
             logger.warning("plugins are disabled by PRINTGUARD_PLUGINS=off")
 
     async def configure(self, settings: dict[str, Any]) -> None:
-        """Selects the requested inference runtime."""
+        """Selects the requested inference runtime.
+
+        The runtime it replaces is closed once every frame already sent to it
+        has come back, including one a ``classify`` call made outside the scheduler.
+        """
         runtime = settings["inference_runtime"]
         inference = await asyncio.to_thread(Inference, self._model_dir, runtime)
         previous = self._inference
@@ -585,7 +785,9 @@ class ServerPlatform:
         self.workers = inference.workers
         self.inference_device = inference.device
         if previous is not None:
+            await previous.drained()
             previous.close()
+        self._notices += [Notice(message) for message in inference.skipped]
         logger.info(
             "inference ready: %s via %s (%d workers, %.0f fps)",
             self.inference_device,
@@ -595,10 +797,18 @@ class ServerPlatform:
         )
 
     async def close(self) -> None:
-        """Releases the HTTP client, and the inference workers once a runtime is up."""
+        """Writes any state still queued, then releases the HTTP clients and the inference workers once a runtime is up."""
+        await asyncio.to_thread(self._state_file.flush)
         await self._client.aclose()
+        await self._public_client.aclose()
+        await self._mediamtx_client.aclose()
         if self._inference is not None:
             self._inference.close()
+
+    def take_notices(self) -> list[Notice]:
+        """Hands over what the hub has had to work around since the last call."""
+        notices, self._notices = self._notices, []
+        return notices
 
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
         """Runs the model through the selected hardware provider."""
@@ -627,7 +837,8 @@ class ServerPlatform:
     async def open_camera(self, camera_id: str, source: dict[str, Any]) -> AVSource:
         """Attaches to a stream, getting URL sources into MediaMTX for viewers.
 
-        RTSP/RTMP URLs and WebRTC WHEP endpoints are pulled by MediaMTX;
+        RTSP/RTMP URLs and WebRTC WHEP endpoints are pulled by MediaMTX, with
+        its own login when the address is a stream pushed to its own listener;
         HTTP/MJPEG ones are read directly and transcoded back into MediaMTX so
         both inference and viewers see them. Device sources are the host's own
         cameras, captured through libavdevice in this process - not a browser
@@ -639,11 +850,18 @@ class ServerPlatform:
         join and - when the container declares no rate - measuring the fps.
         Together those approach twenty seconds; sources that are truly dead
         just take this long to report.
+
+        Raises:
+            RuntimeError: If no frame arrives in time, or if the reader this
+                source was last opened with is still inside a read it cannot
+                be called back from. Opening another beside it would add a
+                thread and a capture session on every retry.
         """
         publish_url: str | None = None
         container_format: str | None = None
         open_options: tuple[dict[str, str], ...] | None = None
         target: str | Callable[[], Any]
+        shown_as: str | None = None
         if source["kind"] == "device":
             await asyncio.to_thread(_authorize_macos_camera)
             container_format, target = _device_input(source["device_id"])
@@ -655,16 +873,38 @@ class ServerPlatform:
                 target = source["url"]
                 publish_url = self.mediamtx.rtsp_url(camera_id)
             else:
+                pushed = await self.mediamtx.own_path(source["url"])
+                if pushed is not None:
+                    pulled = self.mediamtx.rtsp_url(pushed)
                 await self.mediamtx.ensure_path(camera_id, pulled, source.get("fingerprint"))
                 target = self.mediamtx.rtsp_url(camera_id)
+                shown_as = scrub_url(source["url"])
         elif source["kind"] == "path":
             target = self.mediamtx.rtsp_url(source["path"])
+            shown_as = source["path"]
         elif source["kind"] == "bambu":
             target = partial(open_bambu_jpeg_stream, source["host"], source["access_code"])
             publish_url = self.mediamtx.rtsp_url(camera_id)
         else:
             raise ValueError(f"cannot open source kind {source['kind']!r}")
-        av_source = AVSource(target, publish_url, container_format, open_options)
+        reader = source.get("device_id", camera_id)
+        closing = self._closing.get(reader)
+        if closing is not None:
+            if not await asyncio.to_thread(closing.stopped, READER_STOP_WAIT_S):
+                raise RuntimeError(
+                    "this camera's last capture stopped answering and cannot be closed, so it is not opened again. "
+                    "Restart PrintGuard to free it"
+                )
+            self._closing.pop(reader, None)
+        av_source = AVSource(
+            target,
+            publish_url,
+            container_format,
+            open_options,
+            lambda message, recovered: self._notices.append(Notice(message, recovered, camera_id)),
+            lambda: self._forget_closed(reader, av_source),
+            shown_as,
+        )
         self._sources[camera_id] = av_source
         try:
             deadline = time.monotonic() + OPEN_WAIT_S
@@ -692,12 +932,24 @@ class ServerPlatform:
             await asyncio.sleep(0.1)
         source.view()
 
+    def _forget_closed(self, reader: str, source: AVSource) -> None:
+        """Drops a released source once its reader has ended, along with its last frames."""
+        if self._closing.get(reader) is source:
+            del self._closing[reader]
+
     async def release_camera(self, camera_id: str, source: dict[str, Any]) -> None:
-        """Closes the source and removes any MediaMTX pull path."""
+        """Closes the source and removes any MediaMTX pull path.
+
+        The path is removed for every URL camera without asking how its address
+        would be opened today: a printer can change its webcam to one that can
+        no longer be pulled, and the path was added for the address before.
+        ``remove_path`` knows whether it ever added one.
+        """
         av_source = self._sources.pop(camera_id, None)
         if av_source:
+            self._closing[source.get("device_id", camera_id)] = av_source
             av_source.close()
-        if source["kind"] == "url" and pull_source(source["url"]) is not None:
+        if source["kind"] == "url":
             try:
                 await self.mediamtx.remove_path(camera_id)
             except Exception:
@@ -710,22 +962,69 @@ class ServerPlatform:
         *,
         headers: dict[str, str] | None = None,
         json: dict[str, Any] | None = None,
-        data: bytes | None = None,
+        data: bytes | AsyncIterable[bytes] | None = None,
         binary: bool = False,
         timeout: float = 10.0,
+        redirects: Redirects = "follow",
+        max_bytes: int | None = None,
+        public_only: bool = False,
     ) -> tuple[int, Any]:
-        """Performs an HTTP request with httpx, base64 encoding a binary reply."""
-        resp = await self._client.request(method, url, headers=headers, json=json, content=data, timeout=timeout)
-        if binary:
-            return resp.status_code, base64.b64encode(resp.content).decode()
-        try:
-            return resp.status_code, resp.json()
-        except ValueError:
-            return resp.status_code, resp.text
+        """Performs an HTTP request with httpx, base64 encoding a binary reply.
 
-    async def open_socket(self, url: str, arrived: Callable[[str, str], None]) -> WebSocket:
-        """Connects a WebSocket and reads it on a task of its own."""
-        connection = await websockets.connect(url, open_timeout=SOCKET_TIMEOUT_S, max_size=SOCKET_MAX_BYTES)
+        A capped request asks for gzip or nothing and is inflated here as it
+        arrives, since httpx inflates a whole chunk before anyone can count it.
+        A ``public_only`` request goes through a client that resolves and checks
+        the name when it connects, and ignores any proxy in the environment.
+
+        Raises:
+            PermissionError: If ``public_only`` is set and the host is on this
+                network.
+            RuntimeError: If ``redirects`` is ``"refuse"`` and the server
+                redirects, or a followed redirect made httpx replay the request
+                under another method, as it does a POST answered with 301 or
+                302, so the request itself was never delivered, or if the body
+                passes ``max_bytes`` or is neither gzip nor plain.
+        """
+        if max_bytes is not None:
+            headers = httpx.Headers(headers)
+            headers["Accept-Encoding"] = "gzip"
+        client = self._public_client if public_only else self._client
+        async with client.stream(
+            method, url, headers=headers, json=json, content=data, timeout=timeout, follow_redirects=redirects == "follow"
+        ) as resp:
+            if redirects == "refuse" and resp.is_redirect:
+                raise RuntimeError(redirect_message(resp))
+            hops = [*resp.history, resp]
+            for hop, landed in zip(hops, hops[1:]):
+                if hop.status_code != 303 and landed.request.method != hop.request.method:
+                    source, target = (f"{at.url.scheme}://{at.url.netloc.decode()}" for at in (hop, landed))
+                    raise RuntimeError(f"{source} redirects to {target}, which drops the {method}. Use the address it redirects to")
+            content = await resp.aread() if max_bytes is None else await _read_within(resp, max_bytes)
+        return resp.status_code, _parsed(content, resp.encoding, binary)
+
+    async def open_socket(self, url: str, arrived: Callable[[str, str], None], public_only: bool = False) -> WebSocket:
+        """Connects a plugin's WebSocket and reads it on a task of its own.
+
+        A ``public_only`` connection is made to an address checked as
+        ``http`` checks it, and not through a proxy named in the environment.
+        The handshake carries ``PLUGIN_HEADER``, so the hub refuses one that
+        comes back to itself.
+
+        Raises:
+            PermissionError: If ``public_only`` is set and the host is on this
+                network.
+            websockets.InvalidStatus: If the server answers with anything but
+                the upgrade, a redirect included.
+        """
+        options: dict[str, Any] = {"open_timeout": SOCKET_TIMEOUT_S, "max_size": SOCKET_MAX_BYTES, "additional_headers": {PLUGIN_HEADER: "1"}}
+        if public_only:
+            target = urlsplit(url)
+            port = target.port or (443 if target.scheme == "wss" else 80)
+            connection = await connect_to_public(
+                target.hostname or "", port, lambda address: ConnectWithoutRedirects(url, host=address, port=port, proxy=None, **options)
+            )
+        else:
+            connection = await ConnectWithoutRedirects(url, **options)
         socket = WebSocket(connection)
         socket.read(arrived)
         return socket
@@ -739,19 +1038,35 @@ class ServerPlatform:
             codec.width, codec.height = frame.width, frame.height
             codec.pix_fmt = "yuvj420p"
             codec.time_base = Fraction(1, 30)
+            codec.thread_count = 1
             packets = codec.encode(frame.reformat(format="yuvj420p", threads=1)) + codec.encode(None)
             return b"".join(bytes(p) for p in packets)
 
         try:
             return await asyncio.to_thread(encode)
-        except Exception:
+        except Exception as exc:
+            logger.warning("a frame could not be encoded as JPEG: %s", logs.describe(exc))
             return None
 
     async def decode_jpeg(self, data: bytes) -> np.ndarray | None:
-        """Decodes supplied image bytes to an RGB frame with PyAV."""
+        """Decodes a supplied JPEG or PNG to an RGB frame with PyAV.
+
+        FFmpeg is held to its two still-image demuxers, since left to probe the
+        bytes it will take an SDP description and listen on the network for its stream.
+
+        Args:
+            data: The image file's bytes.
+
+        Returns:
+            The frame, or None for anything but a JPEG or PNG it can decode within
+            ``CLASSIFY_MAX_PIXELS``.
+        """
         def decode() -> np.ndarray:
-            with av.open(io.BytesIO(data)) as container:
-                return next(container.decode(video=0)).reformat(format="rgb24", threads=1).to_ndarray()
+            with av.open(io.BytesIO(data), options={"format_whitelist": "jpeg_pipe,png_pipe"}) as container:
+                stream = _decodable_video_stream(container)
+                if stream.width * stream.height > CLASSIFY_MAX_PIXELS:
+                    raise ValueError(f"{stream.width}x{stream.height} is more than {CLASSIFY_MAX_PIXELS} pixels")
+                return next(container.decode(stream)).reformat(format="rgb24", threads=1).to_ndarray()
 
         try:
             return await asyncio.to_thread(decode)
@@ -759,21 +1074,13 @@ class ServerPlatform:
             return None
 
     def load_state(self) -> dict[str, Any]:
-        """Reads persisted engine state from the data directory."""
-        try:
-            return json.loads(self._state_path.read_text())
-        except (OSError, ValueError):
-            return {}
+        """Reads persisted engine state from the data directory.
+
+        Raises:
+            RuntimeError: If the data directory is one the hub's user may not use.
+        """
+        return self._state_file.load()
 
     def save_state(self, state: dict[str, Any]) -> None:
-        """Atomically writes engine state to the data directory, owner-readable only.
-
-        It holds printer passwords, notifier keys, API token hashes and whatever
-        credentials plugins have been given, so the mode is set on the temporary
-        file before the rename rather than after: anything else leaves a window
-        where the finished file is readable by everybody on the host.
-        """
-        tmp = self._state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(state, indent=2))
-        tmp.chmod(0o600)
-        tmp.replace(self._state_path)
+        """Queues engine state to be written to the data directory, off the event loop."""
+        self._state_file.save(state)

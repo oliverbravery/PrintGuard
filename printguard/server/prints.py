@@ -8,7 +8,10 @@ routes and the versioned REST API so an upload is handled one way.
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
 import uuid
+from pathlib import Path
 from typing import Any, AsyncIterator
 
 from fastapi import HTTPException
@@ -17,13 +20,17 @@ from pydantic import BaseModel, Field
 
 from ..engine import gcode
 from ..engine.engine import Engine
-from ..engine.prints import extension
+from ..engine.prints import FORMATS, extension
 from ..engine.registry import PrintFile
+from ..engine.reviews import frame_key
 from .platform import DiskFileStore
+
+logger = logging.getLogger(__name__)
 
 MAX_PRINT_BYTES = 512 * 1024 * 1024
 MAX_SAMPLE_BYTES = gcode.HEAD_BYTES + gcode.TAIL_BYTES + 1
 ADD_TIMEOUT_S = 120.0
+GENERATED_NAME = re.compile(rf"^(?:[0-9a-f]{{8}}\.(?:{'|'.join(FORMATS)}|thumb)|review-[0-9a-f]+-[0-9a-f]+\.jpg)$")
 THUMBNAIL_CACHE_CONTROL = "private, max-age=31536000, immutable"
 
 
@@ -56,6 +63,24 @@ def record_of(engine: Engine, print_id: str) -> PrintFile:
     return record
 
 
+def stored_path(engine: Engine, record: PrintFile, key: str) -> Path:
+    """Where the store keeps one of a print's files.
+
+    Args:
+        engine: The hub's engine.
+        record: The print the file belongs to.
+        key: The file's key in the store.
+
+    Raises:
+        HTTPException: 404 when the file is gone from the data directory, which
+            would otherwise be answered with the path it was looked for at.
+    """
+    path = store_of(engine).path(key)
+    if not path.is_file():
+        raise HTTPException(404, f"print {record.id!r} has lost its file")
+    return path
+
+
 async def receive_print(engine: Engine, upload: PrintUpload, body: AsyncIterator[bytes]) -> PrintFile:
     """Streams an upload into the store and registers it with the engine.
 
@@ -77,7 +102,8 @@ async def receive_print(engine: Engine, upload: PrintUpload, body: AsyncIterator
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     print_id = uuid.uuid4().hex[:8]
-    await store_of(engine).store(f"{print_id}.{ext}", _capped(body, MAX_PRINT_BYTES))
+    store = store_of(engine)
+    await store.store(f"{print_id}.{ext}", capped(body, MAX_PRINT_BYTES))
     try:
         await engine.request(
             {
@@ -93,7 +119,47 @@ async def receive_print(engine: Engine, upload: PrintUpload, body: AsyncIterator
         )
     except RuntimeError as exc:
         raise HTTPException(400, str(exc)) from exc
+    except TimeoutError:
+        await store.remove(f"{print_id}.{ext}")
+        await store.remove(f"{print_id}.thumb")
+        raise
     return record_of(engine, print_id)
+
+
+async def sweep_orphans(engine: Engine, *, unnamed: bool) -> None:
+    """Deletes what the store holds that the engine has no record of.
+
+    A hub killed part way through an upload leaves a ``.part``, and a file
+    whose record was never saved stays for good, since only a record's removal
+    deletes a file. This runs once when the hub starts, before anything can be
+    uploaded. Only names the hub generates are touched, so a folder is left
+    alone, since a NAS keeps its own beside the files, such as Synology's
+    ``@eaDir``, and so is a file a user dropped in. The files of a record this
+    start could not read are kept too, so a backup of the state put in place
+    before the next start still finds them. That next start removes them
+    otherwise, since the record is gone from the state by then.
+
+    Args:
+        engine: The hub's engine, with its state loaded.
+        unnamed: Whether a finished file no print or review names goes too.
+            It stays while a damaged state file waits to be put back, since
+            that state may be the one naming it, and on a start that found no
+            state file, since one restored later may name it too.
+    """
+    named = {key for record in engine.prints.values() for key in (record.file_key, record.thumbnail_key)}
+    named |= {frame_key(review["id"], frame["id"]) for review in engine.reviews.persisted() for frame in review["frames"]}
+    orphans = [
+        path
+        for path in store_of(engine).root.iterdir()
+        if path.is_file()
+        and GENERATED_NAME.match(path.name.removesuffix(".part"))
+        and (path.suffix == ".part" or (unnamed and path.name not in named))
+        and not any(dropped in path.name for dropped in engine.dropped_ids)
+    ]
+    for path in orphans:
+        path.unlink()
+    if orphans:
+        logger.info("removed %d files in %s that no print or review names", len(orphans), store_of(engine).root)
 
 
 async def inspect_sample(ext: str, body: AsyncIterator[bytes]) -> dict[str, Any]:
@@ -117,13 +183,22 @@ async def inspect_sample(ext: str, body: AsyncIterator[bytes]) -> dict[str, Any]
     """
     try:
         extension(f"sample.{ext}")
-        sliced = await asyncio.to_thread(gcode.inspect, b"".join([chunk async for chunk in _capped(body, MAX_SAMPLE_BYTES)]), ext)
+        sliced = await asyncio.to_thread(gcode.inspect, b"".join([chunk async for chunk in capped(body, MAX_SAMPLE_BYTES)]), ext)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"meta": sliced.meta, "thumbnail": sliced.thumbnail is not None}
 
 
-async def _capped(body: AsyncIterator[bytes], limit: int) -> AsyncIterator[bytes]:
+async def capped(body: AsyncIterator[bytes], limit: int) -> AsyncIterator[bytes]:
+    """Passes a request body through, refusing it once it outgrows a limit.
+
+    Args:
+        body: The bytes as they arrive.
+        limit: The most bytes to take.
+
+    Raises:
+        HTTPException: 413 when the body is larger.
+    """
     size = 0
     async for chunk in body:
         size += len(chunk)
@@ -135,7 +210,7 @@ async def _capped(body: AsyncIterator[bytes], limit: int) -> AsyncIterator[bytes
 def file_response(engine: Engine, print_id: str) -> Response:
     """The stored file, for downloading."""
     record = record_of(engine, print_id)
-    return FileResponse(store_of(engine).path(record.file_key), media_type="application/octet-stream", filename=record.filename)
+    return FileResponse(stored_path(engine, record, record.file_key), media_type="application/octet-stream", filename=record.filename)
 
 
 async def gcode_response(engine: Engine, print_id: str) -> Response:
@@ -145,9 +220,9 @@ async def gcode_response(engine: Engine, print_id: str) -> Response:
         HTTPException: 404 for binary gcode, which has no text to draw from.
     """
     record = record_of(engine, print_id)
-    path = store_of(engine).path(record.file_key)
+    path = stored_path(engine, record, record.file_key)
     if record.ext == "3mf":
-        _, plate = gcode.plate_gcode(path.read_bytes())
+        _, plate = await asyncio.to_thread(lambda: gcode.plate_gcode(path.read_bytes()))
         return Response(plate, media_type="text/plain")
     if record.ext == "bgcode":
         raise HTTPException(404, "binary gcode carries nothing the viewer can draw")
@@ -164,7 +239,7 @@ def thumbnail_response(engine: Engine, print_id: str) -> Response:
     if record.thumbnail is None:
         raise HTTPException(404, f"print {print_id!r} has no preview")
     return FileResponse(
-        store_of(engine).path(record.thumbnail_key),
+        stored_path(engine, record, record.thumbnail_key),
         media_type=record.thumbnail,
         headers={"Cache-Control": THUMBNAIL_CACHE_CONTROL},
     )

@@ -8,20 +8,24 @@ the same tags drive both this API's bearer-scope guard and the MCP tool filter.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
-from typing import Annotated, Any, Literal
-from urllib.parse import urlsplit, urlunsplit
+from contextlib import asynccontextmanager
+from importlib.metadata import version as package_version
+from typing import Annotated, Any, AsyncIterator, Awaitable, Callable, Literal
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from fastapi.routing import APIRoute
+from pydantic import AfterValidator, BaseModel, ConfigDict
 
 from ..engine.engine import Engine
-from ..engine.integrations import INTEGRATIONS
-from ..engine.notifiers import NOTIFIERS
 from ..engine.tokens import SCOPE_ORDER, expand_scope, hash_secret
-from .prints import PrintUpload, file_response, receive_print
+from .events import require_finite
+from .prints import PrintUpload, capped, file_response, receive_print
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +57,7 @@ class ApiAuth:
         token = ""
         if header and header.lower().startswith("bearer "):
             token = header[7:].strip()
-        if self._internal and token and hmac.compare_digest(self._internal, token):
+        if self._internal and token and hmac.compare_digest(self._internal.encode(), token.encode()):
             return expand_scope("manage")
         if token:
             digest = hash_secret(token)
@@ -65,30 +69,58 @@ class ApiAuth:
         return None
 
 
-async def scope_guard(request: Request) -> None:
-    """Rejects requests whose token does not cover the matched route's scope."""
-    auth: ApiAuth = request.app.state.api_auth
-    granted = auth.resolve(request.headers.get("authorization"), request.app.state.engine.token_scopes())
-    if granted is None:
-        logger.warning("rejected API request with missing or invalid token: %s %s", request.method, request.url.path)
-        raise HTTPException(401, "missing or invalid token", {"WWW-Authenticate": "Bearer"})
-    required = route_scope(getattr(request.scope.get("route"), "tags", None))
-    if required not in granted:
-        logger.warning("rejected API request lacking %s scope: %s %s", required, request.method, request.url.path)
-        raise HTTPException(403, f"requires {required} scope")
+class ScopedRoute(APIRoute):
+    """A route that checks the caller's token before anything of the request is read.
+
+    A dependency runs after FastAPI has read and parsed the body, so a caller
+    with no token could have the hub take in a body of any size first.
+    """
+
+    def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
+        """Wraps the route's handler in the scope check."""
+        handler = super().get_route_handler()
+
+        async def guarded(request: Request) -> Response:
+            """Rejects a request whose token does not cover this route's scope.
+
+            Raises:
+                HTTPException: 401 for a missing or invalid token, 403 for one
+                    whose scope is too narrow.
+            """
+            auth: ApiAuth = request.app.state.api_auth
+            granted = auth.resolve(request.headers.get("authorization"), request.app.state.engine.token_scopes())
+            if granted is None:
+                logger.warning("rejected API request with missing or invalid token: %s %s", request.method, request.url.path)
+                raise HTTPException(401, "missing or invalid token", {"WWW-Authenticate": "Bearer"})
+            required = route_scope(self.tags)
+            if required not in granted:
+                logger.warning("rejected API request lacking %s scope: %s %s", required, request.method, request.url.path)
+                raise HTTPException(403, f"requires {required} scope")
+            return await handler(request)
+
+        return guarded
 
 
 def get_engine(request: Request) -> Engine:
     return request.app.state.engine
 
 
+FiniteObject = Annotated[dict[str, Any], AfterValidator(require_finite)]
+
+
 class PrinterFields(BaseModel):
     name: str | None = None
     provider: str | None = None
-    config: dict[str, Any] | None = None
+    config: FiniteObject | None = None
 
 
-class MonitorFields(BaseModel):
+class _FiniteNumbers(BaseModel):
+    """Base for the request bodies that carry a number, refusing NaN, Infinity and text or a boolean in place of one."""
+
+    model_config = ConfigDict(allow_inf_nan=False, strict=True)
+
+
+class MonitorFields(_FiniteNumbers):
     name: str | None = None
     camera_id: str | None = None
     printer_id: str | None = None
@@ -112,32 +144,36 @@ class CameraCreate(BaseModel):
     source: CameraSource
 
 
-class CameraPatch(BaseModel):
+class CameraPatch(_FiniteNumbers):
     name: str | None = None
     brightness: float | None = None
     contrast: float | None = None
     sharpness: float | None = None
     crop: dict[str, float] | None = None
     rotation: int | None = None
+    detect_fps: float | None = None
 
 
 class ProviderTest(BaseModel):
     provider: str
-    config: dict[str, Any] = {}
+    config: FiniteObject = {}
 
 
-class SettingsPatch(BaseModel):
-    notifiers: dict[str, dict[str, Any]] | None = None
-    mqtt: dict[str, Any] | None = None
+class SettingsPatch(_FiniteNumbers):
+    notifiers: dict[str, FiniteObject] | None = None
+    mqtt: FiniteObject | None = None
     inference_runtime: Literal["auto", "litert", "onnx"] | None = None
-    preheat: list[dict[str, Any]] | None = None
+    preheat: list[FiniteObject] | None = None
+    fault_grace_s: float | None = None
+    update_check: bool | None = None
+    feedback: Literal["ask", "off"] | None = None
 
 
 class ActionBody(BaseModel):
     action: Literal["pause", "resume", "cancel"]
 
 
-class HeatBody(BaseModel):
+class HeatBody(_FiniteNumbers):
     nozzle: float | None = None
     bed: float | None = None
 
@@ -158,11 +194,22 @@ UPLOAD_BODY = {
         "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
     }
 }
+MAX_FRAME_BYTES = 32 * 1024 * 1024
+CLASSIFY_IN_FLIGHT = 2
+"""Supplied images read, decoded and scored at once. One decodes to as much as 150 MB, and the rest wait their turn."""
+CLASSIFY_WAITING = 8
+"""Callers that may wait for one of those turns. One past that is refused, since each holds a connection open."""
+FRAME_BODY = {
+    "requestBody": {
+        "required": True,
+        "content": {"image/jpeg": {"schema": {"type": "string", "format": "binary"}}},
+    }
+}
 
 
 class _ReadModel(BaseModel):
     """Base for the read-surface response models, documenting each field for
-    `/api/v1/docs` yet passes any unlisted field straight through and tolerates
+    `/api/v1/openapi.json` yet passes any unlisted field straight through and tolerates
     absent ones, so a response still mirrors the resource's `.public()` exactly."""
 
     model_config = ConfigDict(extra="allow")
@@ -180,12 +227,14 @@ class CameraOut(_ReadModel):
     source: dict[str, Any] | None = None
     printer_id: str | None = None
     max_fps: float | None = None
+    detect_fps: float | None = None
     target_fps: float | None = None
     achieved_fps: float | None = None
     inferring: bool | None = None
     in_use: bool | None = None
     online: bool | None = None
     standby: bool | None = None
+    reason: str | None = None
     last_result: LastResult | None = None
     brightness: float | None = None
     contrast: float | None = None
@@ -228,73 +277,87 @@ def _find(items: list[dict[str, Any]], item_id: str, kind: str) -> dict[str, Any
     raise HTTPException(404, f"no {kind} {item_id!r}")
 
 
-def _public_config(config: dict[str, Any], adapter: Any) -> dict[str, Any]:
-    """Drops the credential values an adapter's schema marks secret."""
-    secrets = adapter.secret_keys() if adapter else set()
-    return {key: value for key, value in config.items() if key not in secrets}
-
-
-def _public_printer(printer: dict[str, Any]) -> dict[str, Any]:
-    config = _public_config(printer.get("config", {}), INTEGRATIONS.get(printer.get("provider") or ""))
-    return {**printer, "config": config}
-
-
-def _strip_url_credentials(url: str) -> str:
-    """Removes any user:password@ prefix from a stream URL."""
-    parts = urlsplit(url)
-    if not (parts.username or parts.password):
-        return url
-    netloc = parts.hostname or ""
-    if parts.port:
-        netloc = f"{netloc}:{parts.port}"
-    return urlunsplit(parts._replace(netloc=netloc))
-
-
-def _public_camera(camera: dict[str, Any]) -> dict[str, Any]:
-    """Drops camera-source credentials a printer integration embedded."""
-    source = {key: value for key, value in (camera.get("source") or {}).items() if key != "access_code"}
-    if source.get("url"):
-        source["url"] = _strip_url_credentials(source["url"])
-    return {**camera, "source": source}
-
-
 def public_state(engine: Engine) -> dict[str, Any]:
-    """The engine snapshot with linked-service credentials stripped.
+    """The engine snapshot without what only the dashboard is given.
 
-    The dashboard reads the engine's full state over the WebSocket, where trust
-    is total; this read surface - REST and the MCP tools derived from it - must
-    report status without leaking the printer and notifier credentials those
-    configs embed, nor the access codes a printer-exposed camera source carries.
-    Redaction reuses the secret fields each adapter's schema already declares
-    rather than enumerating credentials here.
+    The snapshot already carries no stored secret. A plugin's store is left
+    out whatever the token's scope, since a plugin may keep a session or
+    anything else it was told in it, and nothing on this surface writes one.
+    The API tokens are left out as well, since only the dashboard issues and
+    revokes them and a read token has no call to list the others.
     """
     state = engine.state_event()
-    state["printers"] = [_public_printer(printer) for printer in state["printers"]]
-    state["cameras"] = [_public_camera(camera) for camera in state["cameras"]]
-    notifiers = state["settings"].get("notifiers", {})
-    mqtt = state["settings"].get("mqtt") or {}
-    state["settings"] = {
-        **state["settings"],
-        "notifiers": {pid: _public_config(config, NOTIFIERS.get(pid)) for pid, config in notifiers.items()},
-        "mqtt": {**mqtt, "password": ""} if mqtt.get("password") else mqtt,
-    }
+    del state["tokens"]
+    state["plugins"] = [{key: value for key, value in plugin.items() if key != "config"} for plugin in state["plugins"]]
     return state
+
+
+class Busy(Exception):
+    """As many callers as may wait for a turn are already waiting."""
+
+
+class Turns:
+    """Lets a few callers work at once and a few more wait, and refuses the rest.
+
+    A caller takes its turn before it reads the image it was sent, so the ones
+    waiting hold a connection each and no image.
+    """
+
+    def __init__(self, at_once: int, waiting: int) -> None:
+        """Sets the bounds.
+
+        Args:
+            at_once: How many may hold a turn together.
+            waiting: How many more may wait for one.
+        """
+        self._working = asyncio.Semaphore(at_once)
+        self._room = at_once + waiting
+
+    @asynccontextmanager
+    async def turn(self) -> AsyncIterator[None]:
+        """Holds a turn for the block, waiting for one if it must.
+
+        Raises:
+            Busy: If too many callers are waiting already.
+        """
+        if not self._room:
+            raise Busy("too many images are waiting to be classified, try again in a moment")
+        self._room -= 1
+        try:
+            async with self._working:
+                yield
+        finally:
+            self._room += 1
 
 
 def build_api_app(auth: ApiAuth) -> FastAPI:
     """Builds the /api/v1 sub-application, with the engine attached at startup."""
     api = FastAPI(
         title="PrintGuard API",
-        version="1",
+        version=package_version("printguard"),
+        docs_url=None,
+        redoc_url=None,
         summary="Monitor and control 3D printers through PrintGuard.",
-        dependencies=[Depends(scope_guard)],
     )
+    api.router.route_class = ScopedRoute
     api.state.api_auth = auth
+    api.state.classifying = Turns(CLASSIFY_IN_FLIGHT, CLASSIFY_WAITING)
 
     @api.exception_handler(RuntimeError)
     async def command_failed(request: Request, exc: RuntimeError) -> JSONResponse:
         """Maps a rejected engine command to a 400 instead of a bare 500."""
         return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    @api.exception_handler(RequestValidationError)
+    async def body_refused(request: Request, exc: RequestValidationError) -> JSONResponse:
+        """Answers 422 without echoing the input, since a NaN in it cannot be written as JSON."""
+        errors = [{key: value for key, value in error.items() if key != "input"} for error in exc.errors()]
+        return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
+
+    @api.exception_handler(Busy)
+    async def turned_away(request: Request, exc: Busy) -> JSONResponse:
+        """Answers 503 to an image sent while too many are waiting to be classified."""
+        return JSONResponse(status_code=503, content={"detail": str(exc)}, headers={"Retry-After": "1"})
 
     @api.exception_handler(TimeoutError)
     async def command_timeout(request: Request, exc: TimeoutError) -> JSONResponse:
@@ -351,7 +414,7 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
     )
     async def get_monitor_snapshot(monitor_id: str, snap_id: str, engine: Engine = Depends(get_engine)) -> Response:
         """Returns a captured risky-moment snapshot as a JPEG image."""
-        jpeg = engine.monitor_snapshot(monitor_id, snap_id)
+        jpeg = await engine.monitor_snapshot(monitor_id, snap_id)
         if jpeg is None:
             raise HTTPException(404, f"no snapshot {snap_id!r} for monitor {monitor_id!r}")
         return Response(jpeg, media_type="image/jpeg")
@@ -388,7 +451,10 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
 
     @api.patch("/printers/{printer_id}", operation_id="update_printer", tags=["manage"])
     async def update_printer(printer_id: str, body: PrinterFields, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
-        """Updates a printer's name or connection details."""
+        """Updates a printer's name or connection details.
+
+        A secret config field left out or blank keeps its stored value, and null clears it.
+        """
         await engine.request({"cmd": "printer.update", "id": printer_id, "patch": body.model_dump(exclude_none=True)})
         return _find(public_state(engine)["printers"], printer_id, "printer")
 
@@ -481,13 +547,11 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
             raise HTTPException(404, f"no frame available for camera {camera_id!r}")
         return Response(jpeg, media_type="image/jpeg")
 
-    @api.post("/classify", operation_id="classify_frame", tags=["read"])
-    async def classify_frame(
-        image: Annotated[bytes, Body(media_type="image/jpeg")],
-        engine: Engine = Depends(get_engine),
-    ) -> dict[str, Any]:
+    @api.post("/classify", operation_id="classify_frame", tags=["read"], openapi_extra=FRAME_BODY)
+    async def classify_frame(request: Request, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
         """Classifies a supplied JPEG frame - the model's verdict without a registered camera."""
-        return await engine.classify(image)
+        async with api.state.classifying.turn():
+            return await engine.classify(b"".join([chunk async for chunk in capped(request.stream(), MAX_FRAME_BYTES)]))
 
     @api.post("/cameras", operation_id="add_camera", tags=["manage"], response_model=list[CameraOut])
     async def add_camera(body: CameraCreate, engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
@@ -524,12 +588,15 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
 
     @api.get("/events", operation_id="recent_events", tags=["read"])
     async def recent_events(engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
-        """Returns recent alerts, warnings, device changes and errors."""
+        """Returns recent alerts, warnings and errors."""
         return engine.recent_events()
 
     @api.patch("/settings", operation_id="update_settings", tags=["manage"])
     async def update_settings(body: SettingsPatch, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
-        """Updates engine settings such as configured notifiers."""
+        """Updates engine settings such as configured notifiers.
+
+        A notifier secret or the MQTT password left out or blank keeps its stored value, and null clears it.
+        """
         await engine.request({"cmd": "settings.update", "patch": body.model_dump(exclude_none=True)})
         return public_state(engine)["settings"]
 

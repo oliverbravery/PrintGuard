@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from .bounds import clamp
+
 if TYPE_CHECKING:
     from .registry import PrinterRegistry
 
@@ -24,8 +26,14 @@ MONITOR_DEFAULTS: dict[str, Any] = {
 }
 
 STANDBY_STATUSES = ("idle", "paused", "error")
+ON_DEFECT = ("none", "pause", "cancel")
 
-_CLAMPS = {"threshold": (0.05, 1.0), "consecutive": (1, 30), "cooldown_s": (0, 600)}
+# A score only approaches 1, and of the failure frames the model was trained
+# on one in seven passes 0.95 and one in seventy 0.99, so a threshold above
+# this would switch a monitor off without saying so.
+THRESHOLD_MAX = 0.95
+
+_CLAMPS = {"threshold": (0.05, THRESHOLD_MAX), "consecutive": (1, 30), "cooldown_s": (0, 600)}
 
 
 def monitor_watching(monitor: dict[str, Any], printers: "PrinterRegistry") -> bool:
@@ -44,11 +52,6 @@ def monitor_watching(monitor: dict[str, Any], printers: "PrinterRegistry") -> bo
     return printer is None or printer.reported_status not in STANDBY_STATUSES
 
 
-def _clamp(key: str, value: float) -> float:
-    low, high = _CLAMPS[key]
-    return max(low, min(high, value))
-
-
 def sanitise_monitor(monitor_id: str, patch: dict[str, Any], base: dict[str, Any] | None = None) -> dict[str, Any]:
     """Merges a monitor patch over defaults or an existing record.
 
@@ -59,17 +62,45 @@ def sanitise_monitor(monitor_id: str, patch: dict[str, Any], base: dict[str, Any
 
     Returns:
         A complete, validated monitor record.
+
+    Raises:
+        ValueError: If the patch names a setting a monitor does not have, the
+            threshold, streak or cooldown is not a finite number, or another
+            value is not of the kind its setting takes.
     """
+    unknown = sorted(set(patch) - set(MONITOR_DEFAULTS))
+    if unknown:
+        raise ValueError(f"a monitor has no {unknown[0]} setting")
     record = {**(base or MONITOR_DEFAULTS), **patch, "id": monitor_id}
-    record["name"] = str(record["name"]).strip() or "Monitor"
-    record["threshold"] = _clamp("threshold", float(record["threshold"]))
-    record["consecutive"] = int(_clamp("consecutive", int(record["consecutive"])))
-    record["cooldown_s"] = int(_clamp("cooldown_s", int(record["cooldown_s"])))
-    record["enabled"] = bool(record["enabled"])
-    record["notify"] = bool(record["notify"])
-    if record["on_defect"] not in ("none", "pause", "cancel"):
-        record["on_defect"] = "none"
+    for key in ("name", "camera_id", "printer_id"):
+        if not isinstance(record[key], str):
+            raise ValueError(f"a monitor's {key} is text")
+    for key in ("enabled", "notify"):
+        if not isinstance(record[key], bool):
+            raise ValueError(f"a monitor's {key} is true or false")
+    if record["on_defect"] not in ON_DEFECT:
+        raise ValueError(f"on_defect is one of {', '.join(ON_DEFECT)}")
+    record["name"] = record["name"].strip() or "Monitor"
+    record["threshold"] = clamp("threshold", record["threshold"], *_CLAMPS["threshold"])
+    record["consecutive"] = int(clamp("consecutive", record["consecutive"], *_CLAMPS["consecutive"]))
+    record["cooldown_s"] = int(clamp("cooldown_s", record["cooldown_s"], *_CLAMPS["cooldown_s"]))
     return record
+
+
+def stored_monitor(record: dict[str, Any]) -> dict[str, Any]:
+    """Reads a monitor back from the state store, leaving out a setting a later version retired.
+
+    A monitor with no printer, which an earlier version stored as null, has an
+    empty printer id.
+
+    Raises:
+        KeyError: If the record has no id.
+        ValueError: If a value is not of the kind its setting takes.
+    """
+    patch = {key: record[key] for key in MONITOR_DEFAULTS if key in record}
+    if "printer_id" in patch and patch["printer_id"] is None:
+        patch["printer_id"] = ""
+    return sanitise_monitor(record["id"], patch)
 
 
 def persisted_monitor(record: dict[str, Any]) -> dict[str, Any]:

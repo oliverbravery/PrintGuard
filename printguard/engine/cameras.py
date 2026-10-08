@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
+import re
+import socket
+import string
+import sys
 from typing import Any
 from urllib.parse import urlsplit
+
+from .bounds import clamp
+from .urls import DEFAULT_PORTS
 
 _WEBRTC_SCHEMES = ("webrtc", "whep", "wheps", "whip", "whips")
 _WHEP_SCHEMES = ("whep", "wheps")
 _WEBRTC_PATH_SEGMENTS = frozenset({"webrtc", "whep", "whip"})
+_DEFAULT_PORTS = {**DEFAULT_PORTS, "rtmp": 1935, "rtmps": 443, "whep": 80, "wheps": 443}
+_UNRESERVED = frozenset(string.ascii_letters + string.digits + "-._~")
+_IPV4_SHORTHAND = re.compile(r"(0x[0-9a-f]+|\d+)(\.(0x[0-9a-f]+|\d+)){0,3}")
 
 
 def webrtc_endpoint(url: str) -> bool:
@@ -34,6 +45,83 @@ def whep_endpoint(url: str) -> bool:
     return parsed.scheme in ("", "http", "https") and parsed.path.rstrip("/").rsplit("/", 1)[-1].lower() == "whep"
 
 
+def tidy_stream_url(url: str) -> str:
+    """Writes a stream address the way it opens, since a space around it or a capital in its scheme opens nothing.
+
+    Args:
+        url: The address as it was typed or pasted.
+
+    Returns:
+        It without the whitespace around it and with its scheme in lower case.
+    """
+    scheme, separator, rest = url.strip().partition("://")
+    return f"{scheme.lower()}{separator}{rest}" if separator else scheme
+
+
+def _plain_percent_escapes(text: str) -> str:
+    """Writes each escape the way one spelling of it is: a letter or digit decoded, the rest in capitals."""
+
+    def decode(escape: re.Match[str]) -> str:
+        character = chr(int(escape.group()[1:], 16))
+        return character if character in _UNRESERVED else escape.group().upper()
+
+    return re.sub(r"%[0-9a-fA-F]{2}", decode, text)
+
+
+def _plain_host(host: str) -> str:
+    """A host with the spellings that name one machine written one way.
+
+    Args:
+        host: A host as ``urlsplit`` hands it back: lower case, without brackets.
+
+    Returns:
+        It without a trailing dot, a number-form IPv4 address such as ``127.1``
+        written out in full, and an IPv6 address in its compressed form.
+    """
+    host = host.rstrip(".")
+    try:
+        if _IPV4_SHORTHAND.fullmatch(host):
+            return socket.inet_ntoa(socket.inet_aton(host))
+        return ipaddress.IPv6Address(host).compressed
+    except (OSError, ValueError):
+        return host
+
+
+def same_stream(url: str) -> str:
+    """The part of a stream address that says which stream it is, for telling two addresses apart.
+
+    Args:
+        url: A stream address.
+
+    Returns:
+        It tidied and written one way however it was typed: without a
+        fragment, credentials, a port that is the scheme's own or a
+        trailing slash, dot or bare ``?``, with its host in lower case and its
+        query parameters in order, and with the escapes that spell a letter or
+        digit decoded. A path keeps its case, since a server tells them apart.
+        A WHEP endpoint is written with the ``whep`` or ``wheps`` scheme
+        MediaMTX pulls it with, however it was typed. An address that cannot
+        be read as a URL stands for itself, tidied.
+    """
+    tidy = tidy_stream_url(url).partition("#")[0]
+    try:
+        parts = urlsplit(tidy)
+        port = parts.port
+    except ValueError:
+        return tidy
+    if not parts.netloc:
+        return tidy
+    scheme = parts.scheme
+    if whep_endpoint(tidy):
+        scheme = "wheps" if scheme in ("https", "wheps") else "whep"
+    host = _plain_host(parts.hostname or "")
+    if ":" in host:
+        host = f"[{host}]"
+    shown_port = f":{port}" if port is not None and port != _DEFAULT_PORTS.get(scheme) else ""
+    query = "&".join(sorted(pair for pair in parts.query.split("&") if pair))
+    return _plain_percent_escapes(f"{scheme}://{host}{shown_port}{parts.path.rstrip('/')}{'?' + query if query else ''}")
+
+
 def declared_camera_id(device_id: str) -> str:
     """The id a device declared by the deployment registers under.
 
@@ -55,40 +143,32 @@ CAMERA_DEFAULTS: dict[str, Any] = {
     "sharpness": 0.0,
     "crop": None,
     "rotation": 0,
+    "detect_fps": 60.0,
 }
 
-_CLAMP = {"brightness": (0.25, 2.0), "contrast": (0.25, 2.0), "sharpness": (0.0, 2.0)}
+_CLAMP = {"brightness": (0.25, 2.0), "contrast": (0.25, 2.0), "sharpness": (0.0, 2.0), "detect_fps": (0.1, 60.0)}
+_CROP_MIN = 0.01
 _ROTATIONS = (0, 90, 180, 270)
-
-
-def _clamp(key: str, value: float) -> float:
-    low, high = _CLAMP[key]
-    return max(low, min(high, value))
 
 
 def _sanitise_crop(raw: Any) -> dict[str, float] | None:
     if raw is None:
         return None
     if not isinstance(raw, dict):
-        return None
-    try:
-        x = max(0.0, min(1.0, float(raw.get("x", 0))))
-        y = max(0.0, min(1.0, float(raw.get("y", 0))))
-        w = max(0.01, min(1.0 - x, float(raw.get("w", 1))))
-        h = max(0.01, min(1.0 - y, float(raw.get("h", 1))))
-    except (TypeError, ValueError):
-        return None
+        raise ValueError("a crop holds x, y, w and h, each a share of the frame")
+    x = clamp("crop x", raw.get("x", 0), 0.0, 1.0 - _CROP_MIN)
+    y = clamp("crop y", raw.get("y", 0), 0.0, 1.0 - _CROP_MIN)
+    w = clamp("crop w", raw.get("w", 1), _CROP_MIN, 1.0 - x)
+    h = clamp("crop h", raw.get("h", 1), _CROP_MIN, 1.0 - y)
     if x == 0 and y == 0 and w == 1 and h == 1:
         return None
     return {"x": x, "y": y, "w": w, "h": h}
 
 
 def _sanitise_rotation(raw: Any) -> int:
-    try:
-        rotation = int(raw) % 360
-    except (TypeError, ValueError):
-        return 0
-    return rotation if rotation in _ROTATIONS else 0
+    if isinstance(raw, bool) or raw not in _ROTATIONS:
+        raise ValueError("rotation is 0, 90, 180 or 270")
+    return int(raw)
 
 
 def sanitise_camera(camera_id: str, patch: dict[str, Any], base: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -101,13 +181,70 @@ def sanitise_camera(camera_id: str, patch: dict[str, Any], base: dict[str, Any] 
 
     Returns:
         A complete, validated camera settings record.
+
+    Raises:
+        ValueError: If the patch names a setting a camera does not have, a
+            tuning value or a side of the crop is not a finite number, or the
+            name, crop or rotation is not of the kind it takes.
     """
+    unknown = sorted(set(patch) - set(CAMERA_DEFAULTS) - {"name"})
+    if unknown:
+        raise ValueError(f"a camera has no {unknown[0]} setting")
     record = {**(base or CAMERA_DEFAULTS), **patch, "id": camera_id}
-    if "name" in patch or base:
-        record["name"] = str(record.get("name", "Camera")).strip() or "Camera"
-    record["brightness"] = _clamp("brightness", float(record["brightness"]))
-    record["contrast"] = _clamp("contrast", float(record["contrast"]))
-    record["sharpness"] = _clamp("sharpness", float(record["sharpness"]))
+    if "name" in patch:
+        if not isinstance(patch["name"], str):
+            raise ValueError("a camera's name is text")
+        record["name"] = patch["name"].strip() or "Camera"
+    for key in ("brightness", "contrast", "sharpness", "detect_fps"):
+        record[key] = clamp(key, record[key], *_CLAMP[key])
     record["crop"] = _sanitise_crop(record.get("crop"))
     record["rotation"] = _sanitise_rotation(record.get("rotation"))
     return record
+
+
+def sanitise_source(source: Any) -> dict[str, Any]:
+    """Checks that a camera source is one the hub can save and read back at the next start.
+
+    Args:
+        source: The source as a command or the state store holds it.
+
+    Returns:
+        The same source.
+
+    Raises:
+        ValueError: If it is not a record with a kind, or its device id, path
+            or address is not text.
+    """
+    if not isinstance(source, dict) or not isinstance(source.get("kind"), str) or not all(isinstance(source.get(key, ""), str) for key in ("device_id", "path", "url")):
+        raise ValueError("a camera's source has a kind, and its device, path and address are text")
+    return source
+
+
+def stored_camera(record: dict[str, Any]) -> dict[str, Any]:
+    """Reads a camera back from the state store, with its tuning as a command would have left it.
+
+    Args:
+        record: One camera as ``Camera.persisted`` wrote it.
+
+    Returns:
+        The fields a ``Camera`` is built from.
+
+    Raises:
+        KeyError: If the record has no id, name, source or frame rate.
+        ValueError: If a value is not of the kind its setting takes.
+    """
+    source = sanitise_source(record["source"])
+    if not isinstance(record["name"], str):
+        raise ValueError("its name is text")
+    printer_id, declared = record.get("printer_id"), record.get("declared", False)
+    if not (printer_id is None or isinstance(printer_id, str)) or not isinstance(declared, bool):
+        raise ValueError("its printer is an id and declared is true or false")
+    tuning = sanitise_camera(record["id"], {key: record[key] for key in CAMERA_DEFAULTS if key in record})
+    return {
+        **tuning,
+        "name": record["name"],
+        "source": source,
+        "printer_id": printer_id,
+        "declared": declared,
+        "max_fps": clamp("max_fps", record["max_fps"], 0.0, sys.float_info.max),
+    }

@@ -3,11 +3,12 @@
 # MediaMTX, generates a platform icon, runs PyInstaller, and packages the result
 # as a .dmg (macOS) or .zip (Windows) under dist/. The desktop app targets macOS
 # and Windows; Linux is served by the container image. Run after `uv sync`.
-# On macOS, APPLE_SIGNING_IDENTITY signs the app and disk image, and APPLE_API_KEY
-# (with APPLE_API_KEY_ID and APPLE_API_ISSUER) notarises the disk image.
+# On macOS, APPLE_SIGNING_IDENTITY signs the app and disk image, and packaging/notarise.sh
+# then notarises the disk image, so the notarisation key is never in this script's environment.
 set -euo pipefail
 
-MEDIAMTX_VERSION="${MEDIAMTX_VERSION:-1.18.2}"
+MEDIAMTX_VERSION=1.21.1
+CREATE_DMG_COMMIT=a2b71d0fda6d0df2a86dc7f67082d4d73e84c59f # v1.3.0
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 rm -rf dist build/desktop build/pyinstaller
@@ -26,8 +27,16 @@ case "$(uname -s)" in
 esac
 
 mtx="mediamtx_v${MEDIAMTX_VERSION}_${OS}_${ARCH}.${MTX_EXT}"
+case "$mtx" in
+  mediamtx_v1.21.1_darwin_arm64.tar.gz) MTX_SHA256=25e20ed41611f1f3103b8359585210b29b11b69fa0d9e11bd11b92f7bbcb42ef ;;
+  mediamtx_v1.21.1_darwin_amd64.tar.gz) MTX_SHA256=be403a36d2225668ea695cbd2c784109bc23ef9a32f886837e43c920b6818813 ;;
+  mediamtx_v1.21.1_windows_amd64.zip) MTX_SHA256=faa97974861eb75a68b5aa326c78e7e7a6f670b5ef191bace78e715130381f23 ;;
+  *) echo "no pinned checksum for ${mtx}, add it from the release's checksums.sha256" >&2; exit 1 ;;
+esac
 curl -fsSL -o "build/desktop/${mtx}" \
   "https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}/${mtx}"
+[ "$(openssl dgst -sha256 -r "build/desktop/${mtx}" | cut -d' ' -f1)" = "$MTX_SHA256" ] \
+  || { echo "${mtx} does not match its pinned checksum" >&2; exit 1; }
 if [ "$MTX_EXT" = zip ]; then
   powershell -NoProfile -Command "Expand-Archive -Path 'build/desktop/${mtx}' -DestinationPath build/desktop -Force"
 else
@@ -42,19 +51,20 @@ if [ "$OS" = darwin ]; then
   iconutil -c icns "$iconset" -o build/desktop/icon.icns
   export PRINTGUARD_ICON="$ROOT/build/desktop/icon.icns"
 elif [ "$OS" = windows ]; then
-  uv run --extra desktop python -c \
+  uv run --locked --extra desktop python -c \
     "from PIL import Image; Image.open('$ICON_SRC').save('build/desktop/icon.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
   export PRINTGUARD_ICON="$ROOT/build/desktop/icon.ico"
 fi
 
-uv run --extra desktop pyinstaller packaging/printguard.spec --noconfirm --distpath dist --workpath build/pyinstaller
+uv run --locked --extra desktop pyinstaller packaging/printguard.spec --noconfirm --distpath dist --workpath build/pyinstaller
 
 if [ "$OS" = darwin ]; then
   out="dist/PrintGuard-${LABEL}.dmg"
-  command -v create-dmg >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install create-dmg
+  git clone -q https://github.com/create-dmg/create-dmg "build/desktop/create-dmg"
+  git -C "build/desktop/create-dmg" checkout -q "$CREATE_DMG_COMMIT"
   staging="build/desktop/dmg"; rm -rf "$staging"; mkdir -p "$staging"
   cp -R dist/PrintGuard.app "$staging/"
-  create-dmg \
+  "build/desktop/create-dmg/create-dmg" \
     --volname PrintGuard \
     --volicon build/desktop/icon.icns \
     --window-size 600 400 \
@@ -66,13 +76,11 @@ if [ "$OS" = darwin ]; then
   if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
     codesign -s "$APPLE_SIGNING_IDENTITY" --timestamp "$out"
   fi
-  if [ -n "${APPLE_API_KEY:-}" ]; then
-    printf '%s' "$APPLE_API_KEY" > build/desktop/notary.p8
-    xcrun notarytool submit "$out" --key build/desktop/notary.p8 --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
-    xcrun stapler staple "$out"
-  fi
 else
   out="dist/PrintGuard-${LABEL}.zip"
+  # Explorer marks every file of a downloaded zip as from the internet, and .NET refuses
+  # to load the window's assemblies with that mark unless the exe's config allows it.
+  cp packaging/PrintGuard.exe.config dist/PrintGuard/
   powershell -NoProfile -Command "Compress-Archive -Path dist/PrintGuard -DestinationPath '$out' -Force"
 fi
 echo "$out"

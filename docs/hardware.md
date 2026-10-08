@@ -2,11 +2,11 @@
 
 # Hardware and model runtimes
 
-[Docs](README.md) · [Architecture](architecture.md) · [Printers & cameras](printers.md) · **Hardware** · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Troubleshooting](troubleshooting.md)
+[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Training frames](feedback.md) · **Hardware** · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 
-Which image to pull, how PrintGuard picks a model runtime, and how to give it a GPU or NPU.
+Which image to pull, how PrintGuard picks a model runtime, and how to give it a GPU.
 
 - [How much hardware you need](#how-much-hardware-you-need)
 - [Image variants](#image-variants)
@@ -36,7 +36,7 @@ camera's rate rather than falling behind. See
 
 ## Image variants
 
-Every release publishes three tags. All three carry the same engine and UI, and differ only
+Every release publishes three variants. All three carry the same engine and UI, and differ only
 in the acceleration runtime they bundle.
 
 | Tag | Platforms | Adds | Use it when |
@@ -45,13 +45,13 @@ in the acceleration runtime they bundle.
 | `latest-intel` | `amd64` | Intel's current GPU compute runtime | You pass `--device /dev/dri` for an Arc card, or an iGPU from Tiger Lake (11th gen) onwards |
 | `latest-nvidia` | `amd64` | TensorRT RTX execution provider and the CUDA 12 runtime | You have an RTX 30 series or newer and the NVIDIA Container Toolkit |
 
-Versioned tags exist alongside them: `X.Y.Z`, `X.Y`, and the same three suffixes, for
-example `2.3.8-intel`. Pin `X.Y` if you want patch updates without surprises.
+Each variant is also tagged `X.Y.Z` and `X.Y`, with the same suffix, for example
+`X.Y.Z-intel`. Pin `X.Y` if you want patch updates without surprises.
 
 > [!NOTE]
 > The Intel GPU compute runtime is roughly 370 MB of compiler and driver libraries that do
 > nothing unless a GPU device is passed in, which is why it lives in its own tag rather
-> than the default image. Intel **CPU** acceleration through OpenVINO is in the standard
+> than the default image. Intel CPU acceleration through OpenVINO is in the standard
 > `amd64` image and needs no extra tag.
 
 ## Choosing a variant
@@ -66,45 +66,58 @@ flowchart TD
     gpu -- "NVIDIA RTX 30+ with Container Toolkit" --> nvidia["latest-nvidia"]
 ```
 
-macOS and Windows users running the desktop app do not choose a variant, since the app
-carries the runtimes for its platform.
+If you run the desktop app on macOS or Windows you don't choose a variant, since the app
+carries the runtimes for your platform.
 
 ## Model runtimes
 
-Hub and desktop mode carry the model twice, once for each runtime, and pick between them:
+PrintGuard carries the model twice, once for each runtime, and picks between them:
 
 | Runtime | What it is | Path used |
 |---|---|---|
 | [LiteRT](https://github.com/google-ai-edge/LiteRT) | Google's on-device runtime, formerly TensorFlow Lite | Optimised CPU |
-| [ONNX Runtime](https://onnxruntime.ai) | Cross-platform runtime with pluggable execution providers | The fastest provider available on the host |
+| [ONNX Runtime](https://onnxruntime.ai) | Cross-platform runtime with pluggable execution providers | The best execution provider the host offers |
 
-**Automatic** is the default. On start, PrintGuard benchmarks both runtimes for concurrent
-throughput on the machine it is actually running on and keeps the faster one. The choice is
-logged, so `docker logs printguard` shows what won and by how much.
+**Automatic** is the default. On start, and again whenever you change the setting, PrintGuard
+benchmarks both runtimes for concurrent throughput on the machine it is actually running on and
+keeps the faster one. The log shows what won and by how much, for example:
 
-The same benchmark also decides how many frames PrintGuard infers at once. It adds workers
-while each one still pays for itself and stops at the host's real ceiling, which is not the
-core count. An accelerator serialises on one device, a runtime's Python binding may hold the
+```
+inference benchmark: Intel CPU 412.0 fps across 4 workers, LiteRT CPU 298.5 fps across 8 workers
+inference ready: Intel CPU via onnx (4 workers, 412 fps)
+```
+
+The same benchmark also decides how many frames PrintGuard infers at once. It doubles the workers
+while each step still adds a tenth to throughput and stops at the host's real ceiling, which is
+usually below the core count. An accelerator serialises on one device, a runtime's Python binding may hold the
 interpreter lock, and a container may be under a CPU quota. Measuring covers all three, and
 the result is the `workers` term the scheduler divides by latency to get
 [capacity](architecture.md#scheduling-inference).
 
 ## Execution providers by platform
 
-ONNX Runtime selects the fastest provider it can use. What is available depends on the
-platform:
+ONNX Runtime takes the first device its providers offer that can run the model, preferring a
+GPU, then an NPU, then the CPU. Nothing here sets an NPU up, so one is used only where its
+provider offers it. What is available depends on the platform:
 
 | Platform | Provider | Notes |
 |---|---|---|
 | macOS, desktop app | Core ML | Uses CPU, GPU and the Neural Engine |
-| Windows 11 24H2 or newer, desktop app | Windows ML | Installs the certified Intel, NVIDIA, AMD or Qualcomm provider on first launch. Needs the [Windows App Runtime](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads) 2.x and stays on the CPU without it |
-| Older Windows, desktop app | Optimised CPU | No provider install |
+| Windows 11 24H2 or newer, desktop app | Windows ML | Installs the certified Intel, NVIDIA, AMD or Qualcomm provider on first launch. Needs the [Windows App Runtime](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads) 2.x and uses DirectML without it |
+| Older Windows, desktop app | DirectML | Runs on the GPU through its DirectX 12 driver, with no provider install, and reads `microsoft gpu`. Stays on the CPU without a driver |
 | Linux `amd64`, standard image | OpenVINO | Intel CPU path out of the box, and the GPU needs `latest-intel` and `/dev/dri` |
 | Linux `amd64`, `latest-nvidia` | TensorRT RTX | Needs the NVIDIA Container Toolkit on the host |
-| Linux `arm64`, standard image | Optimised CPU | Raspberry Pi 4/5 and similar |
+| Linux `arm64`, standard image | ONNX Runtime's own CPU provider | No accelerator. Raspberry Pi 4/5 and similar |
 
-If no accelerator is usable, ONNX Runtime falls back to its CPU provider and PrintGuard
-keeps working.
+If no accelerator is usable, PrintGuard keeps working on the CPU. On an `amd64` image that is
+OpenVINO's CPU path, which the `latest-nvidia` image carries too, and elsewhere it is ONNX
+Runtime's own CPU provider. That covers an accelerator that is offered but can't build or run
+the model, such as a GPU out of memory or a driver the provider rejects. The log names the device
+and the reason in a warning that it `cannot run the model, so detection is not using it`, and the
+dashboard shows the same warning as a startup warning, kept until the hub restarts. **compute**
+names the device used instead. It applies with the runtime pinned
+to ONNX too. On **Automatic** the CPU path still has to beat LiteRT in the benchmark, so
+**compute** may read `litert cpu` instead.
 
 ## Intel GPU
 
@@ -114,6 +127,7 @@ Use the Intel image and pass the render device:
 docker run -d --name printguard --restart unless-stopped \
   --device /dev/dri \
   -p 8000:8000 -p 8554:8554 \
+  --add-host host.docker.internal:host-gateway \
   -v printguard:/data \
   ghcr.io/oliverbravery/printguard:latest-intel
 ```
@@ -127,14 +141,14 @@ Compose:
 ```
 
 On Unraid, set the repository to `ghcr.io/oliverbravery/printguard:latest-intel` and add
-the template's **Intel GPU** device.
+the template's **Intel GPU** device, which is under the advanced view.
 
 The image carries Intel's own current compute runtime rather than the distribution's, which
 covers Arc and Battlemage cards and every iGPU from Tiger Lake (11th gen) onwards. Intel
 provides no current driver for Gen8 to Gen11 graphics, so a pre-Tiger-Lake iGPU has no GPU
 path and inference stays on the OpenVINO CPU path.
 
-**compute** in the header names the hardware in use, so it reads `intel gpu` once the GPU
+The **compute** readout names the hardware in use, so it reads `intel gpu` once the GPU
 is running the model, and `intel cpu` while OpenVINO is on the processor. The log lists
 everything the providers offered at start:
 
@@ -155,6 +169,7 @@ on the host:
 docker run -d --name printguard --restart unless-stopped \
   --gpus all \
   -p 8000:8000 -p 8554:8554 \
+  --add-host host.docker.internal:host-gateway \
   -v printguard:/data \
   ghcr.io/oliverbravery/printguard:latest-nvidia
 ```
@@ -166,8 +181,8 @@ Compose:
     runtime: nvidia
 ```
 
-On Unraid, set the repository to the `-nvidia` tag and add `--runtime=nvidia` to **Extra
-Parameters**.
+On Unraid, set the repository to the `-nvidia` tag and add `--runtime=nvidia --gpus all` to
+**Extra Parameters**.
 
 The image asks the Container Toolkit for every GPU on the host and carries the CUDA 12
 runtime the provider needs, so the toolkit is the only thing to install. To pick one card,
@@ -176,8 +191,20 @@ PrintGuard logs which provider is unavailable and keeps running on the CPU.
 
 ## Reading and pinning the runtime
 
-The header's **compute** readout names the hardware the model is running on, for example
-`intel gpu`, `nvidia gpu` or `apple core ml`, and clicking it opens the setting.
+The **compute** readout names the hardware the model is running on, as the provider's vendor and
+the kind of device. It sits in the header on a window 1280 pixels wide or more and in the **More**
+sheet on a phone. From 640 to 1279 pixels it is only in the Advanced tab in Settings, where it
+reads **Active compute**.
+
+| Readout | Means |
+|---|---|
+| `intel gpu`, `intel npu` | OpenVINO on that device |
+| `intel cpu` | OpenVINO on the processor, whoever made it |
+| `litert cpu` | LiteRT on the processor |
+| `apple core ml` | Core ML on a Mac, which shares the model between the CPU, GPU and Neural Engine itself |
+| `onnx cpu` | ONNX Runtime's own CPU provider, where no other provider offered a device or none of the offered ones could run the model |
+
+A Windows ML or TensorRT device is named the same way as OpenVINO's, by its provider's vendor.
 The Advanced tab in Settings offers:
 
 | Setting | Effect |

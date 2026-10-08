@@ -1,7 +1,27 @@
 import { X } from "lucide-react";
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useSyncExternalStore, type ReactNode } from "react";
 
-let openModals = 0;
+const openModals: HTMLDialogElement[] = [];
+const modalListeners = new Set<() => void>();
+
+function setOpenModals(change: () => void) {
+  change();
+  document.body.style.overflow = openModals.length ? "hidden" : "";
+  modalListeners.forEach((listener) => listener());
+}
+
+function subscribeToModals(listener: () => void) {
+  modalListeners.add(listener);
+  return () => void modalListeners.delete(listener);
+}
+
+function commitFocusedEdit() {
+  (document.activeElement as HTMLElement | null)?.blur();
+}
+
+export function useTopModal(): HTMLDialogElement | null {
+  return useSyncExternalStore(subscribeToModals, () => openModals.at(-1) ?? null);
+}
 
 export function Modal({
   onClose,
@@ -21,29 +41,44 @@ export function Modal({
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
-    // The opener is captured before `showModal` moves focus inside, and refocused on
-    // unmount: React detaches the node during the passive-effect flush, so the dialog's
-    // own focus-return has nothing to restore to by the time cleanup runs.
-    const opener = document.activeElement as HTMLElement | null;
+    const focusedBeforeShowModal = document.activeElement as HTMLElement | null;
     if (!dialog.open) dialog.showModal();
-    if (openModals++ === 0) document.body.style.overflow = "hidden";
+    setOpenModals(() => openModals.push(dialog));
 
-    const onCancel = (event: Event) => {
-      event.preventDefault();
+    const requestClose = () => {
+      commitFocusedEdit();
       onCloseRef.current();
     };
+    const onCancel = (event: Event) => {
+      if (!event.cancelable) return;
+      event.preventDefault();
+      requestClose();
+    };
+    const onClosedByBrowser = () => {
+      if (dialog.open) return;
+      dialog.showModal();
+      requestClose();
+    };
+    let pressedBackdrop = false;
+    const onPress = (event: PointerEvent) => {
+      pressedBackdrop = event.target === dialog;
+    };
     const onLightDismiss = (event: MouseEvent) => {
-      if (event.target === dialog) onCloseRef.current();
+      if (pressedBackdrop && event.target === dialog) requestClose();
     };
     dialog.addEventListener("cancel", onCancel);
+    dialog.addEventListener("close", onClosedByBrowser);
+    dialog.addEventListener("pointerdown", onPress);
     dialog.addEventListener("click", onLightDismiss);
 
     return () => {
       dialog.removeEventListener("cancel", onCancel);
+      dialog.removeEventListener("close", onClosedByBrowser);
+      dialog.removeEventListener("pointerdown", onPress);
       dialog.removeEventListener("click", onLightDismiss);
-      if (--openModals === 0) document.body.style.overflow = "";
+      setOpenModals(() => openModals.splice(openModals.indexOf(dialog), 1));
       dialog.close();
-      opener?.focus?.();
+      focusedBeforeShowModal?.focus?.();
     };
   }, []);
 
@@ -58,8 +93,11 @@ export function CloseButton({ label, onClick }: { label: string; onClick: () => 
   return (
     <button
       type="button"
-      className="-my-2 -mr-2.5 grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded text-text-2 transition-colors hover:text-accent"
-      onClick={onClick}
+      className="-my-2 -mr-2.5 grid h-10 w-10 pointer-coarse:h-11 pointer-coarse:w-11 shrink-0 cursor-pointer place-items-center rounded text-text-2 transition-colors hover:text-accent"
+      onClick={() => {
+        commitFocusedEdit();
+        onClick();
+      }}
       aria-label={label}
     >
       <X size={20} aria-hidden />
@@ -125,7 +163,7 @@ export function Sheet({
   const titleId = useId();
   return (
     <Modal onClose={onClose} variant="sheet" labelledBy={titleId}>
-      <aside className={`slide-in flex h-full w-full flex-col border-l border-line-0 bg-ink-1 ${width}`}>
+      <aside className={`sheet slide-in flex h-full w-full flex-col border-l border-line-0 bg-ink-1 ${width}`}>
         <div className="flex shrink-0 items-center gap-2.5 border-b border-line-0 px-5 py-3.5">
           {lead}
           <h2 id={titleId} className="display min-w-0 flex-1 truncate text-lg font-semibold">

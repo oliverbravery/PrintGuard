@@ -1,0 +1,14 @@
+export const FRAME_BYTES_MAX = 150 * 1024;
+export const PIXELS_MAX = 4096 * 4096;
+export const STORED_BYTES_MAX = 5 * 1024 ** 3;
+export const STORED_BYTES_WARN = 4 * 1024 ** 3;
+export const UPLOADS_PER_DAY = 1000;
+export const UPLOADS_PER_HUB = 60;
+export const UPLOADS_PER_NETWORK = 120;
+export const REGISTRATIONS_PER_NETWORK = 3;
+export const EXPIRY_DAYS = 30;
+export const EXPIRY_WARN_DAYS = 7;
+export const DAY_MS = 86_400_000;
+export const RECOUNT_GAP_MS = 3_600_000;
+export const RECOUNT_PAGES_PER_RUN = 5;
+export const RATE_PERIOD_S = 60;

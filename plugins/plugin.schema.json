@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/plugin.schema.json",
   "title": "PrintGuard plugin",
-  "description": "The manifest of a PrintGuard plugin. See https://github.com/oliverbravery/PrintGuard/blob/main/docs/plugins.md",
+  "description": "The manifest of a PrintGuard plugin. See https://github.com/oliverbravery/PrintGuard/blob/main/docs/plugin-development.md",
   "type": "object",
   "required": [
     "id",
@@ -20,6 +20,7 @@
     },
     "name": {
       "type": "string",
+      "maxLength": 80,
       "description": "Shown on the panel and in Settings. Defaults to the id."
     },
     "version": {
@@ -65,7 +66,7 @@
           },
           {
             "const": "camera:control",
-            "description": "Change any camera's picture and frame rate."
+            "description": "Change any camera's picture and detection rate."
           },
           {
             "const": "camera:manage",
@@ -226,12 +227,14 @@
         "authorize_url": {
           "type": "string",
           "format": "uri",
-          "description": "Where the user is sent to sign in."
+          "pattern": "^https://[^*]+$",
+          "description": "Where the user is sent to sign in. One https address, and one on your own network needs net:local."
         },
         "token_url": {
           "type": "string",
           "format": "uri",
-          "description": "Where the code is exchanged for tokens."
+          "pattern": "^https://[^*]+$",
+          "description": "Where the code is exchanged for tokens. One https address, and one on your own network needs net:local."
         },
         "register_url": {
           "type": "string",
@@ -242,6 +245,7 @@
         "scopes": {
           "type": "array",
           "uniqueItems": true,
+          "maxItems": 20,
           "items": {
             "type": "string"
           }
@@ -324,7 +328,7 @@
       "description": "Files it ships beside its code, each named here and sitting next to plugin.js.",
       "items": {
         "type": "string",
-        "pattern": "^[a-z0-9][a-z0-9._-]{0,39}\\.(csv|gif|jpeg|jpg|json|mp3|mp4|ogg|png|txt|wav|webm|webp)$"
+        "pattern": "^(?=.{1,40}$)[a-z0-9][a-z0-9._-]*\\.(csv|gif|jpeg|jpg|json|mp3|mp4|ogg|png|txt|wav|webm|webp)$"
       }
     },
     "urls": {
@@ -333,7 +337,7 @@
       "description": "The only addresses ctx.http and ctx.socket may reach, each a match pattern of scheme://host/path. Naming a private or loopback address needs the net:local permission as well as net.",
       "items": {
         "type": "string",
-        "pattern": "^(?P<scheme>\\*|http|https|ws|wss|rtsp|rtsps)://(?P<host>\\*|(?:\\*\\.)?[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?|\\[[0-9a-f:]+\\])(?::(?P<port>\\*|\\d{1,5}))?(?P<path>/[^\\s]*)$"
+        "pattern": "^(\\*|[hH][tT][tT][pP]|[hH][tT][tT][pP][sS]|[wW][sS]|[wW][sS][sS]|[rR][tT][sS][pP]|[rR][tT][sS][pP][sS])://(\\*|(?:\\*\\.)?[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?|\\[[0-9a-fA-F:]+\\])(?::(\\*|\\d{1,5}))?(/[^\\s]*)$"
       }
     },
     "events": {

@@ -4,8 +4,8 @@ Bambu Lab printers expose no local HTTP control surface: state and control
 travel over MQTT/TLS on port 8883, authenticated with the LAN access code.
 
 The user must enable LAN Only Mode and then Developer Mode on the printer
-(Settings > Network) - Developer Mode is what opens the MQTT channel on
-current firmware. The access code is shown on that screen; the serial
+(Settings > Network) - Developer Mode is what lets a command through on
+current firmware, while the printer reports its state without it. The access code is shown on that screen; the serial
 number is under Settings > Device.
 
 A sliced 3mf reaches the printer over FTPS on port 990, implicit TLS with the
@@ -14,10 +14,20 @@ same credentials, and the print is then started over MQTT with the
 plate. The printer's FTP server insists the data connection reuses the control
 connection's TLS session, which ftplib does not do on its own.
 
+One subscribed connection is held per printer. The X1 series reports its whole
+state every time and the P1 and A1 series only what changed, so reports are
+merged over the full one ``pushall`` returns, which is asked for once per
+connection because the P1P lags when asked often. The printer answers a command
+on the report topic with the ``sequence_id`` it was sent and a ``result``.
+
 Printer-side setup (LAN Only Mode, Developer Mode): https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode
 Protocol reference: https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md
 TLS and command shapes mirror the bambulabs_api client:
 https://github.com/acse-ci223/bambulabs_api/blob/main/bambulabs_api/mqtt_client.py
+Connection handling and the silence limit mirror ha-bambulab, which also hands
+the H2 series its file as an FTP URL and lists the X1, P1 and A1 series as the
+ones that take a path on the SD card:
+https://github.com/greghesp/ha-bambulab/tree/main/custom_components/bambu_lab
 """
 
 from __future__ import annotations
@@ -26,15 +36,20 @@ import asyncio
 import ftplib
 import hashlib
 import io
+import itertools
 import json
+import queue
+import random
 import socket
 import ssl
 import threading
-from typing import Any
+import time
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable
 
 import paho.mqtt.client as mqtt
 
-from ..gcode import plate_gcode
+from ..gcode import plate_name
 from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
 
 _PORT = 8883
@@ -44,9 +59,13 @@ _CAMERA_PORT = 6000
 _USERNAME = "bblp"
 _CONNECT_TIMEOUT_S = 5.0
 _REPLY_TIMEOUT_S = 5.0
+_STORED_REPLY_TIMEOUT_S = 60.0
+"""How long the printer may take to confirm a stored file, since it answers after flushing the whole of it to the SD card."""
 _DEADLINE_S = 12.0
-_UPLOAD_DEADLINE_S = 300.0
 _KEEPALIVE_S = 30
+_SILENCE_LIMIT_S = 60.0
+_THREADS = ThreadPoolExecutor(max_workers=16, thread_name_prefix="bambu")
+"""Every blocking call into the printer, so printers that are switched off hold these threads and never the default pool inference shares."""
 
 _STATUS_MAP = {
     "running": DeviceStatus.PRINTING,
@@ -54,13 +73,16 @@ _STATUS_MAP = {
     "pause": DeviceStatus.PAUSED,
     "idle": DeviceStatus.IDLE,
     "finish": DeviceStatus.IDLE,
-    "failed": DeviceStatus.ERROR,
+    "failed": DeviceStatus.IDLE,
 }
 
 _COMMANDS = {DeviceAction.PAUSE: "pause", DeviceAction.RESUME: "resume", DeviceAction.CANCEL: "stop"}
 _HEATER_GCODE = {"nozzle": "M104", "bed": "M140"}
 
 _PUSHALL = {"pushing": {"sequence_id": "0", "command": "pushall", "version": 1, "push_target": 1}}
+_GET_VERSION = {"info": {"sequence_id": "0", "command": "get_version"}}
+_SDCARD_URL_SERIES = ("Bambu Lab X1", "Bambu Lab P1", "Bambu Lab A1")
+"""The models handed a file as a path on the SD card. Every later one is handed an FTP URL."""
 _PROJECT_FILE = {
     "sequence_id": "0",
     "command": "project_file",
@@ -79,6 +101,145 @@ _PROJECT_FILE = {
 }
 
 
+def _tls_context() -> ssl.SSLContext:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+async def _blocking(call: Callable[..., Any], *args: Any) -> Any:
+    return await asyncio.get_running_loop().run_in_executor(_THREADS, call, *args)
+
+
+class _Session:
+    """One subscribed MQTT connection to a printer, holding its merged report."""
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        """Connects, subscribes and asks for the printer's version and full report.
+
+        Raises:
+            OSError: If the printer cannot be reached.
+            RuntimeError: If it refuses the connection or never answers it.
+        """
+        serial = str(config["serial"])
+        self._report_topic = f"device/{serial}/report"
+        self._request_topic = f"device/{serial}/request"
+        self._report: dict[str, Any] = {}
+        self._full = threading.Event()
+        self._answered = threading.Event()
+        self._refusal = ""
+        self._product = ""
+        self._versioned = threading.Event()
+        self._heard_at = time.monotonic()
+        self._echoes: dict[tuple[str, str], queue.SimpleQueue[dict[str, Any]]] = {}
+        self._sequence = itertools.count(random.randrange(100_000, 1_000_000))
+        self._client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv311)
+        self._client.connect_timeout = _CONNECT_TIMEOUT_S
+        self._client.username_pw_set(_USERNAME, str(config.get("access_code", "")))
+        self._client.tls_set_context(_tls_context())
+        self._client.on_connect = self._on_connect
+        self._client.on_disconnect = self._on_disconnect
+        self._client.on_message = self._on_message
+        self._client.connect(str(config["host"]), _PORT, keepalive=_KEEPALIVE_S)
+        self._client.loop_start()
+        if not self._answered.wait(_CONNECT_TIMEOUT_S) or self._refusal:
+            self.close()
+            raise RuntimeError(f"Bambu printer refused the connection: {self._refusal or 'no answer'}")
+
+    def lost(self) -> bool:
+        """Whether the connection dropped or the printer has gone silent on it."""
+        return not self._client.is_connected() or time.monotonic() - self._heard_at > _SILENCE_LIMIT_S
+
+    def report(self) -> dict[str, Any] | None:
+        """The merged report, or None while this connection has no full one."""
+        return dict(self._report) if self._full.wait(_REPLY_TIMEOUT_S) else None
+
+    def product(self) -> str:
+        """The model name the printer gives in its version reply, empty if it gives none."""
+        self._versioned.wait(_REPLY_TIMEOUT_S)
+        return self._product
+
+    def command(self, payload: dict[str, Any]) -> None:
+        """Publishes a command under its own sequence number and checks it was taken.
+
+        The broker's acknowledgement is required. The printer's own answer is
+        waited for and a failed one raises, while a printer that sends none is
+        taken at the broker's word.
+
+        Args:
+            payload: The request, one command under its type key.
+
+        Raises:
+            RuntimeError: If the publish is not acknowledged, or the printer
+                answers that the command failed.
+        """
+        ((kind, body),) = payload.items()
+        body = {**body, "sequence_id": str(next(self._sequence))}
+        key = (body["command"], body["sequence_id"])
+        echoes = self._echoes[key] = queue.SimpleQueue()
+        try:
+            sent = self._client.publish(self._request_topic, json.dumps({kind: body}), qos=1)
+            sent.wait_for_publish(_REPLY_TIMEOUT_S)
+            if not sent.is_published():
+                raise RuntimeError(f"Bambu printer did not acknowledge {body['command']}")
+            try:
+                echo = echoes.get(timeout=_REPLY_TIMEOUT_S)
+            except queue.Empty:
+                return
+        finally:
+            del self._echoes[key]
+        result = str(echo.get("result", ""))
+        if result.lower().startswith("fail"):
+            raise RuntimeError(f"Bambu printer refused {body['command']}: {echo.get('reason') or result}")
+
+    def close(self) -> None:
+        """Disconnects and stops the network thread."""
+        self._client.disconnect()
+        self._client.loop_stop()
+
+    def _on_connect(self, client: mqtt.Client, _userdata: Any, _flags: Any, reason_code: Any, _properties: Any) -> None:
+        if reason_code.is_failure:
+            self._refusal = str(reason_code)
+        else:
+            self._report.clear()
+            self._full.clear()
+            self._heard_at = time.monotonic()
+            client.subscribe(self._report_topic)
+            client.publish(self._request_topic, json.dumps(_GET_VERSION))
+            client.publish(self._request_topic, json.dumps(_PUSHALL))
+        self._answered.set()
+
+    def _on_disconnect(self, *_: Any) -> None:
+        self._full.clear()
+
+    def _on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
+        """Reads a report, ignoring one that is not the shape a printer sends.
+
+        paho raises what a callback raises on its network thread, which ends
+        the thread and leaves the connection looking live with nothing read.
+        """
+        try:
+            payload = json.loads(message.payload)
+            self._heard_at = time.monotonic()
+            for body in payload.values():
+                if not isinstance(body, dict):
+                    continue
+                command = body.get("command")
+                if command == "push_status":
+                    self._report.update(body)
+                    if "gcode_state" in self._report:
+                        self._full.set()
+                elif command == "get_version":
+                    self._product = next((m["product_name"] for m in body.get("module") or [] if m.get("product_name")), "")
+                    self._versioned.set()
+                elif echoes := self._echoes.get((command, body.get("sequence_id"))):
+                    echoes.put(body)
+        except (ValueError, TypeError, AttributeError):
+            return
+
+
 class BambuAdapter(IntegrationAdapter):
     """Talks to a Bambu Lab printer's local MQTT API in LAN Only Mode."""
 
@@ -87,8 +248,8 @@ class BambuAdapter(IntegrationAdapter):
     docs_url = "https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md"
     setup_url = "https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode"
     setup_hint = (
-        "On the printer, enable LAN Only Mode then Developer Mode (Settings > Network) to open the MQTT "
-        "channel. The access code is shown there; the serial number is under Settings > Device."
+        "On the printer, enable LAN Only Mode then Developer Mode (Settings > Network) so it takes "
+        "a pause. The access code is shown there; the serial number is under Settings > Device."
     )
     experimental = False
     formats = ("3mf",)
@@ -108,14 +269,22 @@ class BambuAdapter(IntegrationAdapter):
         "required": ["host", "serial", "access_code"],
     }
 
+    def __init__(self) -> None:
+        self._sessions: dict[tuple[str, str, str], _Session] = {}
+        self._session_locks: dict[tuple[str, str, str], threading.Lock] = {}
+        self._reported: set[tuple[str, str, str]] = set()
+
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
-        """Requests a full status push and normalises gcode_state.
+        """Normalises gcode_state from the printer's latest merged report.
 
         The HTTP function is unused: Bambu speaks MQTT, not HTTP. The report's
-        remaining time is in minutes.
+        remaining time is in minutes. A printer with no full report on a live
+        connection is offline. FAILED is how the printer reports a job that was
+        cancelled or gave up, and it holds that until the next job starts while
+        being as ready for one as after FINISH, so both read as idle. A fault
+        the printer stops for mid-job is reported as PAUSE.
         """
-        loop = asyncio.get_running_loop()
-        report = await asyncio.wait_for(loop.run_in_executor(None, self._pull_report, config), _DEADLINE_S)
+        report = await asyncio.wait_for(_blocking(self._pull_report, config), _DEADLINE_S)
         if not report:
             return DeviceState(DeviceStatus.OFFLINE)
         matched = _STATUS_MAP.get(str(report.get("gcode_state", "")).lower(), DeviceStatus.UNKNOWN)
@@ -132,37 +301,44 @@ class BambuAdapter(IntegrationAdapter):
         )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:
-        """Publishes a pause/resume/stop command to the request topic."""
+        """Publishes a pause/resume/stop command to the request topic.
+
+        Raises:
+            RuntimeError: If the printer does not acknowledge the command or
+                answers that it failed, as it does with Developer Mode off.
+        """
         payload = {"print": {"sequence_id": "0", "command": _COMMANDS[action], "param": ""}}
-        loop = asyncio.get_running_loop()
-        await asyncio.wait_for(loop.run_in_executor(None, self._publish, config, payload), _DEADLINE_S)
+        await asyncio.wait_for(_blocking(self._publish, config, payload), _DEADLINE_S)
 
     async def heat(self, http: HttpFn, config: dict[str, Any], heater: str, target: float) -> None:
         """Sets a heater target with the M104 or M140 line Bambu Studio sends over gcode_line."""
         payload = {"print": {"sequence_id": "0", "command": "gcode_line", "param": f"{_HEATER_GCODE[heater]} S{target:g}\n"}}
-        loop = asyncio.get_running_loop()
-        await asyncio.wait_for(loop.run_in_executor(None, self._publish, config, payload), _DEADLINE_S)
+        await asyncio.wait_for(_blocking(self._publish, config, payload), _DEADLINE_S)
 
     async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
         """Uploads a sliced 3mf to the SD card over FTPS and prints its first plate.
 
         The print carries the settings sliced into the file. Bed levelling is
         left on and the flow and vibration calibrations off, and the filament
-        comes from the external spool or the first AMS slot, since a file says
-        nothing about the AMS it was sliced against.
+        comes from the external spool, since a file says nothing about the AMS
+        it was sliced against. The X1, P1 and A1 series, and a printer that
+        does not name its model, are handed the file as a path on the SD card
+        and every other model as an FTP URL. The upload has no
+        deadline of its own, since a large file to a slow printer takes as
+        long as it takes and each step of it times out on its socket.
         """
-        plate, _ = plate_gcode(data)
-        loop = asyncio.get_running_loop()
-        await asyncio.wait_for(loop.run_in_executor(None, self._upload, config, filename, data), _UPLOAD_DEADLINE_S)
+        plate = await asyncio.to_thread(plate_name, data)
+        await _blocking(self._upload, config, filename, data)
+        product = await asyncio.wait_for(_blocking(self._product, config), _DEADLINE_S)
         payload = {
             "print": {
                 **_PROJECT_FILE,
-                "param": f"Metadata/plate_{plate}.gcode",
-                "url": f"file:///sdcard/{filename}",
+                "param": plate,
+                "url": f"file:///sdcard/{filename}" if not product or product.startswith(_SDCARD_URL_SERIES) else f"ftp:///{filename}",
                 "subtask_name": filename.rsplit(".", 1)[0],
             }
         }
-        await asyncio.wait_for(loop.run_in_executor(None, self._publish, config, payload), _DEADLINE_S)
+        await asyncio.wait_for(_blocking(self._publish, config, payload), _DEADLINE_S)
 
     async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
         """Exposes the chamber camera over whichever transport the model serves.
@@ -177,20 +353,20 @@ class BambuAdapter(IntegrationAdapter):
         access_code = str(config.get("access_code", ""))
         if not host:
             return []
-        loop = asyncio.get_running_loop()
-        fingerprint = await loop.run_in_executor(None, self._rtsps_fingerprint, host)
+        fingerprint = await _blocking(self._rtsps_fingerprint, host)
         if fingerprint:
             url = f"rtsps://{_USERNAME}:{access_code}@{host}:{_RTSP_PORT}/streaming/live/1"
             return [{"key": "chamber", "name": "Chamber camera", "source": {"kind": "url", "url": url, "fingerprint": fingerprint}}]
-        if await loop.run_in_executor(None, self._port_open, host, _CAMERA_PORT):
+        if await _blocking(self._port_open, host, _CAMERA_PORT):
             return [{"key": "chamber", "name": "Chamber camera", "source": {"kind": "bambu", "host": host, "access_code": access_code}}]
         return []
 
+    async def close(self, config: dict[str, Any] | None = None) -> None:
+        """Disconnects one printer's MQTT session, or every session."""
+        await _blocking(self._drop, config)
+
     def _rtsps_fingerprint(self, host: str) -> str | None:
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
+        context = _tls_context()
         try:
             with socket.create_connection((host, _RTSP_PORT), timeout=_CONNECT_TIMEOUT_S) as raw:
                 with context.wrap_socket(raw, server_hostname=host) as tls:
@@ -206,15 +382,8 @@ class BambuAdapter(IntegrationAdapter):
         except OSError:
             return False
 
-    def _tls_context(self):
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-        return context
-
     def _upload(self, config: dict[str, Any], filename: str, data: bytes) -> None:
-        context = self._tls_context()
+        context = _tls_context()
 
         class ImplicitFtps(ftplib.FTP_TLS):
             """FTPS with TLS from the first byte, the data channel on the control channel's session.
@@ -239,6 +408,22 @@ class BambuAdapter(IntegrationAdapter):
                 conn, size = ftplib.FTP.ntransfercmd(self, cmd, rest)
                 return context.wrap_socket(conn, server_hostname=self.host, session=self.sock.session), size
 
+            def storbinary(self, cmd: str, fp: Any, blocksize: int = 8192, callback: Any = None, rest: Any = None) -> str:
+                """Stores a file, closing the data channel without waiting on its TLS shutdown.
+
+                ftplib unwraps TLS first, which the printer does not answer, so
+                the wait times out after the file is stored. ha-bambulab and
+                bambulabs_api both close the socket instead. The printer confirms
+                the file once it has written it, which takes longer than any
+                other reply on the control channel.
+                """
+                self.voidcmd("TYPE I")
+                with self.transfercmd(cmd, rest) as conn:
+                    while chunk := fp.read(blocksize):
+                        conn.sendall(chunk)
+                self.sock.settimeout(_STORED_REPLY_TIMEOUT_S)
+                return self.voidresp()
+
         ftps = ImplicitFtps(context=context, timeout=_CONNECT_TIMEOUT_S)
         ftps.connect(str(config["host"]), _FTP_PORT)
         try:
@@ -248,46 +433,82 @@ class BambuAdapter(IntegrationAdapter):
         finally:
             ftps.close()
 
-    def _client(self, config: dict[str, Any]):
-        context = self._tls_context()
-        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv311)
-        client.connect_timeout = _CONNECT_TIMEOUT_S
-        client.username_pw_set(_USERNAME, str(config.get("access_code", "")))
-        client.tls_set_context(context)
-        client.connect(str(config["host"]), _PORT, keepalive=_KEEPALIVE_S)
-        return client
+    def connection_key(self, config: dict[str, Any]) -> tuple[str, str, str]:
+        """A session is one printer's serial at one host under one access code."""
+        return str(config.get("host")), str(config.get("serial")), str(config.get("access_code", ""))
+
+    def _session(self, config: dict[str, Any]) -> _Session:
+        """Returns the printer's session, opening one when there is none or it was lost.
+
+        Raises:
+            RuntimeError: If another caller has been opening the session for
+                the connect timeout, so calls never queue behind a host that
+                accepts and then says nothing.
+        """
+        key = self.connection_key(config)
+        lock = self._session_locks.setdefault(key, threading.Lock())
+        if not lock.acquire(timeout=_CONNECT_TIMEOUT_S):
+            raise RuntimeError("Bambu printer is not answering the connection")
+        try:
+            session = self._sessions.get(key)
+            if session is not None and session.lost():
+                self._sessions.pop(key).close()
+                session = None
+            if session is None:
+                session = self._sessions[key] = _Session(config)
+            return session
+        finally:
+            lock.release()
+
+    def _drop(self, config: dict[str, Any] | None, only: _Session | None = None) -> None:
+        """Closes one printer's session, or every session.
+
+        Args:
+            config: The printer, or None for all of them.
+            only: The session the caller was using. One opened since then is
+                another caller's and is left alone.
+        """
+        keys = [self.connection_key(config)] if config is not None else list(self._sessions)
+        for key in keys:
+            with self._session_locks.setdefault(key, threading.Lock()):
+                if only is not None and self._sessions.get(key) is not only:
+                    continue
+                if only is None:
+                    self._reported.discard(key)
+                session = self._sessions.pop(key, None)
+                if session is not None:
+                    session.close()
 
     def _pull_report(self, config: dict[str, Any]) -> dict[str, Any] | None:
-        serial = str(config["serial"])
-        report: dict[str, Any] = {}
-        received = threading.Event()
+        """Reads the report, or raises when a connection that was accepted has never had one from the printer.
 
-        def on_connect(client, *_):
-            client.subscribe(f"device/{serial}/report")
-            client.publish(f"device/{serial}/request", json.dumps(_PUSHALL))
+        The broker accepts any serial, and only the printer's own reports show whether it is the right one.
+        """
+        report = self._session(config).report()
+        key = self.connection_key(config)
+        if report is not None:
+            self._reported.add(key)
+        elif key not in self._reported:
+            raise RuntimeError("Bambu printer accepted the connection but has sent nothing, so check the serial number")
+        return report
 
-        def on_message(_client, _userdata, message):
-            try:
-                payload = json.loads(message.payload).get("print") or {}
-            except ValueError:
-                return
-            if "gcode_state" in payload:
-                report.update(payload)
-                received.set()
-
-        client = self._client(config)
-        client.on_connect = on_connect
-        client.on_message = on_message
-        client.loop_start()
-        received.wait(_REPLY_TIMEOUT_S)
-        client.loop_stop()
-        client.disconnect()
-        return report or None
+    def _product(self, config: dict[str, Any]) -> str:
+        return self._session(config).product()
 
     def _publish(self, config: dict[str, Any], payload: dict[str, Any]) -> None:
-        client = self._client(config)
-        client.loop_start()
-        info = client.publish(f"device/{config['serial']}/request", json.dumps(payload), qos=1)
-        info.wait_for_publish(_REPLY_TIMEOUT_S)
-        client.loop_stop()
-        client.disconnect()
+        """Sends a command on the printer's session, dropping the session if it fails.
+
+        Raises:
+            RuntimeError: If connecting left too little of the deadline the
+                caller waits for to hear the broker and the printer out, so a
+                command reported as timed out is never sent.
+        """
+        give_up = time.monotonic() + _DEADLINE_S - 2 * _REPLY_TIMEOUT_S
+        session = self._session(config)
+        if time.monotonic() > give_up:
+            raise RuntimeError("Bambu printer took too long to connect")
+        try:
+            session.command(payload)
+        except Exception:
+            self._drop(config, session)
+            raise

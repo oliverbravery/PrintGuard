@@ -14,22 +14,24 @@ from __future__ import annotations
 import html
 import io
 import logging
+import logging.handlers
 import multiprocessing
 import os
+import plistlib
 import signal
 import socket
 import sys
 import threading
 import time
+import webbrowser
 from importlib import metadata
 from pathlib import Path
 from string import Template
 from typing import Any
 
+import httpx
 import platformdirs
-import pystray
 import uvicorn
-import webview
 from PIL import Image
 
 from ..engine import logs
@@ -43,6 +45,8 @@ READY_TIMEOUT_S = 30.0
 STOP_TIMEOUT_S = 10.0
 FAILURE_LOG_LINES = 30
 WIN_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+TRANSIENT_LOCATIONS = ("/Volumes/", "/AppTranslocation/")
+WEBVIEW2_DOWNLOAD = "https://developer.microsoft.com/microsoft-edge/webview2/"
 
 FAILURE_PAGE = Template("""<!doctype html>
 <meta charset="utf-8">
@@ -65,16 +69,22 @@ dealt with. If the log does not explain it, report it with the log attached at
 <pre>$log_tail</pre>
 """)
 
-PLIST_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-\t<key>Label</key><string>{label}</string>
-\t<key>ProgramArguments</key><array>{args}</array>
-\t<key>RunAtLoad</key><true/>
-</dict>
-</plist>
-"""
+STARTING_PAGE = Template("""<!doctype html>
+<meta charset="utf-8">
+<title>PrintGuard</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.6 -apple-system, "Segoe UI", system-ui, sans-serif; margin: 0; padding: 40px 44px; }
+  h1 { font-size: 19px; margin: 0 0 14px; }
+  p { margin: 0 0 14px; max-width: 62ch; }
+  code { font-size: 13px; }
+</style>
+<h1>PrintGuard is still starting</h1>
+<p>Its server is taking longer than usual to come up, which a first launch can do while it sets up
+the graphics card. This window opens the dashboard as soon as it answers.</p>
+<p>If it stays here for more than a few minutes, the reason is at the end of the log at
+<code>$log</code>.</p>
+""")
 
 
 def _configure_environment() -> None:
@@ -155,8 +165,16 @@ def _enable_wkwebview_media() -> None:
             decision_handler(1)
 
 
-def _run_webview(**contents: Any) -> None:
+def _run_webview(
+    log_records: multiprocessing.Queue[logging.LogRecord], awaiting: int | None = None, **contents: Any
+) -> None:
     """Child-process entry point that shows the hub, or why it is not there, in a native window.
+
+    Args:
+        log_records: Where this process's log records go, for the tray process to write.
+        awaiting: The port of a hub that is still starting, whose dashboard replaces
+            the window's contents once it answers.
+        **contents: What the window shows, a ``url`` or a page of ``html``.
 
     The window owns its process's main thread, so it never contends with the
     tray's, and closing it ends only this process. The webview must keep its
@@ -168,17 +186,80 @@ def _run_webview(**contents: Any) -> None:
     ``PRINTGUARD_DEBUG_PORT`` opens the Windows webview to the DevTools protocol on
     that port, which is how CI drives the window. WebView2 ignores its own
     environment switch for this, since pywebview sets the browser arguments itself.
+
+    Windows without the WebView2 runtime would draw the window with Internet Explorer's
+    engine, which cannot run the dashboard, so the dashboard opens in the browser there,
+    once it answers when the hub is still starting.
     """
-    if sys.platform == "darwin":
-        _enable_wkwebview_media()
-    webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
-    webview.settings["REMOTE_DEBUGGING_PORT"] = os.environ.get("PRINTGUARD_DEBUG_PORT")
-    webview.create_window(APP_NAME, width=1280, height=820, **contents)
-    webview.start(private_mode=False, storage_path=os.path.join(os.environ["DATA_DIR"], "webview"))
+    root = logging.getLogger()
+    root.addHandler(logging.handlers.QueueHandler(log_records))
+    root.setLevel(logging.INFO)
+    try:
+        import webview
+
+        if sys.platform == "darwin":
+            _enable_wkwebview_media()
+        if sys.platform == "win32" and ("url" in contents or awaiting):
+            from webview.platforms import winforms
+
+            if not winforms.is_chromium:
+                logger.warning(
+                    "WebView2 is not installed, so the dashboard is opening in the browser; "
+                    "install it from %s for the app window",
+                    WEBVIEW2_DOWNLOAD,
+                )
+                if awaiting:
+                    _wait_until_answering(awaiting, threading.Event())
+                webbrowser.open(contents.get("url") or _webview_url(awaiting))
+                return
+        webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+        webview.settings["ALLOW_DOWNLOADS"] = True
+        webview.settings["REMOTE_DEBUGGING_PORT"] = os.environ.get("PRINTGUARD_DEBUG_PORT")
+        window = webview.create_window(APP_NAME, width=1280, height=820, **contents)
+        follow_up = (_open_when_serving, (window, awaiting)) if awaiting else ()
+        webview.start(*follow_up, private_mode=False, storage_path=os.path.join(os.environ["DATA_DIR"], "webview"))
+    except Exception:
+        logger.exception("the window could not open")
 
 
 def _webview_url(port: int) -> str:
     return f"http://localhost:{port}/?v={metadata.version('printguard')}"
+
+
+def _starting_page() -> str:
+    """The page shown while the hub's server is still coming up."""
+    return STARTING_PAGE.substitute(log=html.escape(os.environ["LOG_FILE"]))
+
+
+def _wait_until_answering(port: int, abandoned: threading.Event, timeout: float | None = None) -> bool:
+    """Waits for a PrintGuard hub to answer on a port.
+
+    Whatever else answers on the port is not waited for, since a window opened on it would
+    show that program.
+
+    Args:
+        port: The port the hub serves on.
+        abandoned: Set to stop waiting.
+        timeout: Seconds to wait, or None to wait until it answers.
+
+    Returns:
+        True once the hub answers, False if the wait was abandoned or ran out first.
+    """
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while not abandoned.wait(1.0):
+        if _hub_running(port):
+            return True
+        if deadline is not None and time.monotonic() >= deadline:
+            break
+    return False
+
+
+def _open_when_serving(window: Any, port: int) -> None:
+    """Swaps the starting page for the dashboard once the hub answers, giving up when the window closes."""
+    closed = threading.Event()
+    window.events.closed += closed.set
+    if _wait_until_answering(port, closed):
+        window.load_url(_webview_url(port))
 
 
 def _failure_page() -> str:
@@ -189,17 +270,25 @@ def _failure_page() -> str:
 
 
 class _Window:
-    """Shows the hub window in a child process spawned from the tray."""
+    """Shows the hub window in a child process spawned from the tray.
+
+    The window process has no log of its own, so its records come back over a queue
+    and are written by this process's handlers.
+    """
 
     def __init__(self, **contents: Any) -> None:
         self._contents = contents
         self._context = multiprocessing.get_context("spawn")
         self._process: multiprocessing.process.BaseProcess | None = None
+        self._log_records = self._context.Queue()
+        logging.handlers.QueueListener(self._log_records, *logging.getLogger().handlers).start()
 
     def open(self) -> None:
         """Opens the window, reusing the existing one if it is still up."""
         if self._process is None or not self._process.is_alive():
-            self._process = self._context.Process(target=_run_webview, kwargs=self._contents, daemon=True)
+            self._process = self._context.Process(
+                target=_run_webview, args=(self._log_records,), kwargs=self._contents, daemon=True
+            )
             self._process.start()
 
     def close(self) -> None:
@@ -208,31 +297,107 @@ class _Window:
             self._process.terminate()
 
 
+def _listening_socket(port: int) -> socket.socket:
+    """Binds the hub's port so that no other program can share it.
+
+    uvicorn binds with ``SO_REUSEADDR``, which on Windows lets it take a port another
+    program is already serving, and both then report that they are listening.
+
+    Args:
+        port: The port the hub serves on.
+
+    Returns:
+        The bound socket for uvicorn to serve on.
+
+    Raises:
+        OSError: If another program holds the port.
+    """
+    listener = socket.socket()
+    listener.setsockopt(
+        socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE if sys.platform == "win32" else socket.SO_REUSEADDR, 1
+    )
+    listener.bind(("0.0.0.0", port))
+    return listener
+
+
+def _health(port: int) -> Any:
+    """What localhost answers on a port's health route, or None if nothing sensible does."""
+    try:
+        return httpx.get(f"http://localhost:{port}/api/health", trust_env=False).json()
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+def _hub_running(port: int) -> bool:
+    """Whether a PrintGuard hub, of any version, already serves a port."""
+    health = _health(port)
+    return isinstance(health, dict) and health.get("ok") is True and "version" in health
+
+
 class _Server:
-    """Runs the hub's uvicorn server on a background daemon thread."""
+    """Runs the hub's uvicorn server on a background daemon thread.
+
+    Attributes:
+        port_held: True once another program was found holding the port the server needs.
+    """
 
     def __init__(self, port: int) -> None:
-        from .app import create_app
+        from .app import SHUTDOWN_GRACE_S, WEBSOCKET_MAX_BYTES, create_app
 
         self._port = port
-        config = uvicorn.Config(create_app(), host="0.0.0.0", port=port, log_config=None, access_log=False)
-        self._server = uvicorn.Server(config)
-        self._server.install_signal_handlers = lambda: None
-        self._thread = threading.Thread(target=self._server.run, daemon=True)
+        self._server = uvicorn.Server(
+            uvicorn.Config(
+                create_app(), log_config=None, access_log=False, ws_max_size=WEBSOCKET_MAX_BYTES, timeout_graceful_shutdown=SHUTDOWN_GRACE_S
+            )
+        )
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self.port_held = False
 
-    def start(self) -> bool:
-        """Starts serving, blocks until startup completes, and reports whether it did.
+    def _serve(self) -> None:
+        try:
+            listener = _listening_socket(self._port)
+        except OSError:
+            logger.error("another program holds port %d, so the hub server cannot listen on it", self._port)
+            self.port_held = True
+            return
+        self._server.run(sockets=[listener])
+
+    def _answers(self) -> bool:
+        """Whether this hub is what a window opened on localhost would reach.
+
+        A program listening on the port over IPv6 does not stop the hub binding it over
+        IPv4, and localhost resolves to IPv6 first, so the window would show that program.
+        """
+        return _health(self._port) == {"ok": True, "version": metadata.version("printguard")}
+
+    def start(self) -> bool | None:
+        """Starts serving and waits for startup to complete.
 
         A startup that fails ends the serving thread, so the wait stops there
         instead of running the timeout out: what the window shows next depends on
         the answer, and the user should not sit in front of a blank one until then.
+
+        Returns:
+            True once the hub is serving, False if its startup failed, and None
+            if it is still starting when the wait ends, as a first launch that
+            downloads a graphics provider can be.
         """
         self._thread.start()
         deadline = time.monotonic() + READY_TIMEOUT_S
         while time.monotonic() < deadline and self._thread.is_alive() and not self._server.started:
             time.sleep(0.1)
-        logger.info("hub server %s on :%d", "listening" if self._server.started else "did not start", self._port)
-        return self._server.started
+        if not self._server.started:
+            if self._thread.is_alive():
+                logger.warning("hub server is still starting on :%d after %ds", self._port, READY_TIMEOUT_S)
+                return None
+            logger.error("hub server did not start on :%d", self._port)
+            return False
+        if not self._answers():
+            logger.error("another program answers on localhost:%d, so the hub server is stopping", self._port)
+            self.stop()
+            return False
+        logger.info("hub server listening on :%d", self._port)
+        return True
 
     def stop(self) -> None:
         """Asks the server to exit and waits for the thread to finish."""
@@ -248,12 +413,27 @@ def _autostart_args() -> list[str]:
     return [sys.executable, "-m", "printguard.server.desktop"]
 
 
+def _refresh_autostart() -> None:
+    """Repoints an existing login entry at this copy when it is the installed app.
+
+    A copy run from source or from a mounted disk image names a path that will not
+    be there at the next login, so only the installed app takes the entry over.
+    """
+    stable_location = not any(location in sys.executable for location in TRANSIENT_LOCATIONS)
+    if getattr(sys, "frozen", False) and stable_location and _autostart_enabled():
+        _set_autostart(True)
+
+
 def _macos_plist() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{BUNDLE_ID}.plist"
 
 
 def _autostart_enabled() -> bool:
-    """Whether the app is registered to launch at login on this platform."""
+    """Whether an app is registered to launch at login on this platform.
+
+    The entry names a path, which can be a copy that has since been moved or
+    replaced, so ``main`` writes it again for the copy that is running.
+    """
     if sys.platform == "darwin":
         return _macos_plist().exists()
     if sys.platform == "win32":
@@ -273,9 +453,10 @@ def _set_autostart(enabled: bool) -> None:
     if sys.platform == "darwin":
         path = _macos_plist()
         if enabled:
-            args = "".join(f"<string>{arg}</string>" for arg in _autostart_args())
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(PLIST_TEMPLATE.format(label=BUNDLE_ID, args=args))
+            path.write_bytes(
+                plistlib.dumps({"Label": BUNDLE_ID, "ProgramArguments": _autostart_args(), "RunAtLoad": True})
+            )
         else:
             path.unlink(missing_ok=True)
     elif sys.platform == "win32":
@@ -340,7 +521,7 @@ def _load_icon() -> Image.Image:
     return template
 
 
-def _show_tray(icon: pystray.Icon) -> None:
+def _show_tray(icon: Any) -> None:
     """Reveals the tray icon, rebuilding it as a crisp macOS menu-bar template.
 
     pystray sizes the status-bar NSImage to the menu-bar thickness in pixels, so on Retina it
@@ -364,22 +545,68 @@ def _show_tray(icon: pystray.Icon) -> None:
     icon._status_item.button().setImage_(image)
 
 
+def _show_running_copy(port: int) -> None:
+    """Opens the dashboard of the copy already serving the port in the browser."""
+    logger.info("PrintGuard is already running on :%d, so its dashboard is opening in the browser", port)
+    webbrowser.open(_webview_url(port))
+
+
+def _reopen_from_finder(window: _Window) -> Any:
+    """Opens the window when macOS reopens the running app.
+
+    Launching a running app again never starts a second process on macOS. It sends the
+    running one a reopen request, which pystray's status item ignores.
+
+    Args:
+        window: The window to open.
+
+    Returns:
+        The application delegate, which AppKit holds only weakly, so the caller keeps it.
+    """
+    import AppKit
+
+    class ReopenDelegate(AppKit.NSObject):
+        def applicationShouldHandleReopen_hasVisibleWindows_(self, application, has_visible_windows):
+            window.open()
+            return True
+
+    delegate = ReopenDelegate.alloc().init()
+    AppKit.NSApplication.sharedApplication().setDelegate_(delegate)
+    return delegate
+
+
 def main() -> None:
     """Console entry point that serves the hub behind a tray icon on the main thread.
 
     The window runs in a child process; closing it leaves the tray and the hub
-    server running so the printer stays watched, and the tray's Quit exits.
+    server running so the printer stays watched, and the tray's Quit exits. Opened while
+    another copy is already running or still starting, it shows that copy's dashboard in the
+    browser and exits. On macOS, opening the running app again opens its window.
     """
     _configure_environment()
     _set_windows_app_id()
     logs.setup_from_env()
     logger.info("desktop app starting (frozen=%s, data=%s)", getattr(sys, "frozen", False), os.environ["DATA_DIR"])
     port = int(os.environ.get("PORT", "8000"))
+    if _hub_running(port):
+        _show_running_copy(port)
+        return
     server = _Server(port)
-    window = _Window(url=_webview_url(port)) if server.start() else _Window(html=_failure_page())
+    started = server.start()
+    if server.port_held and _wait_until_answering(port, threading.Event(), READY_TIMEOUT_S):
+        _show_running_copy(port)
+        return
+    _refresh_autostart()
+    if started is None:
+        window = _Window(html=_starting_page(), awaiting=port)
+    else:
+        window = _Window(url=_webview_url(port)) if started else _Window(html=_failure_page())
     window.open()
     if sys.platform == "darwin":
         _watch_termination(window, server)
+        reopen_delegate = _reopen_from_finder(window)
+
+    import pystray
 
     def open_window(icon: pystray.Icon, item: pystray.MenuItem) -> None:
         window.open()

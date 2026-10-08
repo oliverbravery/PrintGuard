@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { copyText } from "../src/components/CopyButton";
 import { Wordmark } from "../src/components/Wordmark";
+import { NewTab } from "../src/components/NewTab";
 import dashboardDark from "../../docs/assets/dashboard.png";
 import dashboardLight from "../../docs/assets/dashboard-light.png";
 import printerDetail from "../../docs/assets/printer-detail.png";
@@ -17,16 +19,23 @@ const UNRAID_URL = `${REPO_URL}/blob/main/templates/printguard.xml`;
 const ACCELERATION_URL = `${DOCS_URL}/hardware.md`;
 
 const DOCS: { title: string; page: string; body: string }[] = [
-  { title: "Printers & cameras", page: "printers.md", body: "Connect OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab, add cameras and set up alert channels." },
+  { title: "Printers", page: "printers.md", body: "Connect OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab, send a print and set temperatures." },
+  { title: "Cameras", page: "cameras.md", body: "Add a printer webcam, a stream URL, a USB camera or a phone." },
+  { title: "Monitoring", page: "monitoring.md", body: "Tune a monitor's thresholds, frame its camera and read its risk history." },
+  { title: "Notifications", page: "notifications.md", body: "Set up ntfy, Pushover, Telegram, Discord or desktop notifications, and quieten a flaky camera." },
   { title: "Hardware", page: "hardware.md", body: "Pick an image variant and use an Intel or NVIDIA GPU, or an NPU." },
   { title: "Deployment", page: "deployment.md", body: "Reach your hub from outside your network without exposing it." },
   { title: "API & MCP", page: "api.md", body: "Drive the hub from a script, an agent or Home Assistant." },
-  { title: "Plugins", page: "plugins.md", body: "Install a plugin, see what it can reach, or write your own." },
+  { title: "Plugins", page: "plugins.md", body: "Install a plugin and see what it can reach." },
+  { title: "Writing plugins", page: "plugin-development.md", body: "Write a plugin in plain JavaScript and publish it to the catalogue." },
+  { title: "Training frames", page: "feedback.md", body: "Label a print's frames and send them to help train the model." },
+  { title: "Architecture", page: "architecture.md", body: "How the engine, the hub and the dashboard fit together." },
   { title: "Troubleshooting", page: "troubleshooting.md", body: "Fix a dead feed, a failing printer test or a port already in use." },
 ];
 
 const DOCKER_CMD = `docker run -d --name printguard --restart unless-stopped \\
   -p 8000:8000 -p 8554:8554 \\
+  --add-host host.docker.internal:host-gateway \\
   -v printguard:/data \\
   ghcr.io/oliverbravery/printguard`;
 const COMPOSE_CMD =
@@ -74,15 +83,18 @@ function DownloadButton({ label, href, icon, primary }: { label: string; href: s
 
 function Command({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
-  const copy = () => {
-    void navigator.clipboard?.writeText(command);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
+  const copy = (button: HTMLButtonElement) =>
+    copyText(command, button).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      () => undefined,
+    );
   return (
     <div className="panel relative min-w-0">
       <pre className="mono overflow-x-auto px-4 py-3 pr-16 text-[0.72rem] leading-relaxed text-text-1">{command}</pre>
-      <button className="btn absolute right-2.5 top-2.5 px-2 py-1" onClick={copy} aria-label="Copy command">
+      <button className="btn absolute right-2.5 top-2.5 px-2 py-1" onClick={(event) => copy(event.currentTarget)} aria-label="Copy command">
         {copied ? "copied" : "copy"}
       </button>
     </div>
@@ -140,7 +152,7 @@ function Showcase({ src, alt, w, h, kicker, title, body, flip }: { src: string; 
 function DocLink({ title, page, body }: { title: string; page: string; body: string }) {
   return (
     <a className="panel group block p-5 transition-colors hover:border-accent" href={`${DOCS_URL}/${page}`} target="_blank" rel="noreferrer">
-      <h3 className="display mb-1.5 text-sm font-semibold tracking-[0.14em] transition-colors group-hover:text-accent">{title} ↗</h3>
+      <h3 className="display mb-1.5 text-sm font-semibold tracking-[0.14em] transition-colors group-hover:text-accent">{title} <NewTab /></h3>
       <p className="text-[0.84rem] leading-relaxed text-text-1">{body}</p>
     </a>
   );
@@ -148,7 +160,7 @@ function DocLink({ title, page, body }: { title: string; page: string; body: str
 
 export function Home() {
   const os = detectOS();
-  const download = os === "mac" ? { label: "macOS", href: MAC_DOWNLOAD } : os === "windows" ? { label: "Windows", href: WIN_DOWNLOAD } : null;
+  const download = os === "mac" ? { label: "macOS (Apple silicon)", href: MAC_DOWNLOAD } : os === "windows" ? { label: "Windows", href: WIN_DOWNLOAD } : null;
   const mac = <DownloadButton label="macOS" href={MAC_DOWNLOAD} icon={<AppleIcon />} primary={os === "mac"} />;
   const win = <DownloadButton label="Windows" href={WIN_DOWNLOAD} icon={<WindowsIcon />} primary={os === "windows"} />;
 
@@ -160,7 +172,7 @@ export function Home() {
           <div className="flex-1" />
           <a className="mono hidden text-[0.66rem] text-text-2 transition-colors hover:text-accent sm:inline" href="#features" onClick={scrollToId("features")}>FEATURES</a>
           <a className="mono hidden text-[0.66rem] text-text-2 transition-colors hover:text-accent sm:inline" href="#docs" onClick={scrollToId("docs")}>DOCS</a>
-          <a className="mono hidden whitespace-nowrap text-[0.66rem] text-text-2 transition-colors hover:text-accent min-[400px]:inline" href={REPO_URL} target="_blank" rel="noreferrer">GITHUB ↗</a>
+          <a className="mono hidden whitespace-nowrap text-[0.66rem] text-text-2 transition-colors hover:text-accent min-[400px]:inline" href={REPO_URL} target="_blank" rel="noreferrer">GITHUB <NewTab /></a>
           <a className="btn btn-primary" href="#install" onClick={scrollToId("install")}>Install</a>
         </div>
       </nav>
@@ -175,17 +187,18 @@ export function Home() {
         <p className="reveal mx-auto mb-8 max-w-2xl text-[0.95rem] text-text-1 sm:text-lg" style={{ "--i": 2 } as React.CSSProperties}>
           PrintGuard watches your printer cameras with an on-device vision model, pauses the printer through
           OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab when a defect holds, and pushes a snapshot to your phone. No
-          cloud and no subscription, so your frames stay yours.
+          cloud and no subscription, and frames stay on your hardware. A defect snapshot goes to the alert channels and the
+          MQTT broker you set up, and nothing else leaves unless you send it for training.
         </p>
         <div className="reveal flex flex-wrap items-center justify-center gap-3" style={{ "--i": 3 } as React.CSSProperties}>
           {download && <a className="btn btn-primary" href={download.href}>Download for {download.label}</a>}
           <a className={`btn ${download ? "" : "btn-primary"}`} href="#install" onClick={scrollToId("install")}>Run it in Docker</a>
         </div>
         <div className="mt-10 grid grid-cols-2 gap-x-6 gap-y-4 sm:flex sm:items-center sm:justify-center sm:gap-12">
-          <Spec index={3} value="≈5 MB" label="model" />
-          <Spec index={4} value="0" label="frames to cloud" />
-          <Spec index={5} value="5" label="printer services" />
-          <Spec index={6} value="GPL-2.0" label="licence" />
+          <Spec index={3} value="93.6%" label="accuracy on a Pi 4B" />
+          <Spec index={4} value="43x" label="faster than Obico's model" />
+          <Spec index={5} value="≈5 MB" label="model" />
+          <Spec index={6} value="5" label="printer services" />
         </div>
       </section>
 
@@ -197,9 +210,13 @@ export function Home() {
         <p className="label mb-8 text-center">WHAT IT DOES</p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Feature index={2} led="led-infer" title="Detect" body="A compact encoder scores every frame against failure prototypes, scheduled fairly across all your cameras." />
-          <Feature index={3} led="led-on" title="Act" body="A sustained defect pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa or Bambu, and inference rests while the printer is idle." />
-          <Feature index={4} led="led-bad" title="Alert" body="The moment a defect holds, PrintGuard sends a snapshot to your phone over ntfy, Pushover, Telegram or Discord." />
-          <Feature index={5} led="led-warn" title="Fail safe" body="A watchdog warns the second a camera drops, a feed freezes or your printer stops answering. Nothing fails silently." />
+          <Feature index={3} led="led-on" title="Act" body="A sustained defect pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab, and inference rests while the printer is idle." />
+          <Feature index={4} led="led-bad" title="Alert" body="The moment a defect holds, PrintGuard sends a snapshot to your phone over ntfy, Pushover, Telegram or Discord, or to your desktop from the app." />
+          <Feature index={5} led="led-warn" title="Fail safe" body="A watchdog warns when a camera drops, a feed freezes or your printer stops answering for longer than the grace period, two minutes by default." />
+          <Feature index={6} led="led-infer" title="Tune" body="Each monitor has its own threshold, consecutive detections and cooldown, set against a history of its risk score and a snapshot of every alert." />
+          <Feature index={7} led="led-on" title="Automate" body="Every monitor appears in Home Assistant over MQTT, and a REST API and MCP server let a script or an agent watch and control your printers." />
+          <Feature index={8} led="led-on" title="Accelerate" body="Runs on a Raspberry Pi 4's CPU, and uses Core ML, Windows ML, OpenVINO or TensorRT where your machine has them." />
+          <Feature index={9} led="led-infer" title="Anywhere" body="The dashboard fits a phone or a tablet, and works from the keyboard and with a screen reader." />
         </div>
       </section>
 
@@ -207,8 +224,8 @@ export function Home() {
         <Showcase src={printerDetail} alt="Monitor detail with live risk score and printer controls" w={1360} h={860} kicker="EVERY MONITOR, IN DEPTH" title="Open any monitor" body="Live risk score, score history, temperatures and one-tap pause, resume or cancel, bound to the printer through your print server." />
         <Showcase flip src={printViewer} alt="A sliced file in the 3D viewer, with its print time, filament and temperatures" w={1360} h={860} kicker="PRINT LIBRARY" title="Send a print from the dashboard" body="Drop sliced files onto the hub to preview the toolpath layer by layer and check the print time, filament and temperatures. Send one to an idle printer when you're ready." />
         <Showcase src={pluginsLive} alt="The dashboard with the Spotify plugin's panel and album cover behind it" w={1360} h={720} kicker="PLUGINS" title="Add what you need" body="Plugins are written in JavaScript and run in a sandbox with only the permissions you grant. Install verified plugins from the in-app plugin store or install them from GitHub repos or zips." />
-        <Showcase flip src={customise} alt="Customise mode: drag to reorder, pin and hide monitors and cameras" w={1360} h={860} kicker="YOUR DASHBOARD, YOUR WAY" title="Arrange it around your workflow" body="Drag monitors into any order, pin the ones that matter to the front and hide the rest. The camera rail rearranges the same way, with mouse, touch or keyboard." />
-        <Showcase src={dashboardLight} alt="PrintGuard in its light theme" w={1360} h={620} kicker="MAKE IT YOURS" title="Light, dark, or a theme you design" body="Pick System, Light or Dark from the header, or build your own in the theme editor, saved and synced to every browser that opens the hub." />
+        <Showcase flip src={customise} alt="Customise mode: drag to reorder and hide monitors and cameras, and pin a monitor" w={1360} h={860} kicker="YOUR DASHBOARD, YOUR WAY" title="Arrange it around your workflow" body="Drag monitors into any order, pin the ones that matter to the front and hide the rest. The camera rail can be reordered and hidden the same way, with mouse, touch or keyboard." />
+        <Showcase src={dashboardLight} alt="PrintGuard in its light theme" w={1360} h={620} kicker="MAKE IT YOURS" title="Light, dark, glass, or a theme you design" body="Pick System, Light, Dark or Glass, or build your own in the theme editor, saved and synced to every browser that opens the hub." />
       </section>
 
       <section id="install" className="mx-auto max-w-6xl scroll-mt-20 px-5 pb-20">
@@ -223,8 +240,8 @@ export function Home() {
             <p className="label mb-1 text-accent">DESKTOP APP</p>
             <h3 className="display mb-2 text-2xl font-bold">macOS &amp; Windows</h3>
             <p className="mb-5 text-sm leading-relaxed text-text-1">
-              A native app with no Docker and no terminal. It runs the hub in its own window and keeps watching while
-              minimised. Reach it from your phone on the same network too.
+              A native app with no Docker and no terminal. It lives in the menu bar or system tray, so closing the
+              window leaves the printer watched. Reach it from your phone on the same network too.
             </p>
             <div className="flex flex-wrap gap-3">
               {os === "windows" ? (
@@ -240,7 +257,7 @@ export function Home() {
               )}
             </div>
             <p className="mt-4 text-xs leading-relaxed text-text-2">
-              The Windows build is unsigned for now, so its first launch needs a one-time approval. Choose{" "}
+              The macOS build is for Apple silicon. The Windows build is unsigned for now, so its first launch needs a one-time approval. Choose{" "}
               <span className="text-text-1">More info</span>, then <span className="text-text-1">Run anyway</span>.
             </p>
           </div>
@@ -259,16 +276,17 @@ export function Home() {
             <p className="mb-2 mt-5 text-xs text-text-2">OR WITH COMPOSE</p>
             <Command command={COMPOSE_CMD} />
             <p className="mt-4 text-xs leading-relaxed text-text-2">
-              Inference runs on the CPU out of the box. An Intel GPU or NPU needs only{" "}
-              <span className="text-text-1">--device /dev/dri</span>; an NVIDIA RTX 30 series or newer host uses the{" "}
+              Inference runs on the CPU out of the box. An Intel GPU uses the{" "}
+              <span className="text-text-1">:latest-intel</span> image with{" "}
+              <span className="text-text-1">--device /dev/dri</span>, and an NVIDIA RTX 30 series or newer host uses the{" "}
               <span className="text-text-1">:latest-nvidia</span> image with{" "}
               <span className="text-text-1">--gpus all</span>.{" "}
               <a className="text-text-1 underline decoration-line-0 underline-offset-2 transition-colors hover:text-accent" href={ACCELERATION_URL} target="_blank" rel="noreferrer">
-                Hardware acceleration ↗
+                Hardware acceleration <NewTab />
               </a>
             </p>
             <a className="mono mt-4 inline-block text-[0.7rem] text-text-2 transition-colors hover:text-accent" href={UNRAID_URL} target="_blank" rel="noreferrer">
-              Unraid, install from Community Applications ↗
+              Unraid, install from Community Applications <NewTab />
             </a>
           </div>
         </div>

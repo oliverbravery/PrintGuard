@@ -5,6 +5,7 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
 } from "@dnd-kit/core";
 import {
@@ -16,6 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { ReactElement, ReactNode } from "react";
+import { sharesPinning } from "../layout";
 import { SectionHead } from "./SectionHead";
 
 export { horizontalListSortingStrategy, rectSortingStrategy } from "@dnd-kit/sortable";
@@ -32,12 +34,14 @@ export interface SortableHandle {
 
 export function Sortable({
   ids,
+  pinned,
   strategy,
   onReorder,
   disabled,
   children,
 }: {
   ids: string[];
+  pinned: string[];
   strategy: SortingStrategy;
   onReorder: (ids: string[]) => void;
   disabled: boolean;
@@ -54,8 +58,10 @@ export function Sortable({
     const to = ids.indexOf(String(over.id));
     if (from !== -1 && to !== -1) onReorder(arrayMove(ids, from, to));
   };
+  const closestInSameGroup: CollisionDetection = (args) =>
+    closestCenter({ ...args, droppableContainers: args.droppableContainers.filter((tile) => sharesPinning(pinned, String(args.active.id), String(tile.id))) });
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+    <DndContext sensors={sensors} collisionDetection={closestInSameGroup} onDragEnd={onDragEnd}>
       <SortableContext items={ids} strategy={strategy}>
         {children}
       </SortableContext>

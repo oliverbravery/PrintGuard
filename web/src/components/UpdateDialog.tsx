@@ -1,12 +1,14 @@
 import { renderMarkdown } from "../markdown";
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
+import { CopyButton } from "./CopyButton";
 import { Dialog } from "./Dialog";
+import { NewTab } from "./NewTab";
 
 const PULL_COMMAND = "docker compose pull && docker compose up -d";
 
 export function UpdateDialog() {
-  const { engine, releases, send, isPending, openDialog } = useStore();
+  const { engine, releases, reconnecting, send, isPending, openDialog } = useStore();
   const update = engine?.update ?? null;
   const checking = isPending("update.check");
   const current = engine?.version || update?.current;
@@ -14,8 +16,8 @@ export function UpdateDialog() {
   const [selected, setSelected] = useState<string | null>(null);
 
   useEffect(() => {
-    send({ cmd: "update.releases" });
-  }, [send]);
+    if (!reconnecting) send({ cmd: "update.releases" });
+  }, [reconnecting]);
 
   const release = releases.find((entry) => entry.version === selected) ?? releases[0] ?? null;
   const date = release?.published_at ? new Date(release.published_at).toLocaleDateString() : null;
@@ -28,7 +30,7 @@ export function UpdateDialog() {
             {available ? (
               <>
                 <span className="mono text-text-2">v{update!.current}</span>
-                <span className="text-text-2"> → </span>
+                <span className="text-text-2"> to </span>
                 <span className="mono text-accent">v{update!.latest}</span>
               </>
             ) : (
@@ -66,7 +68,7 @@ export function UpdateDialog() {
             </div>
             <div
               className="changelog max-h-[40dvh] overflow-y-auto pr-1"
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(release.notes || "_No release notes._") }}
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(release.notes || "_No release notes._", { base: release.files_url }) }}
             />
             <a
               href={update?.releases_url ?? release.url}
@@ -74,7 +76,7 @@ export function UpdateDialog() {
               rel="noreferrer"
               className="text-[0.7rem] text-accent underline hover:opacity-80 inline-block"
             >
-              All releases on GitHub ↗
+              All releases on GitHub <NewTab />
             </a>
           </div>
         )}
@@ -85,7 +87,7 @@ export function UpdateDialog() {
             {update!.download ? (
               <>
                 <a className="btn btn-primary inline-block" href={update!.download} target="_blank" rel="noreferrer">
-                  Download v{update!.latest}
+                  Download v{update!.latest} <NewTab />
                 </a>
                 <p className="text-[0.7rem] text-text-2">
                   Quit PrintGuard from the tray, replace the app with the downloaded one, and open it again.
@@ -98,9 +100,7 @@ export function UpdateDialog() {
                 </p>
                 <div className="flex items-center gap-2">
                   <code className="mono text-[0.68rem] text-text-0 break-all flex-1">{PULL_COMMAND}</code>
-                  <button className="btn" onClick={() => navigator.clipboard?.writeText(PULL_COMMAND)}>
-                    Copy
-                  </button>
+                  <CopyButton text={PULL_COMMAND} />
                 </div>
               </>
             )}

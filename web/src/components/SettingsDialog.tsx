@@ -1,12 +1,18 @@
-import { useEffect, useState } from "react";
-import { type SettingsTabId, useStore } from "../store";
+import { useEffect, useRef, useState } from "react";
+import { useFocusKept } from "../a11y";
+import { savedChannels, type SettingsTabId, useStore } from "../store";
+import { useSubmit } from "../submit";
 import { applyTheme, beginPreview, endPreview, GLASS_DEFAULT, PALETTES } from "../theme";
-import type { ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
+import type { AdapterConfig, AdapterMeta, ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
+import { ConfirmButton, useConfirm } from "./ConfirmButton";
+import { CopyButton } from "./CopyButton";
 import { Dialog } from "./Dialog";
+import { NewTab } from "./NewTab";
 import { PluginsTab } from "./PluginsTab";
 import { SettingsFooter } from "./SettingsFooter";
 import { SaveStatus } from "./SaveStatus";
-import { SchemaForm } from "./SchemaForm";
+import { addressMoved, retypeReason, SchemaForm, savedSecretTitles } from "./SchemaForm";
+import { SecretInput } from "./SecretInput";
 import { SchemePicker } from "./SchemePicker";
 import { TestRow } from "./TestRow";
 import { Slider } from "./Slider";
@@ -24,6 +30,12 @@ function Swatch({ colors }: { colors: CustomTheme["colors"] }) {
   );
 }
 
+function leavePreview() {
+  endPreview();
+  const saved = useStore.getState().engine?.settings;
+  applyTheme(saved?.theme ?? "system", saved?.themes ?? [], saved?.glass, true);
+}
+
 export function SettingsDialog() {
   const {
     engine,
@@ -38,7 +50,15 @@ export function SettingsDialog() {
     updateSettings,
     settingsTab,
   } = useStore();
-  const [notifiers, setNotifiers] = useState(engine?.settings.notifiers ?? {});
+  const [notifiers, setNotifiers] = useState(() => savedChannels(engine));
+  const parkedChannels = useRef<Record<string, AdapterConfig>>({});
+  const saveChannels = useSubmit(() => {
+    parkedChannels.current = {};
+    setNotifiers(savedChannels(engine));
+  });
+  const saveBroker = useSubmit(() => setMqtt(engine?.settings.mqtt ?? {}));
+  const createToken = useSubmit(() => setTokenName(""));
+  const tokenArea = useFocusKept<HTMLDivElement>();
   const updateCheck = engine?.settings.update_check ?? true;
   const [mqtt, setMqtt] = useState<MqttConfig>(engine?.settings.mqtt ?? {});
   const setMqttField = (key: keyof MqttConfig, value: MqttConfig[keyof MqttConfig]) => setMqtt({ ...mqtt, [key]: value });
@@ -47,6 +67,10 @@ export function SettingsDialog() {
   const [tab, setTab] = useState<SettingsTabId>(settingsTab ?? "alerts");
   const close = () => openDialog(null);
   const tokens = engine?.tokens ?? [];
+  const reviewing = engine?.settings.feedback !== "off";
+  const waitingReviews = (engine?.reviews ?? []).filter((review) => review.status === "ready" || review.status === "queued").length;
+  const setReviewing = (on: boolean) => updateSettings({ feedback: on ? "ask" : "off" }, "advanced");
+  const stopReviewing = useConfirm(() => setReviewing(false));
 
   const theme = engine?.settings.theme ?? "system";
   const themes = engine?.settings.themes ?? [];
@@ -62,23 +86,22 @@ export function SettingsDialog() {
   const newTheme = (base: ThemeBase) =>
     setEditing({ id: "t" + Date.now().toString(36), name: "", base, colors: { ...PALETTES[base] } });
   const cancelEdit = () => {
-    endPreview();
+    leavePreview();
     setEditing(null);
-    applyTheme(theme, themes, glass, true);
   };
   const saveTheme = () => {
     if (!editing) return;
     const next = upsertTheme(themes, { ...editing, name: editing.name.trim() || "Custom" });
     endPreview();
     applyTheme(editing.id, next, glass, true);
-    send({ cmd: "settings.update", patch: { themes: next, theme: editing.id } });
+    updateSettings({ themes: next, theme: editing.id });
     setEditing(null);
   };
   const deleteTheme = (id: string) => {
     const next = themes.filter((t) => t.id !== id);
     const selection = theme === id ? "system" : theme;
     applyTheme(selection, next, glass, true);
-    send({ cmd: "settings.update", patch: { themes: next, theme: selection } });
+    updateSettings({ themes: next, theme: selection });
   };
 
   useEffect(() => {
@@ -87,8 +110,26 @@ export function SettingsDialog() {
     applyTheme(editing.id, upsertTheme(themes, editing), glass, true);
   }, [editing]);
 
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
+  useEffect(
+    () => () => {
+      if (editingRef.current) leavePreview();
+    },
+    [],
+  );
+
   const desktopApp = "pywebview" in window;
   const channels = (engine?.notifiers ?? []).filter((n) => !n.desktop_only || desktopApp);
+  const channelRetype = (meta: AdapterMeta) => {
+    const stored = engine?.settings.notifiers[meta.id];
+    return meta.id in notifiers && stored ? retypeReason(notifiers[meta.id], stored, savedSecretTitles(meta, engine?.secrets_set?.notifiers[meta.id] ?? [])) : null;
+  };
+  const savedPassword = engine?.secrets_set?.mqtt.includes("password") ?? false;
+  const brokerProblem =
+    mqtt.enabled && !mqtt.host?.trim()
+      ? "Enter the broker host."
+      : retypeReason(mqtt, engine?.settings.mqtt ?? {}, savedPassword ? { password: "Password" } : {});
 
   const tabs: { id: SettingsTabId; label: string }[] = [
     { id: "appearance", label: "Appearance" },
@@ -138,6 +179,7 @@ export function SettingsDialog() {
                   <div key={t.id} className="flex items-center gap-2">
                     <button
                       onClick={() => selectTheme(t.id)}
+                      aria-pressed={theme === t.id}
                       className={`flex flex-1 items-center gap-2 overflow-hidden rounded border px-3 py-2 text-left transition-colors cursor-pointer ${
                         theme === t.id ? "border-accent bg-accent/5" : "border-line-0 hover:border-line-1"
                       }`}
@@ -149,9 +191,7 @@ export function SettingsDialog() {
                     <button className="btn" onClick={() => setEditing({ ...t, colors: { ...t.colors } })}>
                       Edit
                     </button>
-                    <button className="btn btn-danger" onClick={() => deleteTheme(t.id)}>
-                      Delete
-                    </button>
+                    <ConfirmButton onConfirm={() => deleteTheme(t.id)}>Delete</ConfirmButton>
                   </div>
                 ))}
               </div>
@@ -176,6 +216,7 @@ export function SettingsDialog() {
             <span className="label block">Notification channels</span>
             {channels.map((meta) => {
               const enabled = meta.id in notifiers;
+              const target = JSON.stringify([meta.id, notifiers[meta.id]]);
               return (
                 <div key={meta.id} className="space-y-3">
                   <Toggle
@@ -183,8 +224,11 @@ export function SettingsDialog() {
                     on={enabled}
                     onChange={(on) => {
                       const next = { ...notifiers };
-                      if (on) next[meta.id] = next[meta.id] ?? {};
-                      else delete next[meta.id];
+                      if (on) next[meta.id] = parkedChannels.current[meta.id] ?? {};
+                      else {
+                        parkedChannels.current[meta.id] = next[meta.id];
+                        delete next[meta.id];
+                      }
                       setNotifiers(next);
                     }}
                   />
@@ -193,37 +237,45 @@ export function SettingsDialog() {
                       <SchemaForm
                         meta={meta}
                         value={notifiers[meta.id]}
+                        stored={engine?.settings.notifiers[meta.id]}
+                        saved={engine?.secrets_set?.notifiers[meta.id]}
                         onChange={(config) => setNotifiers({ ...notifiers, [meta.id]: config })}
                       />
                       <TestRow
                         label="Send test alert"
                         busyLabel="Sending…"
-                        busy={testingNotifier === meta.id}
+                        busy={testingNotifier === target}
                         disabled={testingNotifier !== null}
-                        onTest={() => testNotifier(meta.id, notifiers[meta.id])}
+                        onTest={() => testNotifier(target, meta.id, notifiers[meta.id])}
                         result={
-                          notifyTest?.provider === meta.id
+                          notifyTest?.target === target
                             ? { ok: notifyTest.ok, message: notifyTest.ok ? "sent" : notifyTest.error || "failed" }
                             : null
                         }
                       />
+                      {channelRetype(meta) && <span className="block text-[0.7rem] text-text-2">{channelRetype(meta)}</span>}
                     </>
                   )}
                 </div>
               );
             })}
             <span className="text-[0.7rem] text-text-2 block">
-              Defect alerts (with snapshots) go to every enabled channel for printers with notifications on.
+              Defect alerts (with snapshots) go to every enabled channel for monitors with push notifications on.
             </span>
             <button
               className="btn btn-primary w-full"
-              disabled={isPending("settings.update")}
-              onClick={() => send({ cmd: "settings.update", patch: { notifiers } })}
+              disabled={isPending("settings.update") || channels.some(channelRetype)}
+              onClick={() => saveChannels.submit({ cmd: "settings.update", patch: { notifiers } })}
             >
               {isPending("settings.update") ? "Saving…" : "Save channels"}
             </button>
+            {saveChannels.error && (
+              <span role="alert" className="chip chip-message chip-bad">
+                {saveChannels.error}
+              </span>
+            )}
             <span className="text-[0.7rem] text-text-2 block">
-              Channels hold credentials, so they apply on Save rather than automatically.
+              Channels hold credentials, so they apply when you press Save.
             </span>
           </TabPanel>
         )}
@@ -243,6 +295,10 @@ export function SettingsDialog() {
                 <div className="flex gap-2">
                   <input
                     className="field flex-1"
+                    aria-label="Broker host"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     placeholder="Broker host (e.g. 192.168.1.10)"
                     value={mqtt.host ?? ""}
                     onChange={(e) => setMqttField("host", e.target.value)}
@@ -251,35 +307,51 @@ export function SettingsDialog() {
                     className="field shrink-0"
                     style={{ width: "5rem" }}
                     type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={65535}
+                    step={1}
+                    aria-label="Broker port"
                     placeholder={mqtt.tls ? "8883" : "1883"}
                     value={mqtt.port ?? ""}
                     onChange={(e) => setMqttField("port", e.target.value ? Number(e.target.value) : undefined)}
                   />
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <input
-                    className="field flex-1"
+                    className="field flex-1 basis-32"
+                    aria-label="Username"
+                    autoCapitalize="none"
+                    autoCorrect="off"
                     placeholder="Username (optional)"
                     value={mqtt.username ?? ""}
                     onChange={(e) => setMqttField("username", e.target.value)}
                   />
-                  <input
-                    className="field flex-1"
-                    type="password"
+                  <SecretInput
+                    name="password"
+                    aria-label="Password"
                     placeholder="Password (optional)"
-                    value={mqtt.password ?? ""}
-                    onChange={(e) => setMqttField("password", e.target.value)}
+                    saved={savedPassword}
+                    retype={addressMoved(mqtt, engine?.settings.mqtt ?? {})}
+                    value={mqtt.password}
+                    onChange={(password) => setMqttField("password", password)}
                   />
                 </div>
                 <div className="flex gap-2">
                   <input
                     className="field flex-1"
+                    aria-label="Base topic"
+                    autoCapitalize="none"
+                    autoCorrect="off"
                     placeholder="Base topic (printguard)"
                     value={mqtt.base_topic ?? ""}
                     onChange={(e) => setMqttField("base_topic", e.target.value)}
                   />
                   <input
                     className="field flex-1"
+                    aria-label="Discovery prefix"
+                    autoCapitalize="none"
+                    autoCorrect="off"
                     placeholder="Discovery prefix (homeassistant)"
                     value={mqtt.discovery_prefix ?? ""}
                     onChange={(e) => setMqttField("discovery_prefix", e.target.value)}
@@ -294,13 +366,19 @@ export function SettingsDialog() {
             )}
             <button
               className="btn btn-primary w-full"
-              disabled={isPending("settings.update")}
-              onClick={() => send({ cmd: "settings.update", patch: { mqtt } })}
+              disabled={isPending("settings.update") || brokerProblem !== null}
+              onClick={() => saveBroker.submit({ cmd: "settings.update", patch: { mqtt } })}
             >
               {isPending("settings.update") ? "Saving…" : "Save broker settings"}
             </button>
+            {brokerProblem && <span className="block text-[0.7rem] text-text-2">{brokerProblem}</span>}
+            {saveBroker.error && (
+              <span role="alert" className="chip chip-message chip-bad">
+                {saveBroker.error}
+              </span>
+            )}
             <span className="text-[0.7rem] text-text-2 block">
-              Broker settings open a live connection, so they apply on Save rather than automatically.
+              Broker settings open a live connection, so they apply when you press Save.
             </span>
           </TabPanel>
         )}
@@ -312,7 +390,7 @@ export function SettingsDialog() {
               label="Automatically check for updates"
               on={updateCheck}
               onChange={(on) => {
-                updateSettings({ update_check: on });
+                updateSettings({ update_check: on }, "updates");
                 if (on && !engine?.update) send({ cmd: "update.check" });
               }}
             />
@@ -323,48 +401,46 @@ export function SettingsDialog() {
               <button className="btn" disabled={isPending("update.check")} onClick={() => send({ cmd: "update.check" })}>
                 {isPending("update.check") ? "Checking…" : "Check now"}
               </button>
-              {engine?.update?.available && (
-                <button className="btn btn-primary" onClick={() => openDialog("update")}>
-                  Update to v{engine.update.latest}
-                </button>
-              )}
+              <button className={`btn ${engine?.update?.available ? "btn-primary" : ""}`} onClick={() => openDialog("update")}>
+                {engine?.update?.available ? `Update to v${engine.update.latest}` : "Release notes"}
+              </button>
               <span className="text-[0.7rem] text-text-2">
                 {engine?.version && `v${engine.version}`}
                 {engine?.update && !engine.update.available && " · up to date"}
               </span>
             </div>
             <div className="flex justify-end">
-              <SaveStatus />
+              <SaveStatus scope="settings:updates" />
             </div>
           </TabPanel>
         )}
 
         {tab === "api" && (
-          <TabPanel prefix="settings" id="api" className="space-y-3">
+          <TabPanel ref={tokenArea} prefix="settings" id="api" className="space-y-3">
             <div>
               <span className="label block">API &amp; MCP access</span>
               <span className="text-[0.7rem] text-text-2 block mt-1">
-                Bearer tokens for the REST API and MCP server. Scopes are cumulative: read ⊂ control ⊂ manage.
+                Bearer tokens for the REST API and MCP server. Control includes read, and manage includes both.
               </span>
             </div>
 
             {createdToken && (
               <div className="relative rounded border border-accent/40 bg-accent/5 p-3 pr-8 space-y-2">
-                <button
-                  className="absolute top-2 right-2 text-text-2 hover:text-accent text-lg leading-none cursor-pointer"
-                  onClick={clearCreatedToken}
-                  aria-label="Dismiss"
-                >
-                  ×
-                </button>
+                <span className="absolute top-2 right-2">
+                  <button
+                    className="tap-target text-text-2 hover:text-accent text-lg leading-none cursor-pointer"
+                    onClick={clearCreatedToken}
+                    aria-label="Dismiss"
+                  >
+                    ×
+                  </button>
+                </span>
                 <span className="text-[0.7rem] text-text-1 block">
                   Copy <span className="text-accent">{createdToken.name}</span> now, it is shown once and cannot be retrieved later.
                 </span>
                 <div className="flex items-center gap-2">
                   <code className="mono text-[0.68rem] text-text-0 break-all flex-1">{createdToken.secret}</code>
-                  <button className="btn" onClick={() => navigator.clipboard?.writeText(createdToken.secret)}>
-                    Copy
-                  </button>
+                  <CopyButton text={createdToken.secret} />
                 </div>
               </div>
             )}
@@ -380,43 +456,44 @@ export function SettingsDialog() {
                       </div>
                       <span className="mono text-[0.65rem] text-text-2 block truncate">{t.hint}</span>
                     </div>
-                    <button
-                      className="btn btn-danger"
-                      disabled={isPending("token.remove")}
-                      onClick={() => send({ cmd: "token.remove", id: t.id })}
-                    >
+                    <ConfirmButton disabled={isPending("token.remove", t.id)} onConfirm={() => send({ cmd: "token.remove", id: t.id })}>
                       Revoke
-                    </button>
+                    </ConfirmButton>
                   </div>
                 ))}
               </div>
             )}
 
-            <div className="space-y-2">
+            <form
+              className="space-y-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                createToken.submit({ cmd: "token.create", name: tokenName.trim(), scope: tokenScope });
+              }}
+            >
               <input
                 className="field"
+                aria-label="Token name"
                 placeholder="Token name"
                 value={tokenName}
                 onChange={(e) => setTokenName(e.target.value)}
               />
               <div className="flex gap-2">
-                <select className="field" value={tokenScope} onChange={(e) => setTokenScope(e.target.value as ApiToken["scope"])}>
+                <select className="field" aria-label="Token scope" value={tokenScope} onChange={(e) => setTokenScope(e.target.value as ApiToken["scope"])}>
                   <option value="read">read</option>
                   <option value="control">control</option>
                   <option value="manage">manage</option>
                 </select>
-                <button
-                  className="btn btn-primary whitespace-nowrap"
-                  disabled={!tokenName.trim() || isPending("token.create")}
-                  onClick={() => {
-                    send({ cmd: "token.create", name: tokenName.trim(), scope: tokenScope });
-                    setTokenName("");
-                  }}
-                >
+                <button type="submit" className="btn btn-primary whitespace-nowrap" disabled={!tokenName.trim() || isPending("token.create")}>
                   {isPending("token.create") ? "…" : "Generate"}
                 </button>
               </div>
-            </div>
+              {createToken.error && (
+                <span role="alert" className="chip chip-message chip-bad">
+                  {createToken.error}
+                </span>
+              )}
+            </form>
           </TabPanel>
         )}
 
@@ -429,7 +506,7 @@ export function SettingsDialog() {
               id="inference-runtime"
               className="field w-full"
               value={engine?.settings.inference_runtime ?? "auto"}
-              onChange={(event) => updateSettings({ inference_runtime: event.target.value })}
+              onChange={(event) => updateSettings({ inference_runtime: event.target.value }, "advanced")}
             >
               <option value="auto">Automatic</option>
               <option value="litert">LiteRT</option>
@@ -437,14 +514,38 @@ export function SettingsDialog() {
             </select>
             <span className="block text-[0.7rem] leading-relaxed text-text-2">
               Automatic benchmarks both models and uses the higher-throughput runtime. ONNX Runtime can use Core ML,
-              Windows ML, OpenVINO or NVIDIA hardware; LiteRT uses its optimised CPU runtime for this model.
+              Windows ML, OpenVINO or NVIDIA hardware. LiteRT uses its optimised CPU runtime for this model.
             </span>
             <div className="flex items-center justify-between gap-3 rounded border border-line-0 px-3 py-2">
               <span className="text-xs text-text-1">Active compute</span>
               <span className="chip">{engine?.stats.inference_device ?? "initialising"}</span>
             </div>
+            <span className="label block pt-2">Training frames</span>
+            <Toggle
+              label="Ask me to review frames after a print"
+              on={reviewing}
+              onChange={(on) => (on || waitingReviews === 0 ? setReviewing(on) : stopReviewing.press())}
+            />
+            <span className="block text-[0.7rem] leading-relaxed text-text-2">
+              <span role="status" className="block text-warn">
+                {stopReviewing.armed &&
+                  `Press the switch again to turn it off. ${waitingReviews} ${waitingReviews === 1 ? "print" : "prints"} waiting for review will be dismissed.`}
+              </span>
+              {reviewing
+                ? "PrintGuard keeps a few frames from each print on this hub so you can label them and send them to help train the detection model. Nothing is sent unless you review a print and press Send. Turning this off deletes the frames kept so far."
+                : "PrintGuard keeps only alert frames while this is off, for the risk history. It doesn't ask you to review a print and nothing is sent."}{" "}
+              <a className="text-accent underline hover:opacity-80" href="https://github.com/oliverbravery/PrintGuard/blob/main/docs/feedback.md" target="_blank" rel="noreferrer">
+                What's sent <NewTab />
+              </a>
+            </span>
+            {engine?.feedback_hub && (
+              <div className="flex items-center justify-between gap-3 rounded border border-line-0 px-3 py-2">
+                <span className="text-xs text-text-1">Hub ID</span>
+                <span className="mono text-[0.65rem] break-all text-text-2">{engine.feedback_hub}</span>
+              </div>
+            )}
             <div className="flex justify-end">
-              <SaveStatus />
+              <SaveStatus scope="settings:advanced" />
             </div>
           </TabPanel>
         )}

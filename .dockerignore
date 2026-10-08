@@ -1,7 +1,7 @@
 .git
 .claude
 .venv
-.env
+**/.env
 build
 data
 dist
@@ -9,7 +9,9 @@ tests
 web/node_modules
 web/dist
 web/dist-site
+web/test-results
 **/__pycache__
-*.tsbuildinfo
-.DS_Store
+**/*.tsbuildinfo
+**/.DS_Store
 README.md
+feedback-worker

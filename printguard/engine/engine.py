@@ -9,21 +9,30 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextvars
+import functools
 import logging
+import math
+import re
 import time
+import traceback
 import uuid
-from collections import deque
-from typing import Any, AsyncIterator, Callable
+from collections import Counter, defaultdict, deque
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Awaitable, Callable, Coroutine
 
-from . import gcode, oauth, plugins, reports, updates, urls, vision
-from .cameras import declared_camera_id, sanitise_camera
+import numpy as np
+
+from . import credentials, feedback, gcode, logs, oauth, plugins, reports, updates, urls, vision
+from .adapters import Adapter
+from .cameras import declared_camera_id, same_stream, sanitise_camera, sanitise_source, stored_camera, tidy_stream_url
 from .history import MonitorHistory
-from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, IntegrationAdapter, integrations_meta
-from .monitors import monitor_watching, persisted_monitor, sanitise_monitor
+from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, integrations_meta
+from .monitors import MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor, stored_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
-from .platform import Frame, Platform
-from .printers import PREHEAT_DEFAULTS, sanitise_presets, sanitise_printer, sanitise_targets
-from .prints import accepts, extension, printer_filename, sanitise_name, sanitise_printers
+from .platform import PLUGIN_HEADER, Frame, FrameSource, Platform, as_chunks, plain_failure
+from .printers import PREHEAT_DEFAULTS, connection_settings, sanitise_printer, sanitise_targets
+from .prints import accepts, extension, printer_filename, sanitise_name, sanitise_printers, stored_print
 from .registry import (
     Camera,
     CameraRegistry,
@@ -36,31 +45,87 @@ from .registry import (
     Token,
     TokenRegistry,
 )
+from .reviews import Review, ReviewLibrary, frame_key, stored_review
 from .scheduler import Scheduler
-from .sockets import SocketBroker
-from .tokens import new_token
-from .watchdog import GRACE_DEFAULT_S, Watchdog, clamp_grace
+from .settings import CHECKS, require_broker
+from .sockets import SocketBroker, SocketRefused
+from .tokens import new_token, stored_token
+from .watchdog import GRACE_DEFAULT_S, Watchdog
 
 logger = logging.getLogger(__name__)
-
-
-async def _chunks(data: bytes) -> AsyncIterator[bytes]:
-    yield data
 
 
 STATE_TICK_S = 1.0
 RESULT_EVENT_INTERVAL_S = 0.2
 REATTACH_EVERY_TICKS = 10
 REQUEST_TIMEOUT_S = 15.0
+READ_BACK_S = 5.0
+CAMERA_OPEN_WAIT_S = 25.0
+CAMERA_SETTLE_S = 10.0
+CAMERAS_OPENED_IN_TURN = 4
+RUNTIME_LOAD_ALLOWANCE_S = 60.0
 RECENT_EVENTS_MAX = 100
-RECENT_EVENT_TYPES = ("alert", "warning", "device", "error")
+TEST_PICTURE_SHAPE = (180, 320, 3)
+NUMBERED_LABEL = re.compile(r" \(\d+\)$")
+"""The number a platform appends to the label of each of several cameras of one model."""
+RECENT_EVENT_TYPES = ("alert", "warning", "error")
+SCRUBBED_EVENT_TYPES = ("warning", "error")
 EVENT_LOG_LEVELS = {"alert": logging.INFO, "warning": logging.WARNING, "error": logging.ERROR, "device": logging.DEBUG}
 UPDATE_CHECK_INTERVAL_S = 86400.0
+UPDATE_RETRY_S = 900.0
+RUNTIME_DRAIN_TIMEOUT_S = 10.0
 PLUGIN_RATE_LIMIT = 60
 PLUGIN_RATE_WINDOW_S = 60.0
 PLUGIN_TIMEOUT_S = 10.0
+PLUGIN_STORE_SAVE_S = 1.0
+NOTIFY_SEND_LIMIT = 20
 MAX_PLUGIN_BODY = 256 * 1024
+PLUGIN_RESERVED_HEADERS = ("Host", "Connection", PLUGIN_HEADER)
 CALL_TTL_S = 30.0
+FEEDBACK_RETRY_S = 6 * 3600.0
+FEEDBACK_RECHECK_S = 60.0
+FEEDBACK_UNSENDABLE = ("details", "not_jpeg", "too_large", "length")
+LOOP_RETRY_S = 1.0
+FAILURE_REPORT_EVERY_S = 30.0
+NOTIFY_TIMEOUT_S = 30.0
+FINISHING_COMMANDS = frozenset(
+    {
+        "camera.remove",
+        "printer.update",
+        "printer.remove",
+        "printer.cameras.refresh",
+        "monitor.remove",
+        "print.remove",
+        "settings.update",
+        "plugin.install",
+        "plugin.remove",
+        "plugin.update",
+        "plugin.secrets",
+    }
+)
+READ_ONLY_COMMANDS = frozenset({"history.get", "snapshot.get", "review.get", "camera.snapshot"})
+UNSAVED_COMMANDS = frozenset(
+    {
+        "discover",
+        "printer.test",
+        "notify.test",
+        "notify.send",
+        "update.check",
+        "update.releases",
+        "report.send",
+        "report.bundle",
+        "plugin.code",
+        "plugin.catalogue",
+        "plugin.page",
+        "plugin.http",
+        "plugin.socket",
+        "plugin.call",
+        "plugin.answer",
+        "plugin.publish",
+        "plugin.effect",
+    }
+)
+FEEDBACK_SMALLER_PX = 384
 SETTINGS_DEFAULTS: dict[str, Any] = {
     "notifiers": {},
     "update_check": True,
@@ -73,7 +138,22 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "catalogue_url": plugins.CATALOGUE_URL,
     "fault_grace_s": GRACE_DEFAULT_S,
     "preheat": PREHEAT_DEFAULTS,
+    "feedback": "ask",
 }
+
+
+def _address(source: dict[str, Any]) -> Any:
+    """Returns what a camera source opens, the value that makes two sources the same camera.
+
+    Args:
+        source: A camera source record.
+
+    Returns:
+        Its device id, published path or stream URL, or None when it has none.
+        A URL is given as ``same_stream`` reads it, so one stream written two
+        ways is one camera.
+    """
+    return source.get("device_id") or source.get("path") or (same_stream(source["url"]) if source.get("url") else None)
 
 
 class Engine:
@@ -86,6 +166,10 @@ class Engine:
         self.prints = PrintRegistry()
         self.monitors: dict[str, dict[str, Any]] = {}
         self.history: dict[str, MonitorHistory] = {}
+        self.reviews = ReviewLibrary(platform)
+        self.feedback_token: str | None = None
+        self._sends: dict[str, asyncio.Task[None]] = {}
+        self._send_requests: dict[str, list[Any]] = {}
         self._results: dict[str, dict[str, float]] = {}
         self._result_emitted_at: dict[str, float] = {}
         self.tokens = TokenRegistry()
@@ -98,12 +182,29 @@ class Engine:
         self.watchdog = Watchdog(self)
         self.sockets = SocketBroker(platform.open_socket, self.emit)
         self.oauth = oauth.OAuthFlows(platform.http)
-        self._plugin_calls: dict[str, list[float]] = {}
-        self._pending_calls: dict[str, tuple[str, str, str, float]] = {}
+        self._calls: dict[str, list[float]] = {}
+        self._store_saved_at: dict[str, float] = {}
+        self._stores_unsaved = False
+        self._dropped_gates: set[str] = set()
+        self._pending_calls: dict[str, tuple[str, str, str, float, str]] = {}
+        self._answered_calls: dict[str, tuple[str, float]] = {}
+        self._sign_in_refreshes: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._sinks: list[Callable[[dict[str, Any]], None]] = []
+        self._requester: contextvars.ContextVar[Callable[[dict[str, Any]], None] | None] = contextvars.ContextVar("requester", default=None)
         self._recent: deque[dict[str, Any]] = deque(maxlen=RECENT_EVENTS_MAX)
+        self.startup_warnings: list[str] = []
+        self.dropped_ids: set[str] = set()
         self._tasks: list[asyncio.Task[None]] = []
+        self._background: set[asyncio.Task[None]] = set()
         self._attach_tasks: dict[str, asyncio.Task[None]] = {}
+        self._detaching: Counter[str] = Counter()
+        self._reconciles: dict[str, asyncio.Lock] = {}
+        self._starting: set[str] = set()
+        self._adding: set[Any] = set()
+        self._registering = asyncio.Lock()
+        self._failure_reported_at: dict[str, float] = {}
+        self._ticks = 0
+        logs.scrub_with(self._scrubbed)
         self._handlers: dict[str, Any] = {
             "discover": self._cmd_discover,
             "camera.add": self._cmd_camera_add,
@@ -124,6 +225,10 @@ class Engine:
             "monitor.update": self._cmd_monitor_update,
             "monitor.remove": self._cmd_monitor_remove,
             "history.get": self._cmd_history_get,
+            "review.get": self._cmd_review_get,
+            "review.send": self._cmd_review_send,
+            "review.retry": self._cmd_review_retry,
+            "review.dismiss": self._cmd_review_dismiss,
             "snapshot.get": self._cmd_snapshot_get,
             "camera.snapshot": self._cmd_camera_snapshot,
             "notify.test": self._cmd_notify_test,
@@ -156,58 +261,75 @@ class Engine:
 
         A stored plugin manifest goes back through ``sanitise_manifest``, since
         one written by an earlier version is missing whatever has been added
-        since. One that no longer validates is dropped.
+        since. A record of any kind that no longer reads is dropped and warned
+        of, so one of them cannot keep the hub from starting, and a monitor
+        bound to a printer that was dropped is unlinked from it. A stored setting
+        no command could have written is put back to its default on its own,
+        since a theme no dashboard could render leaves nobody a page to fix it
+        from, and any other would refuse every edit after it.
         """
         persisted = self.platform.load_state() or {}
         self.settings = {**SETTINGS_DEFAULTS, **{k: v for k, v in persisted.get("settings", {}).items() if k in SETTINGS_DEFAULTS}}
+        unusable = []
+        for key, check in CHECKS.items():
+            try:
+                self.settings[key] = check(self.settings[key])
+            except (TypeError, ValueError) as exc:
+                self.settings[key] = SETTINGS_DEFAULTS[key]
+                unusable.append(f"The saved {key} setting could not be used, so it was reset: {logs.describe(exc)}")
+        for warning in unusable:
+            self._warn_at_start(warning)
+        self.settings["notifiers"] = {
+            provider: self._restored_config(NOTIFIERS[provider], config, NOTIFIERS[provider].label) if provider in NOTIFIERS else config
+            for provider, config in self.settings["notifiers"].items()
+        }
         await self.platform.configure(self.settings)
+        for notice in self.platform.take_notices():
+            self._warn_at_start(notice.message)
         self.scheduler.reset()
-        for record in persisted.get("tokens", []):
-            self.tokens.add(Token(**record))
-        for record in persisted.get("printers", []):
-            try:
-                printer = sanitise_printer(record["id"], record)
-            except (KeyError, ValueError):
-                continue
-            self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], config=printer["config"]))
-        for record in persisted.get("monitors", []):
-            self.monitors[record["id"]] = sanitise_monitor(record["id"], record)
-        for record in persisted.get("prints", []):
-            self.prints.add(PrintFile(**record))
-        for record in persisted.get("plugins", []):
-            try:
-                self.plugins.add(Plugin(**{**record, "manifest": plugins.sanitise_manifest(record["manifest"])}))
-            except (KeyError, TypeError, ValueError) as exc:
-                logger.warning("dropping unreadable plugin record %r: %s", record.get("id"), exc)
-        for record in persisted.get("cameras", []):
-            settings = sanitise_camera(record["id"], record)
-            camera = Camera(
-                id=record["id"],
-                name=record["name"],
-                source=record["source"],
-                printer_id=record.get("printer_id"),
-                declared=record.get("declared", False),
-                max_fps=record["max_fps"],
-                brightness=settings["brightness"],
-                contrast=settings["contrast"],
-                sharpness=settings["sharpness"],
-                crop=settings["crop"],
-                rotation=settings["rotation"],
-            )
-            self.cameras.add(camera)
-            self._schedule_attach(camera)
+        self.feedback_token = persisted.get("feedback_token")
+        restorers: dict[str, Callable[[dict[str, Any]], None]] = {
+            "tokens": lambda record: self.tokens.add(Token(**stored_token(record))),
+            "printers": self._restore_printer,
+            "monitors": lambda record: self.monitors.update({record["id"]: stored_monitor(record)}),
+            "reviews": lambda record: self.reviews.restore([stored_review(record)]),
+            "prints": lambda record: self.prints.add(PrintFile(**stored_print(record))),
+            "plugins": self._restore_plugin,
+            "cameras": self._restore_camera,
+        }
+        for kind, restore in restorers.items():
+            for record in persisted.get(kind, []):
+                try:
+                    if not isinstance(record, dict) or not isinstance(record.get("id"), str):
+                        raise ValueError("it has no id")
+                    restore(record)
+                except (AttributeError, KeyError, OverflowError, TypeError, ValueError) as exc:
+                    label = record.get("name") or record.get("id") if isinstance(record, dict) else None
+                    if isinstance(record, dict) and record.get("id"):
+                        self.dropped_ids.add(str(record["id"]))
+                    kept = " (its file stays in the data directory until the hub next starts)" if kind in ("prints", "reviews") else ""
+                    if kind == "plugins" and self._was_gating(record):
+                        self._dropped_gates.add(str(record["id"]))
+                        kept = ". It was guarding the hub, so every request is refused until it is installed again or the hub restarts"
+                    self._warn_at_start(f"A saved {kind[:-1]}{f' ({label})' if label else ''} could not be read and was dropped: {logs.describe(exc)}{kept}")
+        for monitor in self.monitors.values():
+            if monitor["printer_id"] and self.printers.get(monitor["printer_id"]) is None:
+                monitor["printer_id"] = ""
+                self._warn_at_start(f"Monitor '{monitor['name']}' was bound to a printer that could not be read, so it is no longer linked to one and no longer pauses or cancels a print")
         await self.reconcile_declared_cameras()
         self.cameras.sync_in_use(self.monitors, self.printers)
+        self.watchdog.reconcile_cameras_once_read(self.printers.items)
+        self.settle_reviews()
         runtime = self.platform.plugin_runtime
         if runtime is not None:
-            runtime.attach(self.request, self.plugin_failed)
+            runtime.attach(functools.partial(self.request, reply=runtime.on_event), self.plugin_failed)
             self.add_sink(runtime.on_event)
-            await runtime.reload(self.plugins.running())
+            await self._reload_plugins()
         self._tasks = [
-            asyncio.ensure_future(self.scheduler.run()),
-            asyncio.ensure_future(self.watchdog.poll_devices()),
-            asyncio.ensure_future(self.watchdog.watch_health()),
-            asyncio.ensure_future(self._ticker()),
+            asyncio.ensure_future(self._repeat("inference scheduling", self.scheduler.dispatch)),
+            asyncio.ensure_future(self._repeat("printer polling", self.watchdog.poll_devices)),
+            asyncio.ensure_future(self._repeat("the camera and printer health check", self.watchdog.watch_health)),
+            asyncio.ensure_future(self._repeat("the state refresh", self._tick)),
             asyncio.ensure_future(self._update_loop()),
         ]
         logger.info(
@@ -220,17 +342,96 @@ class Engine:
             len(self.prints.items),
         )
 
+    def _warn_at_start(self, message: str) -> None:
+        """Warns of something start found, and keeps it for a dashboard that connects after it.
+
+        Nobody is connected while the hub starts, so a warning that was only
+        emitted would reach the log and no one else.
+        """
+        self.emit({"event": "warning", "message": message, "recovered": False})
+        self.startup_warnings.append(self._scrubbed(message))
+
+    def _restore_printer(self, record: dict[str, Any]) -> None:
+        printer = sanitise_printer(record["id"], record)
+        reported_status = record.get("reported_status")
+        if not (reported_status is None or isinstance(reported_status, str)):
+            raise ValueError("its last status is text")
+        config = self._restored_config(INTEGRATIONS[printer["provider"]], printer["config"], f"printer '{printer['name']}'")
+        self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], config=config, reported_status=reported_status))
+
+    def _restored_config(self, adapter: Adapter, config: dict[str, Any], owner: str) -> dict[str, Any]:
+        """A stored adapter config as a save would take it, warning of each value that had to be cleared.
+
+        Every save is checked against the adapter's schema and a channel save
+        sends every channel, so one value an earlier version stored unchecked
+        would refuse them all.
+
+        Args:
+            adapter: The integration or notifier the config is for.
+            config: The config as the state file holds it.
+            owner: What the config belongs to, as the warning names it.
+        """
+        config, reset = adapter.restored(config)
+        for title in reset:
+            self._warn_at_start(f"The saved {title.partition(' (')[0]} of {owner} could not be used, so it was cleared")
+        return config
+
+    @staticmethod
+    def _was_gating(record: Any) -> bool:
+        """Whether a stored plugin record that could not be read was guarding the hub, running or failed."""
+        if not isinstance(record, dict) or not isinstance(record.get("id"), str) or not isinstance(record.get("granted"), list):
+            return False
+        return "gate" in record["granted"] and bool(record.get("enabled", True) or record.get("failure"))
+
+    def _restore_plugin(self, record: dict[str, Any]) -> None:
+        """Restores a plugin, standing it down when its manifest now asks for more than was accepted.
+
+        A gate stood down this way keeps the reason as its failure, so the hub
+        goes on refusing requests as it does for a gate that failed.
+        """
+        plugin = Plugin(**{**record, "manifest": plugins.restored_manifest(record["manifest"])})
+        asked_now = [name for name in plugin.manifest["permissions"] if name not in record["manifest"].get("permissions", [])]
+        if asked_now:
+            wanted = ", ".join(plugins.PERMISSIONS[name]["label"] for name in asked_now)
+            if plugin.enabled and plugin.may("gate"):
+                plugin.failure = f"it now needs {wanted}, which has not been accepted"
+            plugin.enabled = False
+            self._warn_at_start(f"Plugin {plugin.manifest['name']} now needs {wanted}, so it is off until you accept that in Plugins")
+        try:
+            plugin.config = plugins.sanitise_config(plugin.config)
+        except ValueError as refused:
+            plugin.config = {}
+            self._warn_at_start(f"Plugin {plugin.manifest['name']} had stored data the hub cannot keep ({refused}), so it starts without it")
+        self.plugins.add(plugin)
+
+    def _restore_camera(self, record: dict[str, Any]) -> None:
+        camera = Camera(**stored_camera(record))
+        self.cameras.add(camera)
+        self._schedule_attach(camera)
+
     async def stop(self) -> None:
-        """Cancels background loops and closes every frame source."""
-        for task in self._tasks:
+        """Cancels background loops and inferences in flight, then closes every frame source.
+
+        An inference left running would score its frame after the printers
+        were closed, and could start a defect response nothing is left to
+        carry out. The cameras stay registered, so a command still in flight
+        that saves on its way out writes every one of them. A plugin's store
+        write still waiting for the tick to save it is written here.
+        """
+        if self._stores_unsaved:
+            self.save()
+        background = (*self._tasks, *self._sends.values(), *self._background)
+        for task in background:
             task.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
+        self.scheduler.cancel_all()
+        await asyncio.gather(*background, return_exceptions=True)
         await self.sockets.drop_all(set())
         await self.watchdog.close()
         if self.platform.plugin_runtime is not None:
             await self.platform.plugin_runtime.close()
-        for camera_id in list(self.cameras.items):
-            await self._drop_camera(camera_id)
+        for camera in self.cameras.values():
+            await self._cancel_attach(camera.id)
+            await self.platform.release_camera(camera.id, camera.source)
         await asyncio.gather(*(adapter.close() for adapter in INTEGRATIONS.values()))
         logger.info("engine stopped")
 
@@ -250,30 +451,67 @@ class Engine:
         Alert, warning, error and device events are also written to the log,
         so the log tail carries the same timeline a maintainer sees in a bug
         report's recent events - plus everything around it.
+
+        An error or a warning often quotes an exception a library raised, which
+        may quote a credential it was handed, so its message loses every stored
+        secret here, before it reaches the log or any transport.
         """
+        if event.get("event") in SCRUBBED_EVENT_TYPES:
+            event = {**event, "message": self._scrubbed(event["message"])}
         level = EVENT_LOG_LEVELS.get(event.get("event", ""))
         if level is not None:
             logger.log(level, "%s %s", event["event"], {k: v for k, v in event.items() if k not in ("event", "req_id")})
         self._broadcast(event)
 
+    async def service_http(self, method: str, url: str, **request: Any) -> tuple[int, Any]:
+        """Makes a printer's or a notifier's request, which fails on a redirect and never follows one."""
+        return await self.platform.http(method, url, redirects="refuse", **request)
+
+    def _scrubbed(self, text: str, typed: set[str] | frozenset[str] = frozenset()) -> str:
+        """Removes every stored secret from a message, and the ``typed`` credentials a test was sent that are not stored."""
+        return reports.scrub(text, reports.collect_secrets(self) | typed, standalone_below=reports.MESSAGE_STANDALONE_BELOW)
+
     def _broadcast(self, event: dict[str, Any]) -> None:
         """Delivers an event to recent history and every transport sink.
 
-        Kept separate from emit() so an event carrying a one-time secret
-        (token_created) can reach the requesting transport without ever being
-        written to the log in clear text.
+        An error that answers a command is a refusal its caller hears, so it
+        stays out of the recent history, where a caller that keeps asking
+        would push the alerts out. A sink that raises is unsubscribed, and a
+        warning says so, since whatever it fed has stopped hearing the hub.
         """
-        if event.get("event") in RECENT_EVENT_TYPES:
+        refusal = event.get("event") == "error" and event.get("req_id") is not None
+        if event.get("event") in RECENT_EVENT_TYPES and not refusal:
             self._recent.append(event)
+        failures = []
         for sink in list(self._sinks):
             try:
                 sink(event)
-            except Exception:
+            except Exception as exc:
                 logger.warning("dropping transport sink that failed to accept an event", exc_info=True)
-                self._sinks.remove(sink)
+                self.remove_sink(sink)
+                failures.append(exc)
+        for failure in failures:
+            self.emit(
+                {
+                    "event": "warning",
+                    "message": f"Something listening to the hub's events failed and was dropped, so a dashboard, MQTT or the plugins may be out of date until the hub restarts: {logs.describe(failure)}",
+                    "recovered": False,
+                }
+            )
 
     def state_event(self) -> dict[str, Any]:
-        """Builds the full state snapshot event."""
+        """Builds the full state snapshot event.
+
+        A plugin reads as disabled while the platform has no plugin runtime, so
+        the dashboard stops its half of a plugin when the hub has stopped the
+        other. ``startup_warnings`` is what start found wrong, kept until the
+        hub restarts for a dashboard that was not there to hear it.
+
+        No stored secret is in it. Each config goes without its secret fields
+        and with its addresses scrubbed, and ``secrets_set`` names the ones
+        that are stored, so a form can say a field is saved without reading it.
+        """
+        plugins_running = self.platform.plugin_runtime is not None
         return {
             "event": "state",
             "host": self.platform.host,
@@ -282,20 +520,24 @@ class Engine:
             "cameras": [c.public() for c in self.cameras.values()],
             "printers": [p.public() for p in self.printers.values()],
             "prints": [p.public() for p in self.prints.values()],
+            "reviews": self.reviews.public(),
+            "feedback_hub": self.feedback_token.split(".")[0] if self.feedback_token else None,
+            "startup_warnings": self.startup_warnings,
             "monitors": [
                 {
                     **monitor,
-                    "watching": monitor_watching(monitor, self.printers),
+                    "watching": monitor_watching(monitor, self.printers) and self.cameras.get(monitor["camera_id"]) is not None,
                     "result": self._results.get(monitor["id"]),
                 }
                 for monitor in self.monitors.values()
             ],
-            "settings": self.settings,
+            "settings": credentials.public_settings(self.settings),
+            "secrets_set": credentials.settings_secrets_set(self.settings),
             "tokens": [t.public() for t in self.tokens.values()],
             "stats": self.scheduler.stats(),
             "integrations": integrations_meta(),
             "notifiers": notifiers_meta(),
-            "plugins": [p.public() for p in self.plugins.values()],
+            "plugins": [{**p.public(), "enabled": p.enabled and plugins_running} for p in self.plugins.values()],
             "plugin_permissions": plugins.permissions_meta(),
             "plugin_events": plugins.EVENTS,
             "plugin_event_permissions": plugins.EVENT_PERMISSIONS,
@@ -305,29 +547,106 @@ class Engine:
         }
 
     def recent_events(self) -> list[dict[str, Any]]:
-        """Returns the retained tail of alert, warning, device and error events."""
+        """Returns the retained tail of alert, warning and error events."""
         return list(self._recent)
 
     def token_scopes(self) -> dict[str, str]:
         """Maps each issued token's secret hash to the scope it grants."""
         return {t.hash: t.scope for t in self.tokens.values()}
 
-    async def handle(self, message: dict[str, Any]) -> None:
-        """Executes a protocol command, emitting an error event on failure."""
-        handler = self._handlers.get(message.get("cmd", ""))
-        if not handler:
-            self.emit({"event": "error", "message": f"unknown command {message.get('cmd')!r}"})
-            return
+    def _reply(self, event: dict[str, Any]) -> None:
+        """Delivers an event to the transport that issued the running command only.
+
+        For an event carrying a one-time secret (token_created), which must
+        reach neither the other transports nor the log, and for the answer to a
+        read (history, a snapshot, a review), which is large and of no use to a
+        transport that did not ask for it.
+        """
+        requester = self._requester.get()
+        if requester is not None:
+            requester(event)
+
+    async def handle(self, message: dict[str, Any], reply: Callable[[dict[str, Any]], None] | None = None) -> None:
+        """Executes a protocol command, emitting an error event on failure.
+
+        Args:
+            message: The command, with its ``cmd`` name and arguments.
+            reply: The issuing transport's sink, which alone receives events
+                addressed to the requester.
+        """
+        reset = self._requester.set(reply)
+        try:
+            if isinstance(message.get("cmd"), str) and message["cmd"] in FINISHING_COMMANDS:
+                await self._finish(self._dispatch(message))
+            else:
+                await self._dispatch(message)
+        finally:
+            self._requester.reset(reset)
+
+    async def _finish(self, work: Coroutine[Any, Any, None]) -> None:
+        """Runs a command to its end even when whoever issued it is cancelled.
+
+        A removal that stopped half way would leave a camera out of the
+        registry but still bound to its monitor and in the saved state, a
+        runtime switch would leave the setting naming a runtime other than the
+        one loaded, and a plugin change would never reach the plugin runtime.
+        So it carries on without its issuer, which a socket that closes or a
+        request that times out has stopped waiting for.
+        """
+        await asyncio.shield(self._hold("a command", work))
+
+    def _hold(self, what: str, work: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
+        """Runs work in the background, holding its task so ``stop`` can cancel it and reporting it if it fails.
+
+        Args:
+            what: The work, as a failure is reported.
+            work: The coroutine to run.
+
+        Returns:
+            The task running it.
+        """
+        task = asyncio.create_task(work)
+        self._background.add(task)
+
+        def finished(done: asyncio.Task[None]) -> None:
+            self._background.discard(done)
+            if not done.cancelled() and done.exception():
+                self.report_failure(what, done.exception())
+
+        task.add_done_callback(finished)
+        return task
+
+    async def _dispatch(self, message: dict[str, Any]) -> None:
+        """Runs a command, then closes it with the state event its issuer waits on.
+
+        A command that changes nothing persisted saves nothing, and its closing
+        snapshot goes to its issuer alone, as does that of a handler that
+        returns False to say it changed nothing to save now. The rest save and
+        tell everybody.
+        """
+        handler = self._handlers.get(message["cmd"]) if isinstance(message.get("cmd"), str) else None
         req_id = message.get("req_id")
+        if not handler:
+            self.emit({"event": "error", "message": f"unknown command {message.get('cmd')!r}", "req_id": req_id})
+            return
         logger.debug("command %s", message.get("cmd"))
         try:
-            await handler(message)
-            self._sync(req_id)
+            unsaved = await handler(message) is False
+            if unsaved or message["cmd"] in UNSAVED_COMMANDS:
+                self._reply({**self.state_event(), "req_id": req_id})
+            elif message["cmd"] not in READ_ONLY_COMMANDS:
+                self._sync(req_id)
         except Exception as exc:
-            logger.warning("command %s failed", message.get("cmd"), exc_info=True)
-            self.emit({"event": "error", "message": str(exc), "req_id": req_id})
+            logger.warning("command %s failed\n%s", message.get("cmd"), self._scrubbed(traceback.format_exc()))
+            self.emit({"event": "error", "message": logs.describe(exc), "req_id": req_id})
 
-    async def request(self, message: dict[str, Any], *, timeout: float = REQUEST_TIMEOUT_S) -> list[dict[str, Any]]:
+    async def request(
+        self,
+        message: dict[str, Any],
+        *,
+        timeout: float | None = None,
+        reply: Callable[[dict[str, Any]], None] | None = None,
+    ) -> list[dict[str, Any]]:
         """Runs a command and returns the events it produced, raising on failure.
 
         A correlating req_id is attached, a temporary sink collects every event
@@ -335,6 +654,21 @@ class Engine:
         snapshot, or an error) before it returns. This turns the broadcast
         protocol into the request/response shape the REST and MCP transports need
         without duplicating any command logic.
+
+        Args:
+            message: The command, with its ``cmd`` name and arguments.
+            timeout: Seconds to wait for the command to finish. Left out, it
+                is REQUEST_TIMEOUT_S, and longer for a command that is slow by
+                design.
+            reply: A sink of the caller's that also receives the events
+                addressed to the requester, for a transport that hears its
+                answers as events.
+
+        Returns:
+            Every event the command produced.
+
+        Raises:
+            RuntimeError: The command failed.
         """
         req_id = uuid.uuid4().hex
         collected: list[dict[str, Any]] = []
@@ -343,15 +677,49 @@ class Engine:
             if event.get("req_id") == req_id:
                 collected.append(event)
 
-        self.add_sink(sink)
+        def requester(event: dict[str, Any]) -> None:
+            sink(event)
+            if reply is not None:
+                reply(event)
+
+        self._sinks.append(sink)
         try:
-            await asyncio.wait_for(self.handle({**message, "req_id": req_id}), timeout)
+            await asyncio.wait_for(self.handle({**message, "req_id": req_id}, requester), timeout or self._time_allowed(message))
         finally:
             self.remove_sink(sink)
         for event in collected:
             if event.get("event") == "error":
                 raise RuntimeError(event.get("message", "command failed"))
         return collected
+
+    def _time_allowed(self, message: dict[str, Any]) -> float:
+        """Seconds a requested command may run.
+
+        More than REQUEST_TIMEOUT_S for the commands that are slow by design: a
+        printer command, which has that long to be sent, longer where the
+        adapter says its actions are slow, and READ_BACK_S after it for the
+        printer to be read back, a camera that is given
+        CAMERA_OPEN_WAIT_S to open, one printer's cameras that open in turn, and
+        a switch of inference runtime, which waits for the inferences in flight
+        and then loads the model.
+        """
+        command = message.get("cmd")
+        if command in ("printer.action", "printer.heat"):
+            printer = self.printers.get(message["id"]) if isinstance(message.get("id"), str) else None
+            return self._send_allowed(printer) + READ_BACK_S if printer else REQUEST_TIMEOUT_S
+        if command == "camera.add":
+            return REQUEST_TIMEOUT_S + CAMERA_OPEN_WAIT_S
+        if command == "printer.cameras.refresh":
+            return REQUEST_TIMEOUT_S + CAMERA_OPEN_WAIT_S * CAMERAS_OPENED_IN_TURN
+        patch = message.get("patch")
+        if command == "settings.update" and isinstance(patch, dict) and patch.get("inference_runtime", self.settings["inference_runtime"]) != self.settings["inference_runtime"]:
+            return REQUEST_TIMEOUT_S + RUNTIME_DRAIN_TIMEOUT_S + RUNTIME_LOAD_ALLOWANCE_S
+        return REQUEST_TIMEOUT_S
+
+    @staticmethod
+    def _send_allowed(printer: Printer) -> float:
+        """Seconds a command may take to reach a printer, longer for one whose adapter says its actions are slow."""
+        return REQUEST_TIMEOUT_S + INTEGRATIONS[printer.provider].slow_action_s
 
     async def snapshot(self, camera_id: str) -> bytes | None:
         """Encodes the freshest frame of a camera as JPEG, or None if unavailable.
@@ -365,7 +733,8 @@ class Engine:
         frame = await camera.frame_source.grab()
         if frame is None:
             return None
-        rgb = vision.transform(
+        rgb = await asyncio.to_thread(
+            vision.transform,
             frame.rgb,
             rotation=camera.rotation,
             crop=camera.crop,
@@ -388,13 +757,17 @@ class Engine:
         result = await self.platform.infer(rgb)
         return {**result, "defect_score": vision.defect_score(result)}
 
-    def _save(self) -> None:
+    def save(self) -> None:
+        """Writes the registries and settings to the platform's state store."""
+        self._stores_unsaved = False
         self.platform.save_state(
             {
                 "cameras": [c.persisted() for c in self.cameras.values()],
                 "printers": [p.persisted() for p in self.printers.values()],
                 "prints": [p.persisted() for p in self.prints.values()],
                 "monitors": [persisted_monitor(m) for m in self.monitors.values()],
+                "reviews": self.reviews.persisted(),
+                "feedback_token": self.feedback_token,
                 "settings": self.settings,
                 "tokens": [t.persisted() for t in self.tokens.values()],
                 "plugins": [p.persisted() for p in self.plugins.values()],
@@ -403,7 +776,8 @@ class Engine:
 
     def _sync(self, req_id: Any = None) -> None:
         self.cameras.sync_in_use(self.monitors, self.printers)
-        self._save()
+        self.settle_reviews()
+        self.save()
         event = self.state_event()
         if req_id is not None:
             event["req_id"] = req_id
@@ -415,25 +789,43 @@ class Engine:
         A failure logs at debug only: the ticker retries every few seconds,
         so per-attempt warnings would flood the tail, and the watchdog
         already raises an edge-triggered warning when a watched camera's
-        outage sustains.
+        outage sustains. The camera keeps the reason for as long as it stays
+        closed, so its entry can say why it is offline.
         """
         try:
             source = await self.platform.open_camera(camera.id, camera.source)
         except Exception as exc:
             logger.debug("camera '%s' (%s) failed to attach: %s", camera.name, camera.id, exc)
+            camera.reason = self._scrubbed(logs.describe(exc))
             return
+        camera.reason = None
         if self.cameras.get(camera.id) is not camera:
             source.close()
             await self.platform.release_camera(camera.id, camera.source)
             return
+        self._attach_source(camera, source)
+        logger.info("camera '%s' (%s) attached at %.1f fps", camera.name, camera.id, source.fps)
+
+    @staticmethod
+    def _attach_source(camera: Camera, source: FrameSource) -> None:
+        """Hands a camera the frame source that was opened for it."""
         camera.frame_source = source
         source.set_monitoring(camera.in_use)
         if source.fps > 0:
             camera.max_fps = source.fps
-        logger.info("camera '%s' (%s) attached at %.1f fps", camera.name, camera.id, source.fps)
+
+    async def _detach(self, camera: Camera) -> None:
+        """Closes a camera's frame source, cancelling its inference in flight, and releases what the platform holds for it."""
+        source = camera.frame_source
+        if source is not None:
+            self.scheduler.cancel_camera(camera)
+            camera.frame_source = None
+            source.close()
+        await self.platform.release_camera(camera.id, camera.source)
 
     def _schedule_attach(self, camera: Camera) -> None:
-        if camera.id in self._attach_tasks:
+        """Starts attaching a camera, unless it is attached, being attached or being taken down to be attached afresh."""
+        if camera.frame_source is not None or camera.id in self._attach_tasks or self._detaching[camera.id]:
             return
         task = asyncio.create_task(self._attach(camera))
         self._attach_tasks[camera.id] = task
@@ -446,39 +838,84 @@ class Engine:
 
     async def restart_camera(self, camera: Camera) -> None:
         """Releases a failed camera source and attaches it again from scratch."""
-        source = camera.frame_source
-        if source is None:
+        if camera.frame_source is None:
             return
-        self.scheduler.cancel_camera(camera)
-        camera.frame_source = None
-        source.close()
-        await self.platform.release_camera(camera.id, camera.source)
+        self._detaching[camera.id] += 1
+        try:
+            await self._detach(camera)
+        finally:
+            self._detaching[camera.id] -= 1
         if self.cameras.get(camera.id) is camera:
             self._schedule_attach(camera)
 
-    async def _ticker(self) -> None:
-        tick = 0
+    def report_failure(self, what: str, exc: BaseException) -> None:
+        """Raises an error event for background work that failed.
+
+        A fault that repeats, such as a full disk, is reported once every
+        FAILURE_REPORT_EVERY_S rather than on every frame or pass.
+
+        Args:
+            what: The work that failed, as the message names it.
+            exc: What it raised.
+        """
+        logger.debug("%s traceback", what, exc_info=exc)
+        now = time.monotonic()
+        if now - self._failure_reported_at.get(what, -FAILURE_REPORT_EVERY_S) >= FAILURE_REPORT_EVERY_S:
+            self._failure_reported_at[what] = now
+            self.emit({"event": "error", "message": f"{what} failed: {logs.describe(exc)}"})
+
+    async def _repeat(self, what: str, step: Callable[[], Awaitable[float]]) -> None:
+        """Runs a background loop for good, reporting a pass that fails and carrying on.
+
+        Args:
+            what: The loop, as a failed pass is reported.
+            step: One pass, returning the seconds to wait before the next.
+        """
         while True:
-            await asyncio.sleep(STATE_TICK_S)
-            tick += 1
-            for camera in self.cameras.values():
-                if camera.frame_source is None:
-                    if tick % REATTACH_EVERY_TICKS == 0:
-                        self._schedule_attach(camera)
-                elif camera.frame_source.fps > 0:
-                    camera.max_fps = camera.frame_source.fps
-            self.emit(self.state_event())
+            try:
+                delay = await step()
+            except Exception as exc:
+                self.report_failure(what, exc)
+                delay = LOOP_RETRY_S
+            await asyncio.sleep(delay)
+
+    async def _tick(self) -> float:
+        self._ticks += 1
+        for camera in self.cameras.values():
+            if camera.frame_source is None:
+                if self._ticks % REATTACH_EVERY_TICKS == 0:
+                    self._schedule_attach(camera)
+            elif camera.frame_source.fps > 0:
+                camera.max_fps = camera.frame_source.fps
+        if self.settle_reviews() or self._stores_unsaved:
+            self.save()
+        if self.settings["feedback"] == "ask":
+            for review in self.reviews.due(time.time()):
+                if review.id not in self._sends:
+                    self._start_send(review)
+        for notice in self.platform.take_notices():
+            camera = self.cameras.get(notice.camera_id) if notice.camera_id else None
+            subject = f"'{camera.name}' " if camera else ""
+            self.emit({"event": "warning", "message": subject + notice.message, "recovered": notice.recovered})
+        self.emit(self.state_event())
+        return STATE_TICK_S
 
     async def _update_loop(self) -> None:
-        """Refreshes the update status daily while the auto-check is enabled."""
+        """Refreshes the update status daily while the auto-check is enabled, sooner after a check that failed."""
         while True:
+            delay = UPDATE_CHECK_INTERVAL_S
             if self.settings.get("update_check", True):
                 try:
-                    await self._check_updates()
-                    self.emit(self.state_event())
+                    await self._announce_updates()
                 except Exception as exc:
-                    logger.warning("update check failed: %s", exc)
-            await asyncio.sleep(UPDATE_CHECK_INTERVAL_S)
+                    logger.warning("update check failed: %s", logs.describe(exc))
+                    delay = UPDATE_RETRY_S
+            await asyncio.sleep(delay)
+
+    async def _announce_updates(self) -> None:
+        """Checks for an update without being asked to, and tells every client what it found."""
+        await self._check_updates()
+        self.emit(self.state_event())
 
     async def _check_updates(self) -> None:
         """Fetches and stores the update status, raising if it cannot.
@@ -498,13 +935,19 @@ class Engine:
         self.emit({"event": "error", "message": message})
 
     async def _on_result(self, camera: Camera, frame: Frame, result: dict[str, Any]) -> None:
+        """Scores a frame for every monitor watching through its camera.
+
+        Each monitor is read afresh when its turn comes and again after
+        anything awaited, since one edited, switched off or removed while an
+        earlier monitor's frame was being kept must not be acted on as it was.
+        """
         score = vision.defect_score(result)
-        for monitor in self.monitors.values():
-            if monitor["camera_id"] != camera.id or not monitor_watching(monitor, self.printers):
+        for monitor_id in [monitor["id"] for monitor in self.monitors.values() if monitor["camera_id"] == camera.id]:
+            monitor = self._watching_through(monitor_id, camera)
+            if monitor is None:
                 continue
             ts = time.time()
             point = {"score": round(score, 4), "ts": ts}
-            monitor_id = monitor["id"]
             self._results[monitor_id] = point
             self.history.setdefault(monitor_id, MonitorHistory()).record(ts, score, monitor["threshold"])
             emitted_at = time.monotonic()
@@ -522,42 +965,297 @@ class Engine:
                     }
                 )
             await self.watchdog.on_score(monitor, frame, score)
+            monitor = self._watching_through(monitor_id, camera)
+            if monitor is not None and self.settings["feedback"] == "ask" and self._print_known(monitor):
+                try:
+                    if await self.reviews.sample(monitor, frame, score, ts):
+                        self.save()
+                except Exception as exc:
+                    self.report_failure(f"keeping a frame of '{monitor['name']}' for review", exc)
 
-    def note_alert(self, monitor_id: str, alert: dict[str, Any], jpeg: bytes | None) -> None:
-        """Records a fired alert and its triggering frame in a monitor's history."""
-        self.history.setdefault(monitor_id, MonitorHistory()).record_alert(alert["ts"], alert["score"], alert["action"], jpeg)
+    def _watching_through(self, monitor_id: str, camera: Camera) -> dict[str, Any] | None:
+        """The monitor as it stands now, if it is still watching through this camera."""
+        monitor = self.monitors.get(monitor_id)
+        return monitor if monitor and monitor["camera_id"] == camera.id and monitor_watching(monitor, self.printers) else None
 
-    def monitor_snapshot(self, monitor_id: str, snap_id: str) -> bytes | None:
-        """Returns a captured risky-moment snapshot's JPEG bytes, or None."""
-        history = self.history.get(monitor_id)
-        return history.snapshot(snap_id) if history else None
+    def _print_known(self, monitor: dict[str, Any]) -> bool:
+        """Whether a frame of a monitor can be put down to a print.
+
+        A printer that has not been read yet, as after its connection is
+        edited, is watched in case it is printing. A frame kept then would
+        begin a print that an idle printer's first answer ends at once.
+        """
+        printer = self.printers.get(monitor["printer_id"])
+        return printer is None or printer.reported_status is not None
+
+    async def note_alert(self, monitor_id: str, alert: dict[str, Any], frame: Frame) -> None:
+        """Records a fired alert in a monitor's history and keeps the frame that fired it.
+
+        A monitor removed while its alert was being pushed has nothing left to record it against.
+        """
+        if monitor_id not in self.monitors:
+            return
+        self.history.setdefault(monitor_id, MonitorHistory()).record_alert(alert["ts"], alert["score"], alert["action"])
+        await self.reviews.keep_alert(monitor_id, alert, frame)
+        self.save()
+
+    async def monitor_snapshot(self, monitor_id: str, snap_id: str) -> bytes | None:
+        """Returns the JPEG bytes of a frame kept from a monitor's prints.
+
+        Args:
+            monitor_id: The monitor the frame was kept for.
+            snap_id: The frame's id.
+
+        Returns:
+            The JPEG, or None when the monitor has no such frame or its file has gone from the store.
+        """
+        try:
+            return await self.reviews.read(monitor_id, snap_id)
+        except FileNotFoundError:
+            return None
+
+    def settle_reviews(self) -> bool:
+        """Ends the review of every print that is over, returning whether any did."""
+        return self.reviews.settle(self.monitors, self.printers, self.watchdog.responding, self.settings["feedback"] == "ask")
+
+    def _start_send(self, review: Review, req_id: Any = None) -> None:
+        """Starts uploading a review, or has the upload already under way answer this request too."""
+        if review.id in self._sends:
+            self._send_requests[review.id].append(req_id)
+            return
+        self._send_requests[review.id] = [req_id]
+        self._sends[review.id] = asyncio.create_task(self._send_review(review))
+
+    def _require_feedback_on(self) -> None:
+        """Refuses to send frames for training while the review switch is off.
+
+        Raises:
+            ValueError: If feedback is switched off.
+        """
+        if self.settings["feedback"] != "ask":
+            raise ValueError("Training frames are switched off in Settings, under Advanced, so nothing is sent")
+
+    async def _send_review(self, review: Review) -> None:
+        """Uploads the frames a reviewer kept, stopping when the inbox turns the print away.
+
+        A print the inbox has no room for stays queued with the reason and a
+        time to try again, which is the inbox's own reset time when it gives
+        one, or six hours on when it gives none or one that is not a time. A reset time already past on
+        this hub's clock, which one running ahead of the inbox's sees, is tried
+        again in a minute. A frame that can never be sent, because its file is
+        gone or the inbox rejects that frame itself, is passed over so the rest still go,
+        and leaves the reviewer's choices so it is not counted as sent. A
+        print none of whose frames could be sent goes back to waiting for a
+        review and says so, since calling it sent would be wrong.
+        A send that is cut short keeps no retry time, which makes it due again
+        at once. A print dismissed or submitted afresh while it uploads stops
+        after the frame in flight, since those choices are no longer the ones
+        to send, and one dismissed before its turn is not sent at all. A print
+        whose monitor was removed meanwhile is deleted with the rest of that
+        monitor's. A print submitted afresh carries over the frames already
+        sent that it still keeps, and the upload goes on under the new choices
+        and answers every request made for it, so no frame goes twice.
+        """
+        submission = review.submission or {}
+        try:
+            if review.submission is None:
+                return
+            monitor = self.monitors.get(review.monitor_id)
+            if monitor is None:
+                await self.reviews.forget(review.monitor_id)
+                raise LookupError("that print's monitor was removed, so it was not sent")
+            printer = self.printers.get(monitor.get("printer_id") or "")
+            print_details = {
+                "print": review.id,
+                "threshold": monitor["threshold"],
+                "version": self.platform.version,
+                "provider": printer.provider if printer else "none",
+                "printer": submission["printer"],
+            }
+            submission["code"] = submission["retry_at"] = None
+            for frame in review.unsent():
+                frame_details = {"frame": frame["id"], "label": submission["labels"][frame["id"]], "kind": frame["kind"], "score": frame["score"], "ts": frame["ts"]}
+                taken = await self._send_frame(frame_key(review.id, frame["id"]), {**print_details, **frame_details})
+                chosen = review.submission
+                if chosen is not None and frame["id"] in chosen["labels"]:
+                    if taken:
+                        chosen["sent"].append(frame["id"])
+                    else:
+                        del chosen["labels"][frame["id"]]
+                if chosen is not submission:
+                    break
+            else:
+                if submission["sent"]:
+                    review.status = "sent"
+                else:
+                    review.submission, review.status = None, "ready"
+                    for req_id in self._requesters(review):
+                        self.emit({"event": "error", "message": "none of that print's frames could be sent", "req_id": req_id})
+        except Exception as exc:
+            refused = exc if isinstance(exc, feedback.Refused) else None
+            submission["code"] = refused.code if refused else "failed"
+            given = refused.retry_at if refused else None
+            reset_at = given if isinstance(given, (int, float)) and math.isfinite(given) else 0.0
+            if not reset_at:
+                submission["retry_at"] = time.time() + FEEDBACK_RETRY_S
+            else:
+                submission["retry_at"] = reset_at if reset_at > time.time() else time.time() + FEEDBACK_RECHECK_S
+            logger.info("feedback for review %s queued: %s", review.id, submission["code"])
+            if not refused:
+                self.report_failure("sending a reviewed print", exc)
+        finally:
+            requesters = self._requesters(review)
+            self._sends.pop(review.id, None)
+            del self._send_requests[review.id]
+            self.save()
+        if review.status == "queued" and review.submission is not submission:
+            for req_id in requesters:
+                self._start_send(review, req_id)
+            return
+        for req_id in requesters:
+            self.emit({"event": "review_sent", **review.public(), "ok": review.status == "sent", "req_id": req_id})
+        self.emit(self.state_event())
+
+    def _requesters(self, review: Review) -> list[Any]:
+        """The ``req_id`` of every request an upload answers, or one None when the clock started it."""
+        return [req_id for req_id in self._send_requests[review.id] if req_id is not None] or [None]
+
+    async def _send_frame(self, key: str, details: dict[str, Any]) -> bool:
+        """Uploads one kept frame, passing over one that can never be sent.
+
+        Args:
+            key: The file store key of the frame's JPEG.
+            details: The frame's print and frame ids, label, kind, score and context.
+
+        Returns:
+            Whether the inbox took the frame.
+
+        Raises:
+            feedback.Refused: If the inbox is unreachable or out of room.
+        """
+        try:
+            jpeg = await self._fit_for_feedback(await self.platform.files.read(key))
+            if jpeg is not None:
+                await self._put_feedback_frame(jpeg, details)
+                return True
+            logger.warning("feedback frame %s is too big, so it was not sent", key)
+        except FileNotFoundError:
+            logger.warning("feedback frame %s is missing, so it was not sent", key)
+        except feedback.Refused as refused:
+            if refused.code not in FEEDBACK_UNSENDABLE:
+                raise
+            logger.warning("feedback frame %s was rejected as %s, so it was not sent", key, refused.code)
+        return False
+
+    async def _fit_for_feedback(self, jpeg: bytes) -> bytes | None:
+        """Returns a frame small enough for the inbox, re-encoding it once if needed, or None."""
+        if len(jpeg) <= feedback.FRAME_BYTES_MAX:
+            return jpeg
+        rgb = await self.platform.decode_jpeg(jpeg)
+        smaller = await self.platform.encode_jpeg(vision.shrink(rgb, FEEDBACK_SMALLER_PX)) if rgb is not None else None
+        return smaller if smaller and len(smaller) <= feedback.FRAME_BYTES_MAX else None
+
+    async def _put_feedback_frame(self, jpeg: bytes, details: dict[str, Any]) -> None:
+        """Uploads a frame, registering the hub first and once more if its token is not recognised.
+
+        Prints sent together register one at a time, and each uses the token
+        another has just been given, so every frame goes under one hub id.
+        """
+        tried = None
+        for renew in (False, True):
+            async with self._registering:
+                if self.feedback_token == tried:
+                    self.feedback_token = await feedback.register(self.platform.http)
+                    self.save()
+                tried = self.feedback_token
+            try:
+                return await feedback.put_frame(self.platform.http, tried, jpeg, details)
+            except feedback.Refused as refused:
+                if refused.code != "token" or renew:
+                    raise
 
     async def _cmd_discover(self, message: dict[str, Any]) -> None:
+        """Lists the sources that are not registered yet.
+
+        A Windows camera registered before 2.6.0 has the name it shows as its
+        device id where the hub now lists its device path, and the listing
+        numbers cameras of one model, so a source whose label without its
+        number is a registered name is that camera. Opening by name reached the
+        first of them, so only the first is hidden for each such registration.
+        A stream the hub publishes for one of its own cameras is not offered,
+        since registering it would read the first camera's stream as a second
+        camera.
+        """
         sources = await self.platform.discover_cameras()
-        registered = {c.source.get("device_id") or c.source.get("path") or c.source.get("url") for c in self.cameras.values()}
-        fresh = [s for s in sources if (s.get("device_id") or s.get("path") or s.get("url")) not in registered]
+        unlisted_by_name = [camera.source["device_id"] for camera in self.cameras.values() if camera.source["kind"] == "device"]
+        fresh: list[dict[str, Any]] = []
+        for source in sources:
+            shown_as = NUMBERED_LABEL.sub("", source.get("label") or "")
+            if self._stream_taken(source):
+                continue
+            if shown_as in unlisted_by_name:
+                unlisted_by_name.remove(shown_as)
+                continue
+            fresh.append(source)
         self.emit({"event": "discovered", "sources": fresh, "req_id": message.get("req_id")})
 
+    def _registered_addresses(self, apart_from: Camera | None = None) -> set[Any]:
+        return {_address(camera.source) for camera in self.cameras.values() if camera is not apart_from}
+
+    def _stream_taken(self, source: dict[str, Any], moving: Camera | None = None) -> bool:
+        """Whether a camera is already registered, or being opened, on a source.
+
+        Every way a camera arrives asks this first, so one stream is never two
+        cameras however it was spelt or whichever command got there first.
+
+        Args:
+            source: The source a camera would open.
+            moving: The camera being moved to it, which does not count as
+                holding its own stream, so it can take a new login or
+                certificate fingerprint for the address it is already on.
+        """
+        publishes_a_camera = source.get("kind") == "path" and source.get("path") in self.cameras.items
+        address = _address(source)
+        return publishes_a_camera or bool(address) and address in self._registered_addresses(moving) | self._adding
+
     async def _cmd_camera_add(self, message: dict[str, Any]) -> None:
-        source = dict(message["source"])
+        """Registers a camera once it opens.
+
+        Raises:
+            ValueError: If its source is one the hub could not read back at its
+                next start, or its device or stream is already registered, or is
+                being registered by another command still waiting on it to open,
+                or its name is not text.
+        """
+        name = message.get("name") or "Camera"
+        if not isinstance(name, str):
+            raise ValueError("a camera's name is text")
+        source = dict(sanitise_source(message["source"]))
+        if source.get("url"):
+            source["url"] = tidy_stream_url(source["url"])
+        reports.require_storable(source.values())
+        address = _address(source)
+        if self._stream_taken(source):
+            raise ValueError("that camera is already registered")
         camera_id = uuid.uuid4().hex[:8]
         camera = Camera(
             id=camera_id,
-            name=str(message.get("name") or "Camera").strip() or "Camera",
+            name=name.strip() or "Camera",
             source=source,
             max_fps=15.0,
         )
-        source = await self.platform.open_camera(camera_id, camera.source)
-        camera.frame_source = source
-        source.set_monitoring(camera.in_use)
-        if source.fps > 0:
-            camera.max_fps = source.fps
+        self._adding.add(address)
+        try:
+            source = await self.platform.open_camera(camera_id, camera.source)
+        finally:
+            self._adding.discard(address)
+        self._attach_source(camera, source)
         self.cameras.add(camera)
 
     async def _cmd_camera_update(self, message: dict[str, Any]) -> None:
         camera = self.cameras.get(message["id"])
         if not camera:
-            raise KeyError(f"no camera {message['id']}")
+            raise LookupError(f"no camera {message['id']}")
         settings = sanitise_camera(
             camera.id,
             message.get("patch", {}),
@@ -567,6 +1265,7 @@ class Engine:
                 "sharpness": camera.sharpness,
                 "crop": camera.crop,
                 "rotation": camera.rotation,
+                "detect_fps": camera.detect_fps,
             },
         )
         if "name" in message.get("patch", {}):
@@ -576,23 +1275,56 @@ class Engine:
         camera.sharpness = settings["sharpness"]
         camera.crop = settings["crop"]
         camera.rotation = settings["rotation"]
+        camera.detect_fps = settings["detect_fps"]
 
     async def _cmd_camera_remove(self, message: dict[str, Any]) -> None:
         camera = self.cameras.get(message["id"])
-        if camera and camera.printer_id and self.printers.get(camera.printer_id):
+        if not camera:
+            raise LookupError(f"no camera {message['id']}")
+        if camera.printer_id and self.printers.get(camera.printer_id):
             raise RuntimeError("camera is managed by its printer integration; remove the printer instead")
-        if camera and camera.declared:
+        if camera.declared:
             raise RuntimeError("camera is passed in by the deployment; remove its devices entry instead")
         await self._drop_camera(message["id"])
+        self._unbind_camera(message["id"])
 
     async def _drop_camera(self, camera_id: str) -> None:
+        """Deregisters a camera and releases its source.
+
+        Monitors keep their binding, so a camera its printer or the deployment
+        manages is watched again when it comes back under the same id. An
+        inference in flight is cancelled, since one that never came back would
+        hold its worker for good.
+        """
         camera = self.cameras.remove(camera_id)
+        await self._cancel_attach(camera_id)
+        if camera:
+            self.scheduler.cancel_camera(camera)
+            await self._tidy_up(f"release the camera '{camera.name}'", self.platform.release_camera(camera.id, camera.source))
+
+    async def _tidy_up(self, what: str, work: Awaitable[Any]) -> None:
+        """Runs the clean-up that follows a record being removed, warning when it fails.
+
+        The record is already gone from the registry and the saved state is
+        written when the command ends, so a failure here must not end the
+        command and leave the two disagreeing.
+
+        Args:
+            what: The clean-up, as the warning names it.
+            work: The awaitable that does it.
+        """
+        try:
+            await work
+        except Exception as exc:
+            self.emit({"event": "warning", "message": f"Could not {what}: {logs.describe(exc)}"})
+
+    async def _cancel_attach(self, camera_id: str) -> None:
         task = self._attach_tasks.pop(camera_id, None)
         if task:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-        if camera:
-            await self.platform.release_camera(camera.id, camera.source)
+
+    def _unbind_camera(self, camera_id: str) -> None:
         for monitor in self.monitors.values():
             if monitor["camera_id"] == camera_id:
                 monitor["camera_id"] = ""
@@ -603,17 +1335,34 @@ class Engine:
         Runs at boot, which is as often as the set can change: a container is
         given its devices when it starts. A declared device registers under a
         deterministic id, so a restart returns the camera to the name and tuning
-        it was given, and dropping it from the deployment is what removes it.
+        it was given.
+
+        A device missing at one boot is often only unplugged, so its camera
+        stays registered and offline, and is declared again when the device
+        returns. Until then it is the user's to remove. A device that is still
+        there but no longer declared is one the deployment stopped managing,
+        and its camera goes. One registered by hand before it was declared stays
+        the one camera on it, which the user can still remove.
         """
-        declared = {
+        devices = {
             declared_camera_id(source["device_id"]): source
             for source in await self.platform.discover_cameras()
-            if source.get("declared")
+            if source["kind"] == "device"
         }
-        for camera in [c for c in self.cameras.values() if c.declared and c.id not in declared]:
-            await self._drop_camera(camera.id)
-        for camera_id, source in declared.items():
-            if self.cameras.get(camera_id):
+        for camera in [c for c in self.cameras.values() if c.declared]:
+            if camera.id not in devices:
+                camera.declared = False
+            elif not devices[camera.id].get("declared"):
+                await self._drop_camera(camera.id)
+        for camera_id, source in devices.items():
+            if not source.get("declared"):
+                continue
+            known = self.cameras.get(camera_id)
+            if known:
+                known.declared = True
+                continue
+            if _address(source) in self._registered_addresses():
+                logger.info("declared device '%s' is already registered by hand", source["label"])
                 continue
             camera = Camera(
                 id=camera_id,
@@ -632,79 +1381,164 @@ class Engine:
         add/update: the user triggers it from the camera registry to pick up a
         camera attached to a printer's service after it was registered.
         """
-        await asyncio.gather(*(self.reconcile_printer_cameras(printer) for printer in self.printers.values()))
+        await asyncio.gather(*(self.reconcile_printer_cameras(printer, keep_working=True) for printer in self.printers.values()))
 
-    async def reconcile_printer_cameras(self, printer: Printer) -> None:
+    async def reconcile_printer_cameras(self, printer: Printer, keep_working: bool = False) -> None:
         """Registers any cameras a printer's service exposes that are not known yet.
 
-        Runs when a printer is added or updated, and on demand via
-        printer.cameras.refresh. A deterministic id keyed by the adapter's camera
+        Runs when a printer is added or updated, on demand via
+        printer.cameras.refresh, and once for each printer after its first
+        read at boot. A deterministic id keyed by the adapter's camera
         key makes this idempotent; cameras the service stops exposing are left in
-        place and go only when the printer does.
+        place and go only when the printer does. A camera whose address differs
+        from what the service now says is attached again at the new one,
+        keeping its name and tuning, unless ``keep_working`` is set and it is
+        delivering frames, resting because nothing watches it, or does within
+        CAMERA_SETTLE_S, since the address PrintGuard works out can be wrong
+        where the one it holds works. One printer is reconciled by one caller at
+        a time, so a camera is never opened twice, and a camera whose printer
+        went while it was opening is closed again. A stream already registered
+        by hand stays the one camera on it. A printer removed or edited to
+        another service or address while this waits its turn, lists its cameras
+        or opens one is left alone, since the reconcile that edit queued does
+        the work for the new details. A printer whose cameras cannot be
+        listed, or a camera that will not open, raises a warning, since the
+        camera not appearing says nothing about why.
         """
-        adapter = INTEGRATIONS.get(printer.provider)
-        if not adapter:
-            return
-        try:
-            exposed = await adapter.cameras(self.platform.http, printer.config)
-        except Exception as exc:
-            logger.warning("printer '%s' camera listing failed: %s", printer.name, exc)
-            return
-        if self.printers.get(printer.id) is None:
-            return
-        added = False
-        for descriptor in exposed:
-            camera_id = f"{printer.id}-{descriptor['key']}"
-            if self.cameras.get(camera_id):
-                continue
-            source = dict(descriptor["source"])
-            camera = Camera(id=camera_id, name=descriptor["name"], source=source, printer_id=printer.id, max_fps=15.0)
+        async with self._reconciles.setdefault(printer.id, asyncio.Lock()):
+            adapter = INTEGRATIONS.get(printer.provider)
+            asked = (printer.provider, printer.config)
+
+            def unchanged() -> bool:
+                return self.printers.get(printer.id) is printer and (printer.provider, printer.config) == asked
+
+            if not adapter or not unchanged():
+                return
             try:
-                source = await self.platform.open_camera(camera_id, camera.source)
+                exposed = await adapter.cameras(self.service_http, printer.config)
             except Exception as exc:
-                logger.warning("printer camera '%s' failed to open: %s", descriptor["name"], exc)
-                continue
-            camera.frame_source = source
-            source.set_monitoring(camera.in_use)
-            if source.fps > 0:
-                camera.max_fps = source.fps
-            self.cameras.add(camera)
-            added = True
-        if added:
-            self._sync()
+                self.emit({"event": "warning", "message": f"Could not list the cameras of printer '{printer.name}': {logs.describe(exc)}"})
+                return
+            changed = False
+            for descriptor in exposed:
+                if not unchanged():
+                    break
+                camera_id = f"{printer.id}-{descriptor['key']}"
+                source = dict(descriptor["source"])
+                camera = self.cameras.get(camera_id)
+                if camera:
+                    if camera.source != source and not (keep_working and await self._is_working(camera)):
+                        if self._stream_taken(source, moving=camera):
+                            self.emit({"event": "warning", "message": f"Could not move the camera '{camera.name}' of printer '{printer.name}': that stream is already registered"})
+                        else:
+                            await self._move_camera(camera, source)
+                            changed = True
+                    continue
+                if self._stream_taken(source):
+                    logger.info("printer '%s' camera '%s' is already registered", printer.name, descriptor["name"])
+                    continue
+                camera = Camera(id=camera_id, name=descriptor["name"], source=source, printer_id=printer.id, max_fps=15.0)
+                self._adding.add(_address(source))
+                try:
+                    source = await self.platform.open_camera(camera_id, camera.source)
+                except Exception as exc:
+                    self.emit({"event": "warning", "message": f"Could not open the camera '{descriptor['name']}' of printer '{printer.name}': {logs.describe(exc)}"})
+                    continue
+                finally:
+                    self._adding.discard(_address(camera.source))
+                if not unchanged():
+                    source.close()
+                    await self.platform.release_camera(camera_id, camera.source)
+                    break
+                self._attach_source(camera, source)
+                self.cameras.add(camera)
+                changed = True
+            if changed:
+                self._sync()
+
+    async def _is_working(self, camera: Camera) -> bool:
+        """Whether a camera delivers frames or rests as nothing watches it, waiting up to CAMERA_SETTLE_S for one still opening."""
+        deadline = time.monotonic() + CAMERA_SETTLE_S
+        while not (camera.online or camera.standby):
+            if time.monotonic() > deadline:
+                return False
+            await asyncio.sleep(0.2)
+        return True
+
+    def _schedule_reconcile(self, printer: Printer) -> None:
+        self._hold(f"listing the cameras of '{printer.name}'", self.reconcile_printer_cameras(printer))
+
+    async def _move_camera(self, camera: Camera, source: dict[str, Any]) -> None:
+        """Releases a camera's source and attaches it again at a new address.
+
+        The re-attach tick leaves the camera alone while it is taken down, so
+        it is never opened at the address it is leaving. A restart can be
+        taking it down at the same time, which is why what is taking it down
+        is counted.
+        """
+        self._detaching[camera.id] += 1
+        try:
+            await self._cancel_attach(camera.id)
+            await self._detach(camera)
+            camera.source = source
+        finally:
+            self._detaching[camera.id] -= 1
+        self._schedule_attach(camera)
 
     async def _cmd_printer_add(self, message: dict[str, Any]) -> None:
         printer_id = uuid.uuid4().hex[:8]
         record = sanitise_printer(printer_id, message.get("printer", {}))
+        INTEGRATIONS[record["provider"]].require(record["config"])
+        reports.require_storable(record["config"].values())
         printer = Printer(id=printer_id, name=record["name"], provider=record["provider"], config=record["config"])
         self.printers.add(printer)
-        asyncio.ensure_future(self.reconcile_printer_cameras(printer))
+        self._schedule_reconcile(printer)
 
     async def _cmd_printer_update(self, message: dict[str, Any]) -> None:
+        """Applies a patch to a printer, forgetting the status read through connection details it no longer has.
+
+        A secret the patch's config leaves out or blank keeps its stored
+        value, and one sent as null is cleared. A change of provider keeps
+        nothing of the old config, so the patch has to carry the new one whole.
+
+        The new details are in place before anything is awaited, so an answer
+        from the service it had is dropped instead of landing on the new one.
+        """
         existing = self.printers.get(message["id"])
         if not existing:
-            raise KeyError(f"no printer {message['id']}")
-        record = sanitise_printer(existing.id, message.get("patch", {}), existing.persisted())
-        if record["provider"] != existing.provider or record["config"] != existing.config:
-            await INTEGRATIONS[existing.provider].close(existing.config)
-        if record["provider"] != existing.provider:
-            existing.device_state = None
-            existing.reported_status = None
-            self.prints.untag(existing.id)
-            for camera in [c for c in self.cameras.values() if c.printer_id == existing.id]:
-                await self._drop_camera(camera.id)
+            raise LookupError(f"no printer {message['id']}")
+        patch = dict(message.get("patch", {}))
+        base = existing.persisted()
+        if patch.get("provider", existing.provider) != existing.provider:
+            base["config"] = {}
+        elif "config" in patch:
+            adapter = INTEGRATIONS[existing.provider]
+            patch["config"] = credentials.keep_stored(adapter.declared(connection_settings(patch["config"])), existing.config, adapter.secret_fields())
+        record = sanitise_printer(existing.id, patch, base)
+        INTEGRATIONS[record["provider"]].require(record["config"])
+        reports.require_storable(record["config"].values())
+        was = (existing.provider, existing.config)
         existing.name = record["name"]
         existing.provider = record["provider"]
         existing.config = record["config"]
-        asyncio.ensure_future(self.reconcile_printer_cameras(existing))
+        if was != (existing.provider, existing.config):
+            existing.device_state = None
+            existing.reported_status = None
+            await self._tidy_up(f"close the old connection to printer '{existing.name}'", INTEGRATIONS[was[0]].close(was[1]))
+        if was[0] != existing.provider:
+            for camera in [c for c in self.cameras.values() if c.printer_id == existing.id]:
+                await self._drop_camera(camera.id)
+        self._schedule_reconcile(existing)
 
     async def _cmd_printer_remove(self, message: dict[str, Any]) -> None:
         printer = self.printers.remove(message["id"])
-        if printer:
-            await INTEGRATIONS[printer.provider].close(printer.config)
-        self.prints.untag(message["id"])
+        if not printer:
+            raise LookupError(f"no printer {message['id']}")
+        await self._tidy_up(f"close the connection to printer '{printer.name}'", INTEGRATIONS[printer.provider].close(printer.config))
+        self._reconciles.pop(message["id"], None)
         for camera in [c for c in self.cameras.values() if c.printer_id == message["id"]]:
             await self._drop_camera(camera.id)
+            self._unbind_camera(camera.id)
         for monitor in self.monitors.values():
             if monitor.get("printer_id") == message["id"]:
                 monitor["printer_id"] = ""
@@ -712,47 +1546,89 @@ class Engine:
     async def _cmd_printer_action(self, message: dict[str, Any]) -> None:
         printer = self.printers.get(message["id"])
         if not printer:
-            raise KeyError(f"no printer {message['id']}")
+            raise LookupError(f"no printer {message['id']}")
         adapter = INTEGRATIONS.get(printer.provider)
         if not adapter:
             raise RuntimeError("no printer service linked")
-        await adapter.send(self.platform.http, printer.config, DeviceAction(message["action"]))
-        await self._refresh_device(printer, adapter)
+        async with self._sending_to(printer):
+            await adapter.send(self.service_http, printer.config, DeviceAction(message["action"]))
+        await self._read_back(printer)
+
+    @asynccontextmanager
+    async def _sending_to(self, printer: Printer) -> AsyncIterator[None]:
+        """Holds a command to the time it may take to reach a printer.
+
+        Raises:
+            RuntimeError: If the printer has not answered in that time.
+        """
+        allowed = self._send_allowed(printer)
+        try:
+            async with asyncio.timeout(allowed) as deadline:
+                yield
+        except TimeoutError:
+            if not deadline.expired():
+                raise
+            raise RuntimeError(f"{printer.name} did not answer within {allowed:g} s, so check whether it took the command") from None
+
+    async def _read_back(self, printer: Printer) -> None:
+        """Reads a printer a command was just sent to, leaving a slow read to the next poll.
+
+        The command has gone, so a printer that takes its time to say what it
+        did with it is not a failed command.
+        """
+        try:
+            async with asyncio.timeout(READ_BACK_S):
+                await self.watchdog.refresh(printer, after_command=True)
+        except TimeoutError:
+            logger.warning("printer '%s' took a command but was slow to be read back", printer.name)
 
     async def _cmd_printer_heat(self, message: dict[str, Any]) -> None:
         """Sets a printer's nozzle and bed targets, then re-reads its state.
 
         Raises:
             RuntimeError: If the service takes no targets, or rejects one.
-            ValueError: If the command names no heater.
+            ValueError: If the command names no heater, or a target is out of
+                range or not a number.
         """
         printer = self.printers.get(message["id"])
         if not printer:
-            raise KeyError(f"no printer {message['id']}")
-        targets = sanitise_targets(message)
+            raise LookupError(f"no printer {message['id']}")
+        targets = sanitise_targets(message, strict=True)
         if not targets:
             raise ValueError("a heat command names a nozzle or bed target")
         adapter = INTEGRATIONS[printer.provider]
-        for heater, target in targets.items():
-            await adapter.heat(self.platform.http, printer.config, heater, target)
-        await self._refresh_device(printer, adapter)
-
-    async def _refresh_device(self, printer: Printer, adapter: IntegrationAdapter) -> None:
-        """Re-reads a printer's state after a command changed it, announces it and re-gates its monitors."""
-        printer.observe((await adapter.fetch_state(self.platform.http, printer.config)).public())
-        self.emit({"event": "device", "printer_id": printer.id, **printer.device_state})
-        self.watchdog.follow_printers()
+        async with self._sending_to(printer):
+            for heater, target in targets.items():
+                await adapter.heat(self.service_http, printer.config, heater, target)
+        await self._read_back(printer)
 
     async def _cmd_printer_test(self, message: dict[str, Any]) -> None:
+        """Reads a printer's state from connection details that need not be registered.
+
+        A connection the adapter keeps open is closed again, unless a
+        registered printer is the one using it. With the ``id`` of a registered
+        printer of the same provider, a secret the config leaves blank is the
+        one stored for it.
+        """
         adapter = INTEGRATIONS.get(message.get("provider") or "")
         if not adapter:
             raise RuntimeError(f"unknown provider {message.get('provider')!r}")
+        config = adapter.declared(message.get("config", {}))
+        typed = reports.config_secrets(config, adapter.secret_keys())
+        stored = self.printers.get(message.get("id") or "")
         try:
-            state = await adapter.fetch_state(self.platform.http, message.get("config", {}))
+            if stored and stored.provider == adapter.id:
+                config = credentials.keep_stored(config, stored.config, adapter.secret_fields())
+            adapter.require(config)
+            state = await adapter.fetch_state(self.service_http, config)
             ok = state.status.value not in ("offline", "unknown")
-            self.emit({"event": "printer_test", "ok": ok, "status": state.status.value, "req_id": message.get("req_id")})
+            self._reply({"event": "printer_test", "ok": ok, "status": state.status.value, "req_id": message.get("req_id")})
         except Exception as exc:
-            self.emit({"event": "printer_test", "ok": False, "status": None, "error": str(exc), "req_id": message.get("req_id")})
+            self._reply({"event": "printer_test", "ok": False, "status": None, "error": self._scrubbed(logs.describe(exc), typed), "req_id": message.get("req_id")})
+        finally:
+            used = (adapter.connection_key(p.config) for p in self.printers.values() if p.provider == adapter.id)
+            if adapter.connection_key(config) not in used:
+                await adapter.close(config)
 
     async def _cmd_print_add(self, message: dict[str, Any]) -> None:
         """Registers a sliced file the platform's store already holds.
@@ -762,11 +1638,17 @@ class Engine:
         ``nozzle`` or ``bed`` target rewrites the stored file to heat to it. A
         file that turns out not to be printable is removed again, so nothing
         the library does not list is left behind.
+
+        Raises:
+            ValueError: If the id is not a plain one, or names a print the
+                library already holds, whose file a failed add would remove.
         """
         files = self.platform.files
         filename = str(message.get("filename") or "")
         ext = extension(filename)
         print_id = str(message["id"])
+        if not print_id.isalnum() or self.prints.get(print_id):
+            raise ValueError(f"{print_id!r} cannot be the id of a new print")
         record = PrintFile(
             id=print_id,
             name="",
@@ -782,14 +1664,14 @@ class Engine:
             targets = sanitise_targets(message)
             if targets:
                 data = await asyncio.to_thread(gcode.retemper, data, ext, targets)
-                await files.store(record.file_key, _chunks(data))
+                await files.store(record.file_key, as_chunks(data))
             sliced = await asyncio.to_thread(gcode.inspect, data, ext)
             record.size = len(data)
             record.name = sanitise_name(message.get("name"), filename.rsplit(".", 1)[0])
             record.printer_ids = sanitise_printers(message.get("printer_ids"), ext, self.printers)
             record.meta = sliced.meta
             if sliced.thumbnail:
-                await files.store(record.thumbnail_key, _chunks(sliced.thumbnail))
+                await files.store(record.thumbnail_key, as_chunks(sliced.thumbnail))
                 record.thumbnail = sliced.thumbnail_type
         except Exception:
             await files.remove(record.file_key)
@@ -800,81 +1682,165 @@ class Engine:
     async def _cmd_print_update(self, message: dict[str, Any]) -> None:
         record = self.prints.get(message["id"])
         if not record:
-            raise KeyError(f"no print {message['id']}")
+            raise LookupError(f"no print {message['id']}")
         patch = message.get("patch", {})
-        if "name" in patch:
-            record.name = sanitise_name(patch["name"], record.name)
+        name = sanitise_name(patch["name"], record.name) if "name" in patch else record.name
         if "printer_ids" in patch:
             record.printer_ids = sanitise_printers(patch["printer_ids"], record.ext, self.printers)
+        record.name = name
 
     async def _cmd_print_remove(self, message: dict[str, Any]) -> None:
         record = self.prints.remove(message["id"])
-        if record:
-            files = self.platform.files
-            await files.remove(record.file_key)
-            await files.remove(record.thumbnail_key)
+        if not record:
+            raise LookupError(f"no print {message['id']}")
+        files = self.platform.files
+        await self._tidy_up(f"delete the stored file of '{record.name}'", files.remove(record.file_key))
+        await self._tidy_up(f"delete the preview of '{record.name}'", files.remove(record.thumbnail_key))
 
     async def _cmd_print_start(self, message: dict[str, Any]) -> None:
         """Sends a file to a printer and starts it, once every check passes.
 
         A file tagged for particular printers goes nowhere else, the service has
         to print the format, and the printer has to answer idle right now rather
-        than at the last poll, so a job never lands on top of another.
+        than at the last poll, so a job never lands on top of another. A second
+        start for a printer still being sent a file is refused for the same
+        reason.
+
+        A send cut short, as by a socket that closes, emits an error saying so,
+        since the file may have reached the printer.
 
         Raises:
             PermissionError: If the file is tagged for other printers.
             RuntimeError: If the service cannot print the format, the printer
-                is not idle, or the service rejects the file.
+                is not idle or is already being sent a file, the file has gone
+                from the store, or the service rejects the file.
         """
         record = self.prints.get(message["id"])
         if not record:
-            raise KeyError(f"no print {message['id']}")
+            raise LookupError(f"no print {message['id']}")
         printer = self.printers.get(message["printer_id"])
         if not printer:
-            raise KeyError(f"no printer {message['printer_id']}")
+            raise LookupError(f"no printer {message['printer_id']}")
         if record.printer_ids and printer.id not in record.printer_ids:
             raise PermissionError(f"{record.name} is not tagged for {printer.name}")
         try:
             adapter = accepts(printer, record.ext)
         except ValueError as exc:
             raise RuntimeError(str(exc)) from exc
-        state = await adapter.fetch_state(self.platform.http, printer.config)
-        if state.status is not DeviceStatus.IDLE:
-            raise RuntimeError(f"{printer.name} is {state.status.value}, so {record.name} was not sent")
-        data = await self.platform.files.read(record.file_key)
-        await adapter.print_file(self.platform.http, printer.config, printer_filename(record.name, record.ext), data)
+        if printer.id in self._starting:
+            raise RuntimeError(f"{printer.name} is already being sent a file, so {record.name} was not sent")
+        self._starting.add(printer.id)
+        try:
+            state = await adapter.fetch_state(self.service_http, printer.config)
+            if state.status is not DeviceStatus.IDLE:
+                raise RuntimeError(f"{printer.name} is {state.status.value}, so {record.name} was not sent")
+            try:
+                data = await self.platform.files.read(record.file_key)
+            except FileNotFoundError:
+                raise RuntimeError(f"print {record.id!r} has lost its file") from None
+            await adapter.print_file(self.service_http, printer.config, printer_filename(record.name, record.ext), data)
+        except asyncio.CancelledError:
+            self.emit({"event": "error", "message": f"Sending {record.name} to {printer.name} was interrupted, so check whether it started", "req_id": message.get("req_id")})
+            raise
+        finally:
+            self._starting.discard(printer.id)
         logger.info("print '%s' started on printer '%s'", record.name, printer.name)
-        await self._refresh_device(printer, adapter)
+        await self._read_back(printer)
         self.emit({"event": "print_started", "id": record.id, "printer_id": printer.id, "req_id": message.get("req_id")})
 
     async def _cmd_monitor_add(self, message: dict[str, Any]) -> None:
         monitor_id = uuid.uuid4().hex[:8]
-        self.monitors[monitor_id] = sanitise_monitor(monitor_id, message.get("monitor", {}))
+        monitor = sanitise_monitor(monitor_id, message.get("monitor", {}))
+        self._require_bound(monitor, MONITOR_DEFAULTS)
+        self.monitors[monitor_id] = monitor
         logger.info("monitor %s registered", monitor_id)
+
+    def _require_bound(self, monitor: dict[str, Any], was: dict[str, Any]) -> None:
+        """Refuses to bind a monitor to a camera or printer that is not registered.
+
+        A binding the monitor already had is left alone, since a camera its
+        printer or the deployment manages comes back under the id it went by.
+
+        Args:
+            monitor: The monitor as it would be stored.
+            was: The record it replaces, or the defaults for a new one.
+
+        Raises:
+            LookupError: If it names a camera or printer nothing matches.
+        """
+        for key, registry, kind in (("camera_id", self.cameras, "camera"), ("printer_id", self.printers, "printer")):
+            if monitor[key] not in ("", was[key]) and registry.get(monitor[key]) is None:
+                raise LookupError(f"no {kind} {monitor[key]}")
 
     async def _cmd_monitor_update(self, message: dict[str, Any]) -> None:
         existing = self.monitors.get(message["id"])
         if not existing:
-            raise KeyError(f"no monitor {message['id']}")
-        self.monitors[message["id"]] = sanitise_monitor(message["id"], message.get("patch", {}), existing)
+            raise LookupError(f"no monitor {message['id']}")
+        updated = sanitise_monitor(message["id"], message.get("patch", {}), existing)
+        self._require_bound(updated, existing)
+        self.monitors[message["id"]] = updated
+        if updated["camera_id"] != existing["camera_id"] or not monitor_watching(updated, self.printers):
+            self.watchdog.drop_streak(updated["id"])
+        if not updated["enabled"]:
+            updated["alert"] = None
 
     async def _cmd_monitor_remove(self, message: dict[str, Any]) -> None:
-        if self.monitors.pop(message["id"], None) is not None:
-            logger.info("monitor %s removed", message["id"])
+        if self.monitors.pop(message["id"], None) is None:
+            raise LookupError(f"no monitor {message['id']}")
+        logger.info("monitor %s removed", message["id"])
+        self.watchdog.forget(message["id"])
         self.history.pop(message["id"], None)
+        await self._tidy_up("delete the kept frames of a removed monitor", self.reviews.forget(message["id"]))
         self._results.pop(message["id"], None)
         self._result_emitted_at.pop(message["id"], None)
 
     async def _cmd_history_get(self, message: dict[str, Any]) -> None:
-        history = self.history.get(message["monitor_id"])
-        series = history.series() if history else {"buckets": [], "snaps": [], "alerts": [], "stats": {}}
-        self.emit({"event": "history", "monitor_id": message["monitor_id"], "now": time.time(), **series, "req_id": message.get("req_id")})
+        history = self.history.get(message["monitor_id"]) or MonitorHistory()
+        series = history.series(self.reviews.alert_frames(message["monitor_id"]))
+        self._reply({"event": "history", "monitor_id": message["monitor_id"], "now": time.time(), **series, "req_id": message.get("req_id")})
 
     async def _cmd_snapshot_get(self, message: dict[str, Any]) -> None:
-        jpeg = self.monitor_snapshot(message["monitor_id"], message["id"])
+        jpeg = await self.monitor_snapshot(message["monitor_id"], message["id"])
         if jpeg is None:
-            raise KeyError(f"no snapshot {message['id']!r}")
-        self.emit({"event": "snapshot", "id": message["id"], "jpeg": base64.b64encode(jpeg).decode(), "req_id": message.get("req_id")})
+            raise LookupError(f"no snapshot {message['id']}")
+        self._reply({"event": "snapshot", "id": message["id"], "jpeg": base64.b64encode(jpeg).decode(), "req_id": message.get("req_id")})
+
+    async def _cmd_review_get(self, message: dict[str, Any]) -> None:
+        review = self.reviews.get(message["id"])
+        if review is None:
+            raise LookupError(f"no review {message['id']}")
+        self._reply({"event": "review", **review.public(), "frames": review.frames, "req_id": message.get("req_id")})
+
+    async def _cmd_review_send(self, message: dict[str, Any]) -> None:
+        """Records the frames a reviewer chose and starts uploading them.
+
+        A request for a print that is already uploading replaces the choices
+        and is answered when that upload ends, and a frame already sent is not
+        sent again.
+
+        Raises:
+            LookupError: If there is no such review.
+            ValueError: If feedback is switched off, the print is still running
+                or already sent, or no frame is left to send.
+        """
+        self._require_feedback_on()
+        review = self.reviews.submit(
+            message["id"],
+            failures=set(message.get("failures") or []),
+            removed=set(message.get("removed") or []),
+            printer=feedback.printer_model(message.get("printer")),
+        )
+        self._start_send(review, message.get("req_id"))
+
+    async def _cmd_review_retry(self, message: dict[str, Any]) -> None:
+        self._require_feedback_on()
+        review = self.reviews.get(message["id"])
+        if review is None or review.status != "queued":
+            raise ValueError("only a queued print can be sent again")
+        self._start_send(review, message.get("req_id"))
+
+    async def _cmd_review_dismiss(self, message: dict[str, Any]) -> None:
+        self.reviews.dismiss(message["id"])
 
     async def _cmd_camera_snapshot(self, message: dict[str, Any]) -> None:
         """Hands back a still of a camera as it looks now.
@@ -884,7 +1850,7 @@ class Engine:
         """
         jpeg = await self.snapshot(message["camera_id"])
         if jpeg is None:
-            raise KeyError(f"camera {message['camera_id']!r} has no frame to hand over")
+            raise LookupError(f"camera {message['camera_id']} has no frame to hand over")
         self.emit(
             {
                 "event": "frame",
@@ -895,43 +1861,126 @@ class Engine:
         )
 
     async def _cmd_notify_test(self, message: dict[str, Any]) -> None:
+        """Sends a test alert with a blank picture, the request a defect alert makes.
+
+        A secret the config leaves blank is the one stored for that notifier.
+        """
         adapter = NOTIFIERS.get(message.get("provider") or "")
         if not adapter:
             raise RuntimeError(f"unknown notifier {message.get('provider')!r}")
+        config = adapter.declared(message.get("config", {}))
+        typed = reports.config_secrets(config, adapter.secret_keys())
         try:
-            await adapter.send(self.platform.http, message.get("config", {}), "PrintGuard test", "Notifications are working.", None)
-            self.emit({"event": "notify_test", "provider": adapter.id, "ok": True, "req_id": message.get("req_id")})
+            config = credentials.keep_stored(config, self.settings["notifiers"].get(adapter.id, {}), adapter.secret_fields())
+            adapter.require(config)
+            picture = await self.platform.encode_jpeg(np.zeros(TEST_PICTURE_SHAPE, np.uint8))
+            await adapter.send(self.service_http, config, "PrintGuard test", "Notifications are working.", picture)
+            self._reply({"event": "notify_test", "provider": adapter.id, "ok": True, "req_id": message.get("req_id")})
         except Exception as exc:
-            self.emit({"event": "notify_test", "provider": adapter.id, "ok": False, "error": str(exc), "req_id": message.get("req_id")})
+            self._reply({"event": "notify_test", "provider": adapter.id, "ok": False, "error": self._scrubbed(logs.describe(exc), typed), "req_id": message.get("req_id")})
 
     async def _cmd_settings_update(self, message: dict[str, Any]) -> None:
-        patch = {k: v for k, v in message.get("patch", {}).items() if k in SETTINGS_DEFAULTS}
+        """Applies a settings patch, switching the inference runtime first if it changes.
+
+        Only the keys the patch names are written once the switch is done, so
+        a change another client made while it ran is kept. A notifier secret
+        or the MQTT password left out or blank keeps its stored value and null
+        clears it, and the catalogue address sent back as the snapshot shows
+        it keeps its login. A notifier config keeps only the fields its schema
+        declares, as a printer's does.
+
+        Raises:
+            ValueError: If the patch names a setting there is not, a value in it
+                is not one the setting takes, or an address changed while a
+                stored secret was being kept.
+            RuntimeError: If the runtime could not be switched.
+        """
+        patch = dict(message.get("patch", {}))
+        unknown = sorted(set(patch) - set(SETTINGS_DEFAULTS))
+        if unknown:
+            raise ValueError(f"there is no {unknown[0]} setting")
+        for key in ("notifiers", "mqtt"):
+            if key in patch:
+                patch[key] = CHECKS[key](patch[key])
+        for provider in patch.get("notifiers", {}):
+            if provider not in NOTIFIERS:
+                raise ValueError(f"unknown notifier {provider!r}")
+        if "notifiers" in patch:
+            patch["notifiers"] = {
+                provider: credentials.keep_stored(
+                    NOTIFIERS[provider].declared(config), self.settings["notifiers"].get(provider, {}), NOTIFIERS[provider].secret_fields()
+                )
+                for provider, config in patch["notifiers"].items()
+            }
+        if "mqtt" in patch:
+            patch["mqtt"] = credentials.keep_stored(patch["mqtt"], self.settings["mqtt"], credentials.MQTT_SECRETS)
+        if "catalogue_url" in patch:
+            patch["catalogue_url"] = credentials.keep_url(patch["catalogue_url"], self.settings["catalogue_url"], reports.scrub_catalogue_url)
         settings = {**self.settings, **patch}
-        if settings["inference_runtime"] not in ("auto", "litert", "onnx"):
-            raise ValueError("inference runtime must be auto, litert or onnx")
-        settings["fault_grace_s"] = clamp_grace(settings["fault_grace_s"])
-        settings["preheat"] = sanitise_presets(settings["preheat"])
+        settings.update({key: check(settings[key]) for key, check in CHECKS.items()})
+        if "mqtt" in patch:
+            require_broker(settings["mqtt"])
+        for provider, config in patch.get("notifiers", {}).items():
+            reports.require_storable(config.values())
+            NOTIFIERS[provider].require(config)
         if settings["inference_runtime"] != self.settings["inference_runtime"]:
-            await self.scheduler.reconfigure(lambda: self.platform.configure(settings))
-        self.settings = settings
+            await self._switch_runtime(settings)
+        switched_on = settings["update_check"] and not self.settings["update_check"]
+        self.settings = {**self.settings, **{key: settings[key] for key in patch}}
+        if switched_on:
+            self._hold("the update check", self._announce_updates())
+        if patch.get("feedback") == "off":
+            await self._tidy_up("delete the frames kept for review", self.reviews.stop_asking())
         logger.info("settings updated: %s", sorted(patch))
+
+    async def _switch_runtime(self, settings: dict[str, Any]) -> None:
+        """Waits for the inferences in flight, then loads the runtime the settings name.
+
+        An inference that has not come back after RUNTIME_DRAIN_TIMEOUT_S is
+        given up on, since one wedged in a runtime would hold every camera
+        still behind it. The load itself is never cut short, and
+        ``settings.update`` is a finishing command so that holds when its
+        issuer goes away.
+
+        Raises:
+            RuntimeError: If an inference did not finish, so nothing was switched.
+        """
+        draining = True
+
+        async def configure() -> None:
+            nonlocal draining
+            draining = False
+            await self.platform.configure(settings)
+
+        switch = asyncio.ensure_future(self.scheduler.reconfigure(configure))
+        try:
+            await asyncio.wait({switch}, timeout=RUNTIME_DRAIN_TIMEOUT_S)
+            if draining:
+                switch.cancel()
+            await asyncio.wait({switch})
+        finally:
+            switch.cancel()
+        if switch.cancelled():
+            raise RuntimeError("an inference did not finish, so the runtime was not switched")
+        switch.result()
 
     async def _cmd_token_create(self, message: dict[str, Any]) -> None:
         name = str(message.get("name") or "token").strip() or "token"
         record, secret = new_token(name, message.get("scope") or "read")
         token = Token(**record)
         self.tokens.add(token)
-        self._broadcast({"event": "token_created", **token.public(), "token": secret, "req_id": message.get("req_id")})
+        self._reply({"event": "token_created", **token.public(), "token": secret, "req_id": message.get("req_id")})
 
     async def _cmd_token_remove(self, message: dict[str, Any]) -> None:
-        self.tokens.remove(message["id"])
+        if not self.tokens.remove(message["id"]):
+            raise LookupError(f"no token {message['id']}")
 
     async def _cmd_update_check(self, message: dict[str, Any]) -> None:
         await self._check_updates()
         self.emit({"event": "releases", "releases": self.releases, "req_id": message.get("req_id")})
 
     async def _cmd_update_releases(self, message: dict[str, Any]) -> None:
-        if self.update is None:
+        if self.update is None and self.settings.get("update_check", True):
             await self._check_updates()
         self.emit({"event": "releases", "releases": self.releases, "req_id": message.get("req_id")})
 
@@ -951,31 +2000,52 @@ class Engine:
             self.emit({"event": "report_sent", "ok": True, "req_id": message.get("req_id")})
         except Exception as exc:
             logger.warning("bug report failed to send", exc_info=True)
-            self.emit({"event": "report_sent", "ok": False, "error": str(exc), "req_id": message.get("req_id")})
+            self.emit({"event": "report_sent", "ok": False, "error": logs.describe(exc), "req_id": message.get("req_id")})
 
-    async def send_alerts(self, title: str, body: str, image: bytes | None) -> None:
+    async def send_alerts(self, title: str, body: str, image: bytes | None, urgent: bool = True) -> None:
         """Delivers a message through every configured notification channel.
+
+        The channels are sent to together and each is given NOTIFY_TIMEOUT_S,
+        so one that never answers is reported as failed instead of holding up
+        the others and the defect response waiting on them.
 
         Args:
             title: Short headline the channel shows first.
             body: The detail beneath it.
             image: JPEG snapshot to attach, where the channel carries one.
+            urgent: Whether the notice should interrupt, which a recovery does not.
         """
-        configured = {nid: config for nid, config in self.settings.get("notifiers", {}).items() if nid in NOTIFIERS}
-        for notifier_id, config in configured.items():
+
+        async def deliver(notifier_id: str, config: dict[str, Any]) -> None:
             try:
-                await NOTIFIERS[notifier_id].send(self.platform.http, config, title, body, image)
+                async with asyncio.timeout(NOTIFY_TIMEOUT_S):
+                    await NOTIFIERS[notifier_id].send(self.service_http, config, title, body, image, urgent=urgent)
             except Exception as exc:
                 logger.debug("notifier %s delivery traceback", notifier_id, exc_info=True)
-                self.emit({"event": "error", "message": f"{NOTIFIERS[notifier_id].label} notification failed: {exc}"})
+                self.emit({"event": "error", "message": f"Sending to {NOTIFIERS[notifier_id].label} failed: {logs.describe(exc)}"})
+
+        configured = {nid: config for nid, config in self.settings.get("notifiers", {}).items() if nid in NOTIFIERS}
+        await asyncio.gather(*(deliver(notifier_id, config) for notifier_id, config in configured.items()))
 
     async def _cmd_notify_send(self, message: dict[str, Any]) -> None:
-        """Sends a caller's own message through the configured channels."""
-        title = str(message.get("title") or "PrintGuard").strip()[:80]
-        body = str(message.get("text", "")).strip()[:400]
+        """Sends a caller's own message through the configured channels.
+
+        A plugin's command cannot be told from anybody else's, so the limit is
+        one for the hub and every caller counts against it.
+
+        Raises:
+            ValueError: If the title or text is not text, or there is no text.
+            PermissionError: If NOTIFY_SEND_LIMIT have been sent in the last minute.
+        """
+        title, text = message.get("title") or "PrintGuard", message.get("text", "")
+        if not isinstance(title, str) or not isinstance(text, str):
+            raise ValueError("a notification's title and text are text")
+        title = title.strip()[:80].strip()
+        body = text.strip()[:400]
         if not body:
             raise ValueError("a notification needs something to say")
-        await self.send_alerts(title, body, None)
+        self._spend("notify.send", NOTIFY_SEND_LIMIT, "notifications are being sent")
+        await self.send_alerts(title, body, None, urgent=False)
 
     async def _cmd_plugin_install(self, message: dict[str, Any]) -> None:
         """Fetches, verifies and registers a plugin, or reinstalls one in place.
@@ -984,15 +2054,26 @@ class Engine:
         a newer revision replaces the old bytes and keeps the grants, stored data
         and credentials, as long as it comes from the same place. A bundle from
         anywhere else starts with none of them, and one reaching further than the
-        accepted manifest stands down until the wider list is accepted.
+        accepted manifest stands down until the wider list is accepted. A zip
+        over a zip keeps its stored data and credentials, but is accepted again,
+        unless it reaches further than the one it replaces. One that
+        signs in at different addresses is signed out as well, so a refresh
+        token is never sent to an endpoint it was not issued by. A zip the
+        catalogue vouches for is recorded as the catalogue's own install, so its
+        README and pictures come from the pinned commit and never from the zip.
+        A running gate that an update stands down keeps the reason as its
+        failure, so the hub refuses requests until the update is accepted.
         """
         source = dict(message.get("source") or {})
         page: dict[str, str] = {}
         if source.get("kind") == "github":
+            requested = str(source.get("ref") or "HEAD")
             manifest, sources, files, sha = await plugins.fetch_github(
-                self.platform.http, str(source.get("repo", "")), str(source.get("path", "")), str(source.get("ref") or "HEAD")
+                self.platform.http, str(source.get("repo", "")), str(source.get("path", "")), requested
             )
             source = {"kind": "github", "repo": source["repo"], "path": str(source.get("path", "")), "ref": sha}
+            if requested != sha:
+                source["branch"] = requested
         elif source.get("kind") == "file":
             manifest, sources, files, page_files = plugins.unpack(base64.b64decode(message["zip"]))
             page = plugins.sanitise_page(page_files)
@@ -1000,6 +2081,8 @@ class Engine:
         else:
             raise ValueError(f"unknown plugin source {source.get('kind')!r}")
         manifest = plugins.sanitise_manifest(manifest)
+        if not plugins.runs_here(manifest["platforms"], self.platform.host):
+            raise ValueError(f"{manifest['id']} only runs on {', '.join(manifest['platforms'])}, not {self.platform.host}")
         sources = plugins.sanitise_sources(sources)
         assets = plugins.sanitise_assets(files)
         if set(manifest["assets"]) - set(assets):
@@ -1007,15 +2090,26 @@ class Engine:
         digests = plugins.digests(manifest, sources, assets)
         await self._refresh_catalogue(quiet=True)
         entry = plugins.verified_by(self.catalogue, manifest["id"], digests)
+        if entry is not None and source["kind"] == "file":
+            source, page = plugins.pinned_source(entry), {}
         existing = self.plugins.get(manifest["id"])
         inherits = existing is not None and plugins.same_source(existing.source, source)
-        accepted = inherits and not plugins.widens(existing.manifest, manifest)
+        widened = existing is not None and plugins.widens(existing.manifest, manifest)
+        accepted = inherits and not widened
         granted = [p for p in (existing.granted if accepted else []) if p in manifest["permissions"]]
-        if existing is not None and not inherits:
+        keeps_data = inherits or (existing is not None and not widened and existing.source.get("kind") == source["kind"] == "file")
+        if existing is not None and not keeps_data:
             logger.warning(
                 "plugin %s came from %s and now from %s, so its grants and credentials were dropped",
                 manifest["id"], existing.source, source,
             )
+        secrets = existing.secrets if keeps_data else {}
+        if keeps_data and not plugins.same_sign_in(existing.manifest, manifest):
+            secrets = oauth.without_session(secrets)
+            logger.warning("plugin %s signs in somewhere new, so it was signed out", manifest["id"])
+        enabled = bool(existing and existing.enabled and plugins.consented(manifest, granted))
+        stood_down = existing is not None and existing.enabled and existing.may("gate") and not enabled
+        self._dropped_gates.discard(manifest["id"])
         self.plugins.add(
             Plugin(
                 id=manifest["id"],
@@ -1026,49 +2120,94 @@ class Engine:
                 digests=digests,
                 source=source,
                 granted=granted,
-                config=existing.config if inherits else {},
-                secrets=existing.secrets if inherits else {},
+                config=existing.config if keeps_data else {},
+                secrets=secrets,
                 verified=entry is not None,
-                enabled=bool(existing and existing.enabled and plugins.consented(manifest, granted)),
+                enabled=enabled,
                 installed=time.time(),
+                failure="this version asks for more than was accepted" if stood_down else None,
             )
         )
         logger.info(
             "plugin %s v%s installed (%s, %s)",
             manifest["id"], manifest["version"], source["kind"], "verified" if entry else "unverified",
         )
+        await self.sockets.drop_for(manifest["id"])
         await self._reload_plugins()
 
     async def _cmd_plugin_remove(self, message: dict[str, Any]) -> None:
-        self.plugins.remove(message["id"])
+        if not self.plugins.remove(message["id"]):
+            raise LookupError(f"no plugin {message['id']}")
         await self._reload_plugins()
 
-    async def _cmd_plugin_update(self, message: dict[str, Any]) -> None:
+    async def _cmd_plugin_update(self, message: dict[str, Any]) -> bool | None:
         """Applies a patch, refusing to run a plugin with unaccepted permissions.
+
+        A plugin that loses a network permission loses the sockets it opened
+        under it. A ``store`` names the keys a writer wrote and removed, which
+        go over whatever the plugin holds by now, so the dashboard and the
+        worker writing different keys do not undo each other.
+
+        Returns:
+            False when the patch only wrote the plugin's store and there is
+            nothing to save or broadcast now.
 
         Raises:
             PermissionError: If enabling one that asks for more than it holds.
+            ValueError: If ``store`` is not the keys written and the keys
+                removed, or the store it leaves is too large or too deep.
         """
         plugin = self.plugins.get(message["id"])
         if not plugin:
-            raise KeyError(f"no plugin {message['id']}")
+            raise LookupError(f"no plugin {message['id']}")
         patch = message.get("patch", {})
-        if "granted" in patch:
-            plugin.granted = [p for p in patch["granted"] if p in plugin.manifest["permissions"]]
+        granted = [p for p in patch["granted"] if p in plugin.manifest["permissions"]] if "granted" in patch else plugin.granted
+        if patch.get("enabled") and not plugins.consented(plugin.manifest, granted):
+            raise PermissionError(f"{plugin.id} asks for permissions that have not been accepted")
+        stored = plugin.config
+        if "store" in patch:
+            changes = patch["store"] if isinstance(patch["store"], dict) else {}
+            written, removed = changes.get("written"), changes.get("removed")
+            if not isinstance(written, dict) or not isinstance(removed, list):
+                raise ValueError("a store write names the keys it wrote and the keys it removed")
+            plugin.config = plugins.sanitise_config({**{key: value for key, value in stored.items() if key not in removed}, **written})
+        lost = set(plugin.granted) - set(granted)
+        plugin.granted = granted
+        if lost & {"net", "net:local"}:
+            await self.sockets.drop_for(plugin.id)
         if "enabled" in patch:
-            if patch["enabled"] and not plugins.consented(plugin.manifest, plugin.granted):
-                raise PermissionError(f"{plugin.id} asks for permissions that have not been accepted")
             plugin.enabled = bool(patch["enabled"])
             plugin.failure = None
-        if "config" in patch:
-            plugin.config = plugins.sanitise_config(patch["config"])
-        if not {"config"} >= set(patch):
+        if not {"store"} >= set(patch):
             await self._reload_plugins()
+            return None
+        return self._store_save_due(plugin, stored)
+
+    def _store_save_due(self, plugin: Plugin, stored: dict[str, Any]) -> bool:
+        """Whether a plugin's store write is saved and broadcast now.
+
+        A write that changed nothing is neither. One within
+        PLUGIN_STORE_SAVE_S of the plugin's last is held in memory for the next
+        tick to save and broadcast, so a ``plugin.js`` that writes its store on
+        every render costs one save a second and not one a render.
+
+        Args:
+            plugin: The plugin, holding the store as written.
+            stored: The store it held before.
+        """
+        if plugin.config == stored:
+            return False
+        now = time.monotonic()
+        if now - self._store_saved_at.get(plugin.id, float("-inf")) < PLUGIN_STORE_SAVE_S:
+            self._stores_unsaved = True
+            return False
+        self._store_saved_at[plugin.id] = now
+        return True
 
     async def _cmd_plugin_code(self, message: dict[str, Any]) -> None:
         plugin = self.plugins.get(message["id"])
         if not plugin:
-            raise KeyError(f"no plugin {message['id']}")
+            raise LookupError(f"no plugin {message['id']}")
         self.emit(
             {
                 "event": "plugin_code",
@@ -1093,10 +2232,30 @@ class Engine:
         """
         plugin = self.plugins.get(message["id"])
         if not plugin:
-            raise KeyError(f"no plugin {message['id']}")
+            raise LookupError(f"no plugin {message['id']}")
         self.emit({"event": "plugin_page", "id": plugin.id, "page": plugin.page, "req_id": message.get("req_id")})
 
-    async def _network_allows(self, plugin_id: str, url: str) -> Plugin:
+    def _running_plugin(self, plugin_id: str) -> Plugin | None:
+        """The plugin with this id, if it is enabled and the hub has a runtime to run it.
+
+        Every command a plugin sends for itself goes through this, so a hub
+        started with plugins off answers none of them, whatever is installed.
+        """
+        plugin = self.plugins.get(plugin_id)
+        return plugin if plugin and plugin.enabled and self.platform.plugin_runtime is not None else None
+
+    def _networked(self, plugin_id: str) -> Plugin:
+        """The plugin a network request belongs to, if it is running and holds the grant.
+
+        Raises:
+            PermissionError: If it is not installed, not running or lacks ``net``.
+        """
+        plugin = self._running_plugin(plugin_id)
+        if not plugin or not plugin.may("net"):
+            raise PermissionError("plugin may not reach the network")
+        return plugin
+
+    def _network_allows(self, plugin_id: str, url: str) -> Plugin:
         """Checks a plugin may reach a URL, and returns the plugin.
 
         Args:
@@ -1107,25 +2266,45 @@ class Engine:
             The plugin record.
 
         Raises:
-            PermissionError: If the plugin holds no network grant, the URL falls
-                outside every pattern it declared, or it lands on this network
-                without the grant that covers that.
+            PermissionError: If the plugin is not running, holds no network grant, the URL falls
+                outside every pattern it declared, or it is written as an address
+                on this network without the grant that covers that. A name that
+                only resolves to one is refused when the platform connects.
         """
-        plugin = self.plugins.get(plugin_id)
-        if not plugin or not plugin.may("net"):
-            raise PermissionError("plugin may not reach the network")
+        plugin = self._networked(plugin_id)
         if not urls.allowed(url, plugin.manifest["urls"]):
-            raise PermissionError(f"plugin {plugin.id} did not declare {url}")
-        if await asyncio.to_thread(urls.resolves_local, url) and not plugin.may("net:local"):
-            raise PermissionError(f"plugin {plugin.id} may not reach {url} on this network")
+            raise PermissionError(f"plugin {plugin.id} did not declare that address")
+        if urls.is_local_url(url) and not plugin.may("net:local"):
+            raise PermissionError(f"plugin {plugin.id} may not reach this network")
         return plugin
 
-    def _within_rate(self, plugin_id: str) -> bool:
-        """Whether a plugin has requests left in the current window."""
+    def _spend_request(self, plugin: Plugin) -> None:
+        """Counts one request or socket a plugin opens against its window.
+
+        Raises:
+            PermissionError: If it has made ``PLUGIN_RATE_LIMIT`` in the last minute.
+        """
+        self._spend(plugin.id, PLUGIN_RATE_LIMIT, f"plugin {plugin.id} is making requests")
+
+    def _spend(self, spender: str, limit: int, doing: str) -> None:
+        """Counts one call against what its spender may make in a minute.
+
+        Args:
+            spender: Whose window it is, a plugin's id or a command's name.
+            limit: How many the window allows.
+            doing: What is being done too fast, as the refusal begins.
+
+        Raises:
+            PermissionError: If the window is full. A refused call is not
+                counted, so one that keeps being made gets through again once
+                the earlier ones age out.
+        """
         now = time.monotonic()
-        recent = [at for at in self._plugin_calls.get(plugin_id, []) if now - at < PLUGIN_RATE_WINDOW_S]
-        self._plugin_calls[plugin_id] = [*recent, now]
-        return len(recent) < PLUGIN_RATE_LIMIT
+        recent = [at for at in self._calls.get(spender, []) if now - at < PLUGIN_RATE_WINDOW_S]
+        if len(recent) >= limit:
+            self._calls[spender] = recent
+            raise PermissionError(f"{doing} faster than {limit} a minute")
+        self._calls[spender] = [*recent, now]
 
     async def _cmd_plugin_http(self, message: dict[str, Any]) -> None:
         """Makes an outbound request on a plugin's behalf, if it may.
@@ -1133,48 +2312,127 @@ class Engine:
         Neither sandbox has a network, so this is the only way out, and it opens
         only for the patterns the manifest declares and the user granted. The
         answer comes back as an ``http`` event under the plugin's own tag.
+
+        The address is checked again once its secrets are filled in, and a
+        redirect is handed back as the answer, never followed, so neither can
+        take the request somewhere the plugin did not declare. The platform
+        stops reading an answer past ``MAX_PLUGIN_BODY``, whatever its type, and
+        the request fails. A plugin without ``net:local`` passes ``public_only``,
+        so the connection itself is refused an address on this network, which a
+        name that resolves there would otherwise get past the check made here.
+        A ``Host`` header is refused, since a server holding several sites
+        would answer as the one it names, not the one the address did. Every
+        request carries ``PLUGIN_HEADER``, which the plugin may not set, so the
+        hub refuses one that comes back to itself. ``Connection`` is refused
+        too, since a proxy removes every header it names. The
+        whole request has ``PLUGIN_TIMEOUT_S``, so an answer that trickles in
+        cannot hold it open. The plugin is looked up again once its sign-in
+        has been renewed, since it may have been removed or reinstalled while
+        the provider answered.
         """
-        plugin = await self._network_allows(message["id"], str(message.get("url", "")))
-        if not self._within_rate(plugin.id):
-            raise PermissionError(f"plugin {plugin.id} is making requests faster than {PLUGIN_RATE_LIMIT} a minute")
+        url = str(message.get("url", ""))
+        if plugins.addresses_a_secret(url):
+            raise PermissionError(f"plugin {message['id']} may only use a secret in the path of its address")
+        plugin = self._network_allows(message["id"], url)
+        headers = dict(message.get("headers") or {})
+        named = {str(name).lower() for name in headers}
+        for reserved in PLUGIN_RESERVED_HEADERS:
+            if reserved.lower() in named:
+                raise PermissionError(f"plugin {plugin.id} may not set the {reserved} header")
+        self._spend_request(plugin)
         await self._refresh_sign_in(plugin)
-        request = {"url": str(message.get("url", "")), "headers": message.get("headers") or None, "json": message.get("json")}
-        blank = plugins.missing_secrets(request, plugin.secrets)
+        plugin = self._network_allows(message["id"], url)
+        request = {"url": url, "headers": headers or None, "json": plugins.shallow(message.get("json"), "a request body")}
+        usable = plugins.fillable(plugin.secrets)
+        blank = plugins.missing_secrets(request, usable)
         if blank:
-            raise ValueError(
-                f"{plugin.id} is not signed in yet"
-                if blank & set(oauth.SESSION)
-                else f"{plugin.id} needs {', '.join(sorted(blank))} filled in first"
-            )
-        filled = plugins.fill_secrets(request, plugin.secrets)
-        status, body = await self.platform.http(
-            str(message.get("method", "GET")).upper(),
-            filled["url"],
-            headers=filled["headers"],
-            json=filled["json"],
-            binary=message.get("binary") is True,
-            timeout=PLUGIN_TIMEOUT_S,
-        )
+            raise ValueError(self._unfilled(plugin, blank))
+        filled = plugins.fill_secrets(request, usable)
+        if filled["url"] != url:
+            try:
+                self._network_allows(plugin.id, filled["url"])
+            except PermissionError:
+                raise PermissionError(f"plugin {plugin.id} did not declare where its secrets take its address") from None
+        try:
+            async with asyncio.timeout(PLUGIN_TIMEOUT_S):
+                status, body = await self.platform.http(
+                    str(message.get("method", "GET")).upper(),
+                    filled["url"],
+                    headers={**(filled["headers"] or {}), PLUGIN_HEADER: "1"},
+                    json=filled["json"],
+                    binary=message.get("binary") is True,
+                    timeout=PLUGIN_TIMEOUT_S,
+                    redirects="answer",
+                    max_bytes=MAX_PLUGIN_BODY,
+                    public_only=not plugin.may("net:local"),
+                )
+        except Exception as exc:
+            raise self._network_failure(plugin.id, "request", exc) from None
         self.emit(
             {
                 "event": "http",
                 "id": plugin.id,
                 "tag": str(message.get("tag", "")),
                 "status": status,
-                "body": body if isinstance(body, (dict, list)) else str(body)[:MAX_PLUGIN_BODY],
+                "body": body,
                 "req_id": message.get("req_id"),
             }
         )
 
     async def _cmd_plugin_socket(self, message: dict[str, Any]) -> None:
-        """Opens, writes to or closes a WebSocket a plugin is holding."""
+        """Opens, writes to or closes a WebSocket a plugin is holding.
+
+        Only the declared address is checked, and the platform refuses a
+        handshake that redirects, so a socket ends where the plugin said. A
+        frame is written only while the plugin is still running with ``net``.
+        Opening one counts against the same rate limit as a request, and
+        without ``net:local`` it is refused an address on this network as a
+        request is.
+        """
         action = str(message.get("action", ""))
         plugin_id = str(message["id"])
+        public_only = True
         if action == "open":
-            await self._network_allows(plugin_id, str(message.get("url", "")))
-        await self.sockets.act(
-            plugin_id, action, str(message.get("tag", "")), str(message.get("url", "")), str(message.get("text", ""))
-        )
+            plugin = self._network_allows(plugin_id, str(message.get("url", "")))
+            self._spend_request(plugin)
+            public_only = not plugin.may("net:local")
+        elif action == "send":
+            self._networked(plugin_id)
+        try:
+            await self.sockets.act(
+                plugin_id, action, str(message.get("tag", "")), str(message.get("url", "")), str(message.get("text", "")), public_only
+            )
+        except SocketRefused:
+            raise
+        except Exception as exc:
+            raise self._network_failure(plugin_id, "socket", exc) from None
+
+    @staticmethod
+    def _unfilled(plugin: Plugin, blank: set[str]) -> str:
+        """Says what a plugin's request is missing, in words the plugin did not choose.
+
+        Only a name the manifest declared is repeated, since an echoed
+        reference would let a plugin test a guess against the secrets the hub
+        holds.
+        """
+        if oauth.ACCESS in blank:
+            return f"{plugin.id} is not signed in yet"
+        needed = sorted((blank & plugin.manifest["secrets"].keys()) - set(oauth.WITHHELD))
+        return f"{plugin.id} needs {', '.join(needed)} filled in first" if needed else f"{plugin.id} refers to a secret it does not hold"
+
+    def _network_failure(self, plugin_id: str, kind: str, failure: Exception) -> Exception:
+        """What a plugin hears of a request or socket that failed.
+
+        A library's message can quote the address, a header or something the
+        other end chose, and every error event reaches plugins, so the log keeps
+        the message and the event carries the kind of failure only. A
+        ``RuntimeError`` is the platform's own refusal, which quotes nothing
+        the request or the answer chose.
+        """
+        logger.warning("plugin %s %s failed: %s", plugin_id, kind, self._scrubbed(logs.describe(failure)))
+        if isinstance(failure, PermissionError):
+            return PermissionError(f"plugin {plugin_id} may not reach this network")
+        return plain_failure(failure, f"plugin {plugin_id} {kind}")
 
     def _offering(self, plugin_id: str, channel: str) -> Plugin:
         """The plugin answering on a channel, if it offers that channel at all.
@@ -1183,11 +2441,11 @@ class Engine:
             PermissionError: If it is not installed, not running, or offers
                 nothing by that name.
         """
-        plugin = self.plugins.get(plugin_id)
-        if plugin is None or not plugin.enabled or not plugin.may("link:provide"):
-            raise PermissionError(f"no plugin {plugin_id!r} is answering other plugins")
+        plugin = self._running_plugin(plugin_id)
+        if plugin is None or not plugin.may("link:provide"):
+            raise PermissionError("no running plugin is answering other plugins there")
         if channel not in plugin.manifest["provides"]:
-            raise PermissionError(f"{plugin_id} does not offer {channel!r}")
+            raise PermissionError(f"plugin {plugin.id} does not offer that channel")
         return plugin
 
     async def _cmd_plugin_call(self, message: dict[str, Any]) -> None:
@@ -1196,26 +2454,38 @@ class Engine:
         Both ends declared it. The caller named the plugin and channel, and the
         answering plugin offers that channel.
         """
-        caller = self.plugins.get(message["id"])
+        caller = self._running_plugin(message["id"])
         to, channel = str(message.get("to", "")), str(message.get("channel", ""))
         if not caller or not caller.may("link:consume") or f"{to}:{channel}" not in caller.manifest["consumes"]:
-            raise PermissionError(f"plugin {message['id']} did not declare {to}:{channel}")
+            raise PermissionError("plugin did not declare that plugin and channel")
         self._offering(to, channel)
         body = plugins.sanitise_config({"body": message.get("body")})["body"]
         call_id = uuid.uuid4().hex
         now = time.monotonic()
         self._pending_calls = {k: v for k, v in self._pending_calls.items() if now - v[3] < CALL_TTL_S}
-        self._pending_calls[call_id] = (caller.id, to, str(message.get("tag", "")), now)
+        self._pending_calls[call_id] = (caller.id, to, str(message.get("tag", "")), now, channel)
         self.emit({"event": "call", "id": to, "from": caller.id, "channel": channel, "body": body, "call_id": call_id})
 
     async def _cmd_plugin_answer(self, message: dict[str, Any]) -> None:
-        """Returns one plugin's answer to the plugin that asked for it."""
-        waiting = self._pending_calls.pop(str(message.get("call_id", "")), None)
+        """Returns one plugin's answer to the plugin that asked for it.
+
+        Every open dashboard answers a call its plugin serves, so an answer to
+        one that has just been answered by the same plugin is dropped quietly.
+        The answer is labelled with the channel the question was asked on,
+        whatever the answering plugin calls it.
+        """
+        call_id = str(message.get("call_id", ""))
+        now = time.monotonic()
+        self._answered_calls = {k: v for k, v in self._answered_calls.items() if now - v[1] < CALL_TTL_S}
+        waiting = self._pending_calls.pop(call_id, None)
+        if waiting is None and self._answered_calls.get(call_id, ("",))[0] == message["id"]:
+            return
         if waiting is None or waiting[1] != message["id"]:
             raise PermissionError("no question of that plugin is waiting for an answer")
-        caller, answering, tag, _ = waiting
+        caller, answering, tag, _, channel = waiting
+        self._answered_calls[call_id] = (answering, now)
         body = plugins.sanitise_config({"body": message.get("body")})["body"]
-        self.emit({"event": "answer", "id": caller, "tag": tag, "from": answering, "channel": str(message.get("channel", "")), "body": body})
+        self.emit({"event": "answer", "id": caller, "tag": tag, "from": answering, "channel": channel, "body": body})
 
     async def _cmd_plugin_publish(self, message: dict[str, Any]) -> None:
         """Hands one plugin's message to everybody who asked to hear that channel."""
@@ -1235,7 +2505,7 @@ class Engine:
         """
         plugin = self.plugins.get(message["id"])
         if not plugin:
-            raise KeyError(f"no plugin {message['id']}")
+            raise LookupError(f"no plugin {message['id']}")
         given = message.get("secrets") or {}
         kept = plugins.sanitise_secrets(given, list(plugin.manifest["secrets"]))
         plugin.secrets = {**plugin.secrets, **kept}
@@ -1245,14 +2515,21 @@ class Engine:
     def _provider(plugin: Plugin) -> dict[str, Any]:
         """A plugin's sign-in, with the client id of the app the user registered.
 
+        It carries whether the plugin may reach this network, which is what a
+        token endpoint that resolves here needs.
+
         Raises:
-            PermissionError: If nobody has typed one in.
+            PermissionError: If either address of the sign-in is on this network
+                and the plugin may not reach it, or nobody has typed a client
+                id in.
         """
         provider = plugin.manifest["oauth"]
+        if plugins.local_sign_in(provider) and not plugin.may("net:local"):
+            raise PermissionError(f"{provider['label']} signs in on this network, which needs the net:local permission")
         client_id = plugin.secrets.get(oauth.CLIENT_ID, "")
         if not client_id:
             raise PermissionError(f"{plugin.id} needs the client id of a {provider['label']} app you registered")
-        return {**provider, "client_id": client_id}
+        return {**provider, "client_id": client_id, "local": plugin.may("net:local")}
 
     async def _cmd_plugin_oauth(self, message: dict[str, Any]) -> None:
         """Starts a plugin's sign-in, or forgets what an earlier one returned."""
@@ -1274,39 +2551,88 @@ class Engine:
 
         Returns:
             The name of the plugin now signed in, or None if nothing was waiting.
+
+        Raises:
+            PermissionError: If the plugin may not connect an account, or lost
+                that, was removed or was reinstalled while the provider answered.
         """
         plugin_id = self.oauth.waiting_for(state)
         plugin = self.plugins.get(plugin_id) if plugin_id else None
         if plugin is None:
             return None
-        plugin.secrets = {**plugin.secrets, **await self.oauth.finish(state, code, self._provider(plugin))}
+        if not plugin.may("oauth"):
+            raise PermissionError("plugin may not connect an account")
+        session = await self.oauth.finish(state, code, self._provider(plugin))
+        if self.plugins.get(plugin.id) is not plugin or not plugin.may("oauth"):
+            raise PermissionError("plugin changed while it was signing in, so sign in again")
+        plugin.secrets = {**plugin.secrets, **session}
         logger.info("plugin %s signed in", plugin.id)
+        self.save()
         self._broadcast(self.state_event())
         return plugin.manifest["name"]
 
     async def _refresh_sign_in(self, plugin: Plugin) -> None:
-        """Renews a plugin's access token before a request goes out on it."""
+        """Renews a plugin's access token before a request goes out on it.
+
+        One renewal runs at a time for a plugin, so a request that waited on it
+        finds the new token rather than spending the refresh token again. A
+        provider that no longer honours the refresh token signs the plugin out,
+        so later requests ask for a sign-in without calling the provider again
+        and the panel sees it is no longer signed in.
+
+        A token that needs no renewing asks nothing of the sign-in, so a plugin
+        nobody has typed a client id for can still make its other requests.
+        The answer is written to the plugin installed once the provider has
+        answered, and only while it still holds the refresh token that was
+        spent, so a disconnect, a fresh sign-in or a removal made meanwhile
+        stands.
+
+        Raises:
+            RuntimeError: If the provider refused the refresh token.
+        """
         if not plugin.manifest["oauth"]:
             return
-        renewed = await self.oauth.refreshed(self._provider(plugin), plugin.secrets)
-        if renewed is not None:
-            plugin.secrets = renewed
+        async with self._sign_in_refreshes[plugin.id]:
+            held = plugin.secrets
+            if not oauth.expiring(held):
+                return
+            provider = self._provider(plugin)
+            refused: oauth.SignInRefused | None = None
+            renewed = held
+            try:
+                renewed = await self.oauth.refreshed(provider, held)
+            except oauth.SignInRefused as exc:
+                refused = exc
+            current = self.plugins.get(plugin.id)
+            if current is None or current.secrets.get(oauth.REFRESH) != held[oauth.REFRESH]:
+                return
+            if refused:
+                current.secrets = oauth.without_session(current.secrets)
+                self.save()
+                self._broadcast(self.state_event())
+                raise RuntimeError(f"{refused}, so {plugin.id} was signed out")
+            current.secrets = {**current.secrets, **{key: value for key, value in renewed.items() if held.get(key) != value}}
+            self.save()
 
     async def _cmd_plugin_effect(self, message: dict[str, Any]) -> None:
         """Hands a plugin's effect to the dashboards that can perform it.
+
+        A background that is not a picture is handed on as none, which clears it.
 
         Raises:
             PermissionError: If the plugin was not granted what the effect needs,
                 or asks for something no dashboard performs.
             ValueError: If the effect is larger than one has any business being.
         """
-        plugin = self.plugins.get(str(message.get("id", "")))
+        plugin = self._running_plugin(str(message.get("id", "")))
         effect = message.get("effect") if isinstance(message.get("effect"), dict) else {}
         needed = plugins.UI_EFFECTS.get(str(effect.get("kind", "")))
         if plugin is None or needed is None or not plugin.may(needed):
-            raise PermissionError(f"plugin {message.get('id')!r} may not ask a dashboard for {effect.get('kind')!r}")
-        if len(plugins.canonical(effect)) > plugins.MAX_EFFECT_BYTES:
+            raise PermissionError("plugin may not ask a dashboard for that")
+        if len(plugins.canonical(plugins.shallow(effect, "a plugin effect"))) > plugins.MAX_EFFECT_BYTES:
             raise ValueError(f"a plugin effect is {plugins.MAX_EFFECT_BYTES // 1024 // 1024} MB at most")
+        if effect["kind"] == "background":
+            effect = {**effect, "image": plugins.background_image(effect.get("image"))}
         self.emit({"event": "plugin_effect", "id": plugin.id, "effect": effect, "req_id": message.get("req_id")})
 
     async def _refresh_catalogue(self, quiet: bool = False) -> None:
@@ -1322,22 +2648,33 @@ class Engine:
 
         Sockets belong to the plugin that opened them, so anything no longer
         running loses its connections rather than keeping them open behind a
-        grant that has gone.
+        grant that has gone. A gate that failed is named too, and so is one the
+        hub stood down itself or could not read at start, so the runtime keeps
+        refusing for it until somebody enables, reinstalls or removes it.
         """
         running = self.plugins.running()
         await self.sockets.drop_all({plugin.id for plugin in running})
         runtime = self.platform.plugin_runtime
         if runtime is not None:
-            await runtime.reload(running)
+            stopped_gates = {plugin.id for plugin in self.plugins.values() if plugin.failure and "gate" in plugin.manifest["permissions"]}
+            await runtime.reload(running, stopped_gates | self._dropped_gates)
 
     def plugin_failed(self, plugin_id: str, reason: str) -> None:
-        """Disables a plugin its runtime could not keep running, and says why."""
+        """Disables a plugin its runtime could not keep running, drops it from the runtime and closes its sockets.
+
+        The reason is the plugin's own error, so it stays on the plugin's record
+        and in the log. The event says only that it stopped, since every plugin
+        reads the error events.
+        """
         plugin = self.plugins.get(plugin_id)
         if plugin is None or not plugin.enabled:
             return
         plugin.enabled = False
         plugin.failure = reason
-        self.emit({"event": "error", "message": f"plugin {plugin.manifest['name']} stopped: {reason}"})
+        self._hold(f"closing the sockets of plugin {plugin.manifest['name']}", self.sockets.drop_for(plugin_id))
+        self._hold(f"reloading the plugins after {plugin.manifest['name']} stopped", self._reload_plugins())
+        logger.warning("plugin %s stopped: %s", plugin_id, self._scrubbed(reason))
+        self.emit({"event": "error", "message": f"plugin {plugin.manifest['name']} stopped, and Plugins says why"})
         self._sync()
 
     async def _cmd_report_bundle(self, message: dict[str, Any]) -> None:

@@ -1,42 +1,75 @@
 import { create } from "zustand";
+import { alertOutcome } from "./history";
 import { currentLayout } from "./layout";
 import { log } from "./log";
 import type { Finding } from "./lint";
 import { PluginPanelHost } from "./panel";
-import { commandAllowed, outboundLink, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget } from "./plugins";
+import { commandAllowed, LINK_ACTIONS, outboundLink, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget, type StoreChanges } from "./plugins";
 import { play, playFile } from "./sound";
-import { resumePublishers } from "./stream";
+import { readStored, writeStored } from "./storage";
+import { published, resumePublishers, stopPublishing } from "./stream";
 import { applyTheme, measureCover } from "./theme";
-import { openExternally } from "./urls";
+import { openIn } from "./urls";
 import { extOf, FORMATS, sendPrint, type PrintDraft } from "./prints";
-import { withPreview } from "./toolpath";
-import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, ScorePoint, UpdateRelease } from "./types";
+import { withPreview, type ParsedToolpath } from "./toolpath";
+import type { AdapterConfig, Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, PrintFile, Review, ScorePoint, UpdateRelease } from "./types";
 
 const HISTORY_LIMIT = 240;
 const MAX_BACKGROUND_CHARS = 3 * 1024 * 1024;
+const BACKGROUND_IMAGE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/;
+const DOWNLOAD_URL_LIFETIME_MS = 60_000;
 const MAX_NOTICE_CHARS = 200;
 const UPDATE_DEBOUNCE_MS = 250;
+const REMOVAL = /^(camera|monitor|print)\.remove$/;
+const RECONNECT_DELAY_MS = 1500;
+const HUB_SILENCE_LIMIT_MS = 10_000;
+const BLOCKED_PAGE_SLACK_MS = 2_000;
+const BOOT_DROPS_BEFORE_HINT = 3;
+const HUB_NOT_ANSWERING = "The hub is not answering. Check the address, and that a proxy forwards WebSockets and the Origin header";
 const updateTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 
-type OptimisticKind = "camera" | "monitor" | "settings";
+type OptimisticKind = "camera" | "monitor" | "print" | "settings";
 
 interface OptimisticEntry {
   kind: OptimisticKind;
   id?: string;
   patch: Record<string, unknown>;
-  reqId: number | null;
+  unsent: Record<string, unknown>;
+  sent: Record<string, string>;
+}
+
+function withoutKeys<T>(record: Record<string, T>, keys: string[]): Record<string, T> {
+  return Object.fromEntries(Object.entries(record).filter(([key]) => !keys.includes(key)));
+}
+
+function settle(overlay: Record<string, OptimisticEntry>, reqId: string): Record<string, OptimisticEntry> {
+  const settled: Record<string, OptimisticEntry> = {};
+  for (const [key, entry] of Object.entries(overlay)) {
+    const answered = Object.keys(entry.sent).filter((field) => entry.sent[field] === reqId);
+    if (!answered.length) settled[key] = entry;
+    else if (Object.keys(entry.patch).some((field) => !answered.includes(field)))
+      settled[key] = { ...entry, patch: withoutKeys(entry.patch, answered), sent: withoutKeys(entry.sent, answered) };
+  }
+  return settled;
 }
 
 function applyOptimistic(engine: EngineState, overlay: Record<string, OptimisticEntry>): EngineState {
   let cameras = engine.cameras;
   let monitors = engine.monitors;
+  let prints = engine.prints;
   let settings = engine.settings;
   for (const entry of Object.values(overlay)) {
     if (entry.kind === "camera") cameras = cameras.map((c) => (c.id === entry.id ? ({ ...c, ...entry.patch } as Camera) : c));
     else if (entry.kind === "monitor") monitors = monitors.map((m) => (m.id === entry.id ? ({ ...m, ...entry.patch } as Monitor) : m));
+    else if (entry.kind === "print") prints = prints.map((p) => (p.id === entry.id ? ({ ...p, ...entry.patch } as PrintFile) : p));
     else settings = { ...settings, ...entry.patch } as EngineState["settings"];
   }
-  return { ...engine, cameras, monitors, settings };
+  return { ...engine, cameras, monitors, prints, settings };
+}
+
+export function savedChannels(engine: EngineState | null): Record<string, AdapterConfig> {
+  const withSecretsOnly = Object.fromEntries(Object.keys(engine?.secrets_set?.notifiers ?? {}).map((provider) => [provider, {}]));
+  return { ...withSecretsOnly, ...engine?.settings.notifiers };
 }
 
 function commandFor(entry: OptimisticEntry): Record<string, unknown> {
@@ -56,7 +89,7 @@ function saveBase64(filename: string, base64: string, type: string) {
   anchor.href = url;
   anchor.download = filename;
   anchor.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_URL_LIFETIME_MS);
 }
 
 const INTRO_SEEN_KEY = "pg.intro.seen";
@@ -84,21 +117,25 @@ export type SettingsTabId = "appearance" | "alerts" | "plugins" | "mqtt" | "upda
 interface PgStore {
   phase: "booting" | "ready";
   bootMsg: string;
+  reconnecting: boolean;
   link: EngineLink | null;
   engine: EngineState | null;
   history: Record<string, ScorePoint[]>;
   discovered: CameraSource[] | null;
   discovering: boolean;
-  printerTest: { ok: boolean; status?: string; error?: string } | null;
-  testing: boolean;
-  notifyTest: { provider: string; ok: boolean; error?: string } | null;
+  printerTest: { target: string; ok: boolean; status?: string; error?: string } | null;
+  testing: string | null;
+  notifyTest: { target: string; ok: boolean; error?: string } | null;
+  outcome: { req_id: string; error: string | null } | null;
   testingNotifier: string | null;
   reportResult: { ok: boolean; error?: string } | null;
   releases: UpdateRelease[];
-  pending: Record<string, { req_id: number; cmd: string }>;
+  pending: Record<string, { req_id: string; cmd: string }>;
   toasts: Toast[];
   detailId: string | null;
   statsMonitorId: string | null;
+  reviewId: string | null;
+  reviewData: Record<string, Review>;
   printId: string | null;
   uploads: Upload[];
   staged: StagedPrint[];
@@ -110,7 +147,7 @@ interface PgStore {
   createdToken: { name: string; secret: string } | null;
   customising: boolean;
   optimistic: Record<string, OptimisticEntry>;
-  savedAt: number | null;
+  savedAt: Record<string, number>;
   pluginTrees: Record<string, PluginNode | null>;
   pluginFindings: Record<string, Finding[]>;
   background: { id: string; image: string } | null;
@@ -122,67 +159,103 @@ interface PgStore {
   pluginPages: Record<string, Record<string, string>>;
   pluginAct(id: string, action: string, arg: unknown): void;
   checkPlugin(id: string): void;
-  mountPanel(id: string, frame: HTMLIFrameElement | null): void;
+  mountPanel(id: string, container: HTMLElement | null): void;
   fetchCatalogue(): void;
   fetchPluginPage(id: string): void;
-  installPlugin(source: Record<string, unknown>, zip?: string): void;
+  installPlugin(source: Record<string, unknown>, zip?: string): boolean;
   setCustomising(on: boolean): void;
   mutateLayout(key: keyof Layout, fn: (section: LayoutSection) => LayoutSection): void;
   resetLayout(): void;
-  send(cmd: Record<string, unknown>): number;
-  isPending(cmd: string): boolean;
+  send(cmd: Record<string, unknown>): string | null;
+  isPending(cmd: string, id?: string): boolean;
   updateCamera(id: string, patch: Record<string, unknown>): void;
   updateMonitor(id: string, patch: Record<string, unknown>): void;
-  updateSettings(patch: Record<string, unknown>): void;
+  updatePrint(id: string, patch: Record<string, unknown>): void;
+  updateSettings(patch: Record<string, unknown>, scope?: string): void;
   flushUpdates(): void;
   discover(): void;
   openDialog(dialog: DialogKind, focusCameraId?: string | null): void;
   openSettings(tab?: SettingsTabId): void;
   openDetail(id: string | null): void;
   openStats(id: string | null): void;
+  fetchHistory(monitorId: string): void;
+  openReview(id: string | null): void;
+  fetchReview(id: string): void;
   openPrint(id: string | null): void;
   stagePrints(files: File[]): void;
   unstage(id: number): void;
-  uploadPrint(draft: PrintDraft): void;
+  uploadPrint(draft: PrintDraft, thumbnailFrom: ParsedToolpath | null, signal: AbortSignal): Promise<void>;
   fetchSnapshot(monitorId: string, id: string): void;
   clearCreatedToken(): void;
-  testPrinter(provider: string, config: Record<string, string>): void;
-  testNotifier(provider: string, config: Record<string, string>): void;
+  testPrinter(target: string, provider: string, config: AdapterConfig, id?: string): void;
+  addPublishedCamera(name: string, path: string): void;
+  testNotifier(target: string, provider: string, config: AdapterConfig): void;
+  signIn(pluginId: string): void;
   toast(kind: Toast["kind"], text: string): void;
 }
 
 let toastSeq = 0;
 let reqSeq = 0;
+const TAB_ID = crypto.getRandomValues(new Uint32Array(1))[0].toString(36);
+const nextReqId = () => `${TAB_ID}-${++reqSeq}`;
+const issuedHere = (reqId: unknown) => typeof reqId === "string" && reqId.startsWith(`${TAB_ID}-`);
 let uploadSeq = 0;
 let resumed = false;
+const toastedStartupWarnings = new Set<string>();
 
-function connectHub(onEvent: (event: any) => void, onDown: () => void): EngineLink {
+function connectHub(onEvent: (event: any) => void, onUp: () => void, onDown: (wasUp: boolean) => void): EngineLink {
   let socket: WebSocket;
-  let closed = false;
   const open = () => {
-    socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws`);
-    socket.onopen = () => log("info", "hub socket connected");
-    socket.onmessage = (msg) => onEvent(JSON.parse(msg.data));
-    socket.onclose = () => {
-      if (!closed) {
-        log("warn", "hub socket closed, reconnecting");
-        onDown();
-        setTimeout(open, 1500);
-      }
+    const opening = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws`);
+    socket = opening;
+    let connected = false;
+    let silence: ReturnType<typeof setTimeout>;
+    const drop = () => {
+      clearTimeout(silence);
+      opening.onclose = opening.onmessage = null;
+      log("warn", "hub socket closed, reconnecting");
+      onDown(connected);
+      setTimeout(open, RECONNECT_DELAY_MS);
     };
+    const expectTick = () => {
+      clearTimeout(silence);
+      const armedAt = performance.now();
+      silence = setTimeout(() => {
+        if (performance.now() - armedAt > HUB_SILENCE_LIMIT_MS + BLOCKED_PAGE_SLACK_MS) return expectTick();
+        log("warn", "hub socket went silent");
+        opening.close();
+        drop();
+      }, HUB_SILENCE_LIMIT_MS);
+    };
+    opening.onopen = () => {
+      log("info", "hub socket connected");
+      connected = true;
+      expectTick();
+      onUp();
+    };
+    expectTick();
+    opening.onmessage = (msg) => {
+      expectTick();
+      onEvent(JSON.parse(msg.data));
+    };
+    opening.onclose = drop;
   };
   open();
   return {
-    send: (cmd) => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify(cmd)),
-    close: () => {
-      closed = true;
-      socket.close();
+    send: (cmd) => {
+      if (socket.readyState !== WebSocket.OPEN) return false;
+      socket.send(JSON.stringify(cmd));
+      return true;
     },
   };
 }
 
+const RECONNECTING = "The hub is reconnecting, so that wasn't sent. Try again in a moment.";
+
 export const useStore = create<PgStore>((set, get) => {
-  const clearPending = (reqId?: number) => {
+  let droppedWhileBooting = 0;
+
+  const clearPending = (reqId?: string) => {
     if (reqId == null) return;
     set((s) => {
       const next = { ...s.pending };
@@ -193,26 +266,55 @@ export const useStore = create<PgStore>((set, get) => {
     });
   };
 
-  const sendSilent = (cmd: Record<string, unknown>): number => {
-    const req_id = ++reqSeq;
+  const sendSilent = (cmd: Record<string, unknown>): string => {
+    const req_id = nextReqId();
     get().link?.send({ ...cmd, req_id });
     return req_id;
   };
+
+  const forgetUnshownSnapshots = () => {
+    if (get().reviewId === null && get().statsMonitorId === null) set({ snapshotCache: {} });
+  };
+
+  let lastSnapshot: EngineState | null = null;
+
+  const withDeviceState = (engine: EngineState, printerId: string, deviceState: EngineState["printers"][number]["device_state"]): EngineState => ({
+    ...engine,
+    printers: engine.printers.map((p) => (p.id === printerId ? { ...p, device_state: deviceState } : p)),
+  });
 
   const flushKey = (key: string) => {
     delete updateTimers[key];
     const entry = get().optimistic[key];
     if (!entry) return;
-    const reqId = sendSilent(commandFor(entry));
-    set((s) => (s.optimistic[key] ? { optimistic: { ...s.optimistic, [key]: { ...s.optimistic[key], reqId } } } : s));
+    const reqId = sendSilent(commandFor({ ...entry, patch: entry.unsent }));
+    const carried = Object.fromEntries(Object.keys(entry.unsent).map((field) => [field, reqId]));
+    set((s) =>
+      s.optimistic[key]
+        ? { optimistic: { ...s.optimistic, [key]: { ...s.optimistic[key], unsent: {}, sent: { ...s.optimistic[key].sent, ...carried } } } }
+        : s,
+    );
+  };
+
+  const dropUpdate = (key: string) => {
+    clearTimeout(updateTimers[key]);
+    delete updateTimers[key];
+    set((s) => ({ optimistic: withoutKeys(s.optimistic, [key]) }));
   };
 
   const queueUpdate = (key: string, kind: OptimisticKind, id: string | undefined, patch: Record<string, unknown>) => {
     set((s) => {
       const prev = s.optimistic[key];
-      const entry: OptimisticEntry = { kind, id, patch: { ...(prev?.patch ?? {}), ...patch }, reqId: null };
+      const entry: OptimisticEntry = {
+        kind,
+        id,
+        patch: { ...(prev?.patch ?? {}), ...patch },
+        unsent: { ...(prev?.unsent ?? {}), ...patch },
+        sent: withoutKeys(prev?.sent ?? {}, Object.keys(patch)),
+      };
       const optimistic = { ...s.optimistic, [key]: entry };
-      return { optimistic, savedAt: null, engine: s.engine ? applyOptimistic(s.engine, optimistic) : s.engine };
+      const { [key]: _resaving, ...savedAt } = s.savedAt;
+      return { optimistic, savedAt, engine: s.engine ? applyOptimistic(s.engine, optimistic) : s.engine };
     });
     clearTimeout(updateTimers[key]);
     updateTimers[key] = setTimeout(() => flushKey(key), UPDATE_DEBOUNCE_MS);
@@ -224,9 +326,49 @@ export const useStore = create<PgStore>((set, get) => {
   };
 
   const hosts = new Map<string, PluginHost>();
-  const codeRequests = new Map<number, string>();
-  const savedConfigs = new Map<string, string>();
-  const writingConfigs = new Map<string, string>();
+  const codeRequests = new Map<string, string>();
+  const publishRequests = new Map<string, string>();
+  const signInTabs = new Map<string, Window | null>();
+  const registeredPublishers = new Set<string>();
+
+  const stopUnregisteredPublishers = (cameras: Camera[]) => {
+    for (const path of [...published.keys()]) {
+      if (cameras.some((camera) => camera.source.path === path)) registeredPublishers.add(path);
+      else if (registeredPublishers.delete(path)) stopPublishing(path);
+    }
+  };
+
+  const dropInFlight = () => {
+    codeRequests.clear();
+    for (const path of publishRequests.values()) registeredPublishers.add(path);
+    publishRequests.clear();
+    configWrites.clear();
+    for (const tab of signInTabs.values()) tab?.close();
+    signInTabs.clear();
+    set((s) => ({
+      pending: {},
+      discovering: false,
+      testing: null,
+      testingNotifier: null,
+      reportResult: "report.send" in s.pending ? { ok: false, error: "the connection to the hub dropped" } : s.reportResult,
+      optimistic: Object.fromEntries(Object.entries(s.optimistic).map(([key, entry]) => [key, { ...entry, unsent: entry.patch, sent: {} }])),
+    }));
+  };
+
+  const resendUnsaved = () => {
+    for (const key of Object.keys(get().optimistic)) {
+      clearTimeout(updateTimers[key]);
+      flushKey(key);
+    }
+    for (const id of unsavedStores.keys()) writeStore(id);
+  };
+  const unsavedStores = new Map<string, StoreChanges>();
+  const configWrites = new Map<string, string>();
+  const codeDigests = new Map<string, string>();
+
+  const writeStore = (id: string) => {
+    configWrites.set(sendSilent({ cmd: "plugin.update", id, patch: { store: unsavedStores.get(id) } }), id);
+  };
 
   const panels = new Map<string, PluginPanelHost>();
 
@@ -247,13 +389,15 @@ export const useStore = create<PgStore>((set, get) => {
     for (const effect of effects) {
       if (effect.kind === "command" && effect.cmd) {
         const name = String(effect.cmd.cmd);
-        if (commandAllowed(name, plugin.granted, engine.plugin_permissions)) sendSilent(effect.cmd);
-        else get().toast("error", `${plugin.manifest.name} tried to run ${name} without permission`);
+        if (!commandAllowed(name, plugin.granted, engine.plugin_permissions)) {
+          get().toast("error", `${plugin.manifest.name} tried to run ${name} without permission`);
+        } else if (get().reconnecting) get().toast("error", RECONNECTING);
+        else sendSilent(effect.cmd);
       } else if (effect.kind === "http" && effect.request) {
         sendSilent(outboundRequest(id, effect.request));
       } else if (effect.kind === "socket" && effect.request) {
         sendSilent(outboundSocket(id, String(effect.action), effect.request));
-      } else if (effect.kind === "link" && effect.request) {
+      } else if (effect.kind === "link" && effect.request && LINK_ACTIONS.includes(String(effect.action))) {
         sendSilent(outboundLink(id, String(effect.action), effect.request));
       } else if (effect.kind === "notify") {
         if (plugin.granted.includes("notify")) {
@@ -266,8 +410,8 @@ export const useStore = create<PgStore>((set, get) => {
         else play(effect.tones ?? []);
       } else if (effect.kind === "background") {
         if (!plugin.granted.includes("background")) continue;
-        const image = String(effect.image ?? "").slice(0, MAX_BACKGROUND_CHARS);
-        showBackground(image.startsWith("data:image/") ? { id, image } : null);
+        const image = String(effect.image ?? "");
+        showBackground(image.length <= MAX_BACKGROUND_CHARS && BACKGROUND_IMAGE.test(image) ? { id, image } : null);
       } else if (effect.kind === "log") {
         log("info", `plugin ${id}:`, effect.text);
       }
@@ -278,12 +422,14 @@ export const useStore = create<PgStore>((set, get) => {
     onView: (id: string, tree: PluginNode | null, targets: Record<string, PluginNode | null>) =>
       set((s) => ({ pluginTrees: { ...s.pluginTrees, [id]: tree }, pluginViews: { ...s.pluginViews, [id]: targets } })),
     onEffects: perform,
-    onStore: (id: string, config: Record<string, unknown>) => {
-      const serialised = JSON.stringify(config);
-      if (savedConfigs.get(id) === serialised) return;
-      savedConfigs.set(id, serialised);
-      writingConfigs.set(id, serialised);
-      sendSilent({ cmd: "plugin.update", id, patch: { config } });
+    onStore: (id: string, { written, removed }: StoreChanges) => {
+      if (!removed.length && !Object.keys(written).length) return;
+      const unsaved = unsavedStores.get(id) ?? { written: {}, removed: [] };
+      unsavedStores.set(id, {
+        written: { ...withoutKeys(unsaved.written, removed), ...written },
+        removed: [...unsaved.removed.filter((key) => !(key in written)), ...removed],
+      });
+      writeStore(id);
     },
     onFailure: (id: string, failure: string) => {
       dropHosts((hosted) => hosted === id);
@@ -300,7 +446,33 @@ export const useStore = create<PgStore>((set, get) => {
     }
   };
 
+  const forgetPlugin = (id: string, keepPage: boolean) => {
+    dropHosts((hosted) => hosted === id);
+    panels.get(id)?.close();
+    panels.delete(id);
+    for (const url of Object.values(get().pluginAssets[id] ?? {})) URL.revokeObjectURL(url);
+    for (const [reqId, requested] of codeRequests) if (requested === id) codeRequests.delete(reqId);
+    codeDigests.delete(id);
+    const drop = <T>(record: Record<string, T>) => withoutKeys(record, [id]);
+    set((s) => ({
+      pluginPanels: drop(s.pluginPanels),
+      pluginFindings: drop(s.pluginFindings),
+      pluginAssets: drop(s.pluginAssets),
+      pluginTrees: drop(s.pluginTrees),
+      pluginViews: drop(s.pluginViews),
+      pluginPages: keepPage ? s.pluginPages : drop(s.pluginPages),
+    }));
+  };
+
   const syncPlugins = (engine: EngineState) => {
+    const held = new Set([...hosts.keys(), ...panels.keys(), ...codeDigests.keys(), ...Object.keys(get().pluginPages), ...Object.keys(get().pluginAssets)]);
+    for (const id of held) {
+      const plugin = engine.plugins.find((p) => p.id === id);
+      if (!plugin) {
+        forgetPlugin(id, false);
+        unsavedStores.delete(id);
+      } else if (codeDigests.has(id) && codeDigests.get(id) !== JSON.stringify(plugin.digests)) forgetPlugin(id, true);
+    }
     const wanted = new Set(engine.plugins.filter((p) => p.enabled && p.files.includes("plugin.js")).map((p) => p.id));
     dropHosts((id) => !wanted.has(id));
     if (get().background && !engine.plugins.some((p) => p.id === get().background?.id && p.enabled)) showBackground(null);
@@ -318,6 +490,7 @@ export const useStore = create<PgStore>((set, get) => {
       [
         ...[...wanted].filter((id) => !hosts.has(id)),
         ...engine.plugins.filter((p) => p.enabled && p.files.includes("panel.html") && !get().pluginPanels[p.id]).map((p) => p.id),
+        ...engine.plugins.filter((p) => p.enabled && p.granted.includes("sound") && !get().pluginAssets[p.id]).map((p) => p.id),
       ].filter((id) => !get().pluginFailures[id]),
     );
     for (const id of missing) {
@@ -327,15 +500,11 @@ export const useStore = create<PgStore>((set, get) => {
     for (const [id, host] of hosts) {
       const plugin = engine.plugins.find((p) => p.id === id);
       if (!plugin) continue;
-      const landed = JSON.stringify(plugin.config);
-      if (writingConfigs.get(plugin.id) === landed) writingConfigs.delete(plugin.id);
-      const moved = !writingConfigs.has(plugin.id) && savedConfigs.get(plugin.id) !== landed;
-      if (moved) savedConfigs.set(plugin.id, landed);
-      void host.update(pluginState(plugin), pluginTargets(plugin), moved ? plugin.config : undefined);
+      void host.update(pluginState(plugin), pluginTargets(plugin), unsavedStores.has(plugin.id) ? undefined : plugin.config);
     }
     for (const [id, panel] of panels) {
       const plugin = engine.plugins.find((p) => p.id === id);
-      if (plugin) panel.update(pluginState(plugin));
+      if (plugin) panel.update(pluginState(plugin), plugin.secrets_set);
     }
   };
 
@@ -376,7 +545,6 @@ export const useStore = create<PgStore>((set, get) => {
     }
     for (const url of Object.values(get().pluginAssets[id] ?? {})) URL.revokeObjectURL(url);
     set((s) => ({ pluginAssets: { ...s.pluginAssets, [id]: files } }));
-    savedConfigs.set(id, JSON.stringify(plugin.config));
     set((s) => {
       const { [id]: _dropped, ...rest } = s.pluginFailures;
       return { pluginFailures: rest };
@@ -399,28 +567,45 @@ export const useStore = create<PgStore>((set, get) => {
     switch (event.event) {
       case "state": {
         clearPending(event.req_id);
+        publishRequests.delete(event.req_id);
+        const answeredWrite = configWrites.get(event.req_id);
+        configWrites.delete(event.req_id);
+        if (answeredWrite && ![...configWrites.values()].includes(answeredWrite)) unsavedStores.delete(answeredWrite);
         const server = event as EngineState;
-        let optimistic = get().optimistic;
-        const had = Object.keys(optimistic).length > 0;
-        if (event.req_id != null && had) {
-          optimistic = Object.fromEntries(Object.entries(optimistic).filter(([, e]) => e.reqId !== event.req_id));
+        if (get().engine && get().engine!.version !== server.version) {
+          location.reload();
+          return;
         }
-        const cleared = had && Object.keys(optimistic).length === 0;
-        const firstRun = get().phase !== "ready" && !localStorage.getItem(INTRO_SEEN_KEY);
+        lastSnapshot = server;
+        const optimistic = event.req_id == null ? get().optimistic : settle(get().optimistic, event.req_id);
+        const acknowledged = Object.keys(get().optimistic).filter((key) => !(key in optimistic));
+        const firstRun = get().phase !== "ready" && !readStored(INTRO_SEEN_KEY);
         const engine = Object.keys(optimistic).length ? applyOptimistic(server, optimistic) : server;
         let history = get().history;
         for (const monitor of server.monitors) {
           if (monitor.result) history = appendScore(history, monitor.id, monitor.result);
         }
         applyTheme(engine.settings?.theme ?? "system", engine.settings?.themes ?? [], engine.settings?.glass);
-        set({
+        const monitorIds = new Set(server.monitors.map((m) => m.id));
+        const present = (monitorId: string | null) => (monitorId !== null && monitorIds.has(monitorId) ? monitorId : null);
+        set((s) => ({
           engine,
           history,
           optimistic,
+          outcome: issuedHere(event.req_id) ? { req_id: event.req_id, error: null } : s.outcome,
+          detailId: present(s.detailId),
+          statsMonitorId: present(s.statsMonitorId),
+          reviewId: server.reviews.some((r) => r.id === s.reviewId && monitorIds.has(r.monitor_id)) ? s.reviewId : null,
           phase: "ready",
-          ...(cleared ? { savedAt: Date.now() } : {}),
+          savedAt: { ...s.savedAt, ...Object.fromEntries(acknowledged.map((key) => [key, Date.now()])) },
           ...(firstRun ? { dialog: "intro" as const } : {}),
-        });
+        }));
+        for (const warning of server.startup_warnings ?? []) {
+          if (toastedStartupWarnings.has(warning)) continue;
+          toastedStartupWarnings.add(warning);
+          get().toast("alert", warning);
+        }
+        stopUnregisteredPublishers(server.cameras);
         if (!resumed) {
           resumed = true;
           void resumePublishers(server.cameras, (reason) => get().toast("error", `publishing stopped: ${reason}`));
@@ -436,13 +621,15 @@ export const useStore = create<PgStore>((set, get) => {
       case "plugin_code": {
         if (codeRequests.get(event.req_id) !== event.id) break;
         codeRequests.delete(event.req_id);
+        codeDigests.set(event.id, JSON.stringify(get().engine?.plugins.find((p) => p.id === event.id)?.digests));
         void readPlugin(event.id, event.sources);
         startPlugin(event.id, event.sources, event.assets ?? {});
         break;
       }
       case "plugin_oauth": {
         clearPending(event.req_id);
-        openExternally(event.url);
+        if (signInTabs.has(event.req_id)) openIn(signInTabs.get(event.req_id)!, event.url);
+        signInTabs.delete(event.req_id);
         break;
       }
       case "plugin_effect":
@@ -455,11 +642,10 @@ export const useStore = create<PgStore>((set, get) => {
         break;
       case "result":
         set((s) => ({ history: appendScore(s.history, event.monitor_id, { ts: event.ts, score: event.score }) }));
-        if (get().statsMonitorId === event.monitor_id) get().send({ cmd: "history.get", monitor_id: event.monitor_id });
         break;
       case "alert": {
         const name = get().engine?.monitors.find((m) => m.id === event.monitor_id)?.name ?? "monitor";
-        get().toast("alert", `Defect on ${name}, ${(event.score * 100).toFixed(0)}% (${event.action})`);
+        get().toast("alert", [`Defect on ${name}, ${(event.score * 100).toFixed(0)}%`, alertOutcome(event.action)].filter(Boolean).join(", "));
         break;
       }
       case "history":
@@ -470,6 +656,13 @@ export const useStore = create<PgStore>((set, get) => {
             [event.monitor_id]: { now: event.now, buckets: event.buckets, snaps: event.snaps, alerts: event.alerts, stats: event.stats },
           },
         }));
+        break;
+      case "review":
+        clearPending(event.req_id);
+        set((s) => ({ reviewData: { ...s.reviewData, [event.id]: event } }));
+        break;
+      case "review_sent":
+        clearPending(event.req_id);
         break;
       case "snapshot":
         clearPending(event.req_id);
@@ -486,24 +679,21 @@ export const useStore = create<PgStore>((set, get) => {
       case "device": {
         clearPending(event.req_id);
         const { event: _kind, printer_id, req_id: _req, ...device_state } = event;
-        set((s) =>
-          s.engine
-            ? { engine: { ...s.engine, printers: s.engine.printers.map((p) => (p.id === printer_id ? { ...p, device_state } : p)) } }
-            : s,
-        );
+        if (lastSnapshot) lastSnapshot = withDeviceState(lastSnapshot, printer_id, device_state);
+        set((s) => (s.engine ? { engine: withDeviceState(s.engine, printer_id, device_state) } : s));
         break;
       }
       case "discovered":
-        set({ discovered: event.sources, discovering: false });
+        if (issuedHere(event.req_id)) set({ discovered: event.sources, discovering: false });
         break;
       case "printer_test":
-        set({ printerTest: event, testing: false });
+        if (issuedHere(event.req_id)) set((s) => ({ printerTest: { ...event, target: s.testing ?? "" }, testing: null }));
         break;
       case "notify_test":
-        set({ notifyTest: event, testingNotifier: null });
+        if (issuedHere(event.req_id)) set((s) => ({ notifyTest: { ...event, target: s.testingNotifier ?? "" }, testingNotifier: null }));
         break;
       case "report_sent":
-        set({ reportResult: event });
+        if (issuedHere(event.req_id)) set({ reportResult: event });
         break;
       case "releases":
         clearPending(event.req_id);
@@ -511,6 +701,7 @@ export const useStore = create<PgStore>((set, get) => {
         break;
       case "report_bundle":
         clearPending(event.req_id);
+        if (!issuedHere(event.req_id)) break;
         saveBase64(event.filename, event.zip, "application/zip");
         get().toast("info", `Diagnostics saved as ${event.filename}`);
         break;
@@ -520,35 +711,66 @@ export const useStore = create<PgStore>((set, get) => {
       case "warning":
         get().toast(event.recovered ? "info" : "alert", event.message);
         break;
-      case "error":
+      case "error": {
+        if (event.req_id != null && !issuedHere(event.req_id)) break;
         get().toast("error", event.message);
+        const failed = Object.values(get().pending).find((entry) => entry.req_id === event.req_id)?.cmd;
         clearPending(event.req_id);
+        if (publishRequests.has(event.req_id)) {
+          stopPublishing(publishRequests.get(event.req_id)!);
+          publishRequests.delete(event.req_id);
+        }
+        signInTabs.get(event.req_id)?.close();
+        signInTabs.delete(event.req_id);
+        unsavedStores.delete(configWrites.get(event.req_id) ?? "");
+        configWrites.delete(event.req_id);
+        const optimistic = event.req_id != null ? settle(get().optimistic, event.req_id) : get().optimistic;
+        const engine = lastSnapshot ? applyOptimistic(lastSnapshot, optimistic) : get().engine;
+        if (engine) applyTheme(engine.settings?.theme ?? "system", engine.settings?.themes ?? [], engine.settings?.glass);
         set((s) => ({
-          discovering: false,
-          testing: false,
-          testingNotifier: null,
-          optimistic:
-            event.req_id != null
-              ? Object.fromEntries(Object.entries(s.optimistic).filter(([, e]) => e.reqId !== event.req_id))
-              : s.optimistic,
+          discovering: failed === "discover" ? false : s.discovering,
+          testing: failed === "printer.test" ? null : s.testing,
+          testingNotifier: failed === "notify.test" ? null : s.testingNotifier,
+          outcome: event.req_id != null ? { req_id: event.req_id, error: event.message } : s.outcome,
+          optimistic,
+          engine,
         }));
         break;
+      }
     }
   };
+
+  window.addEventListener("pagehide", () => get().flushUpdates());
 
   (window as any).__pgEvent = onEvent;
 
   return {
     phase: "booting",
     bootMsg: "Connecting to hub",
-    link: connectHub(onEvent, () => set({ bootMsg: "Reconnecting" })),
+    reconnecting: false,
+    link: connectHub(
+      onEvent,
+      () => {
+        dropInFlight();
+        set({ reconnecting: false });
+        resendUnsaved();
+      },
+      (wasUp) => {
+        if (wasUp) {
+          dropInFlight();
+          set({ reconnecting: true });
+        }
+        if (get().phase === "booting" && ++droppedWhileBooting >= BOOT_DROPS_BEFORE_HINT) set({ bootMsg: HUB_NOT_ANSWERING });
+      },
+    ),
     engine: null,
     history: {},
     discovered: null,
     discovering: false,
     printerTest: null,
-    testing: false,
+    testing: null,
     notifyTest: null,
+    outcome: null,
     testingNotifier: null,
     reportResult: null,
     releases: [],
@@ -556,6 +778,8 @@ export const useStore = create<PgStore>((set, get) => {
     toasts: [],
     detailId: null,
     statsMonitorId: null,
+    reviewId: null,
+    reviewData: {},
     printId: null,
     uploads: [],
     staged: [],
@@ -567,7 +791,7 @@ export const useStore = create<PgStore>((set, get) => {
     createdToken: null,
     customising: false,
     optimistic: {},
-    savedAt: null,
+    savedAt: {},
     pluginTrees: {},
     pluginViews: {},
     pluginFindings: {},
@@ -594,22 +818,23 @@ export const useStore = create<PgStore>((set, get) => {
     },
 
     installPlugin(source, zip) {
-      get().send({ cmd: "plugin.install", source, ...(zip ? { zip } : {}) });
+      return get().send({ cmd: "plugin.install", source, ...(zip ? { zip } : {}) }) !== null;
     },
 
-    mountPanel(id, frame) {
+    mountPanel(id, container) {
       panels.get(id)?.close();
       panels.delete(id);
       const engine = get().engine;
       const plugin = engine?.plugins.find((p) => p.id === id);
       const source = get().pluginPanels[id];
-      if (!frame || !engine || !plugin || !source) return;
-      panels.set(id, new PluginPanelHost(plugin, frame, source.html, source.assets, pluginState(plugin), handlers));
+      if (!container || !engine || !plugin || !source) return;
+      panels.set(id, new PluginPanelHost(plugin, container, source.html, source.assets, pluginState(plugin), handlers));
     },
 
     checkPlugin(id) {
       if (get().pluginFindings[id] || [...codeRequests.values()].includes(id)) return;
-      codeRequests.set(get().send({ cmd: "plugin.code", id }), id);
+      const reqId = get().send({ cmd: "plugin.code", id });
+      if (reqId) codeRequests.set(reqId, id);
     },
 
     setCustomising(on) {
@@ -620,28 +845,30 @@ export const useStore = create<PgStore>((set, get) => {
       const engine = get().engine;
       if (!engine) return;
       const base = currentLayout(engine.settings.layout);
-      const layout: Layout = { ...base, [key]: fn(base[key]) };
-      set({ engine: { ...engine, settings: { ...engine.settings, layout } } });
-      get().send({ cmd: "settings.update", patch: { layout } });
+      get().updateSettings({ layout: { ...base, [key]: fn(base[key]) } });
     },
 
     resetLayout() {
-      const engine = get().engine;
-      if (!engine) return;
-      set({ engine: { ...engine, settings: { ...engine.settings, layout: undefined } } });
-      get().send({ cmd: "settings.update", patch: { layout: {} } });
+      get().updateSettings({ layout: {} });
     },
 
     send(cmd) {
-      const req_id = ++reqSeq;
+      const req_id = nextReqId();
       const cmdType = cmd.cmd as string;
-      set((s) => ({ pending: { ...s.pending, [cmdType]: { req_id, cmd: cmdType } } }));
-      get().link?.send({ ...cmd, req_id });
-      return req_id;
+      if (get().link?.send({ ...cmd, req_id })) {
+        const key = typeof cmd.id === "string" ? `${cmdType}:${cmd.id}` : cmdType;
+        set((s) => ({ pending: { ...s.pending, [key]: { req_id, cmd: cmdType } } }));
+        const removed = REMOVAL.exec(cmdType)?.[1];
+        if (removed && typeof cmd.id === "string") dropUpdate(`${removed}:${cmd.id}`);
+        return req_id;
+      }
+      get().toast("error", RECONNECTING);
+      return null;
     },
 
-    isPending(cmd) {
-      return cmd in get().pending;
+    isPending(cmd, id) {
+      const pending = get().pending;
+      return id === undefined ? Object.values(pending).some((entry) => entry.cmd === cmd) : `${cmd}:${id}` in pending;
     },
 
     updateCamera(id, patch) {
@@ -652,8 +879,12 @@ export const useStore = create<PgStore>((set, get) => {
       queueUpdate(`monitor:${id}`, "monitor", id, patch);
     },
 
-    updateSettings(patch) {
-      queueUpdate("settings", "settings", undefined, patch);
+    updatePrint(id, patch) {
+      queueUpdate(`print:${id}`, "print", id, patch);
+    },
+
+    updateSettings(patch, scope) {
+      queueUpdate(scope ? `settings:${scope}` : "settings", "settings", undefined, patch);
     },
 
     flushUpdates() {
@@ -664,13 +895,12 @@ export const useStore = create<PgStore>((set, get) => {
     },
 
     discover() {
-      set({ discovered: null, discovering: true });
-      get().send({ cmd: "discover" });
+      set({ discovered: null, discovering: get().send({ cmd: "discover" }) !== null });
     },
 
     openDialog(dialog, focusCameraId = null) {
       get().flushUpdates();
-      if (get().dialog === "intro") localStorage.setItem(INTRO_SEEN_KEY, "1");
+      if (get().dialog === "intro") writeStored(INTRO_SEEN_KEY, "1");
       set({
         dialog,
         discovered: null,
@@ -680,6 +910,7 @@ export const useStore = create<PgStore>((set, get) => {
         focusCameraId,
         createdToken: null,
         settingsTab: null,
+        savedAt: {},
       });
     },
 
@@ -694,18 +925,32 @@ export const useStore = create<PgStore>((set, get) => {
         focusCameraId: null,
         createdToken: null,
         settingsTab,
+        savedAt: {},
       });
     },
 
     openDetail(detailId) {
       get().flushUpdates();
-      set({ detailId, printerTest: null });
+      set({ detailId, printerTest: null, savedAt: {} });
     },
 
     openStats(statsMonitorId) {
       get().flushUpdates();
       set({ statsMonitorId });
-      if (statsMonitorId) get().send({ cmd: "history.get", monitor_id: statsMonitorId });
+      forgetUnshownSnapshots();
+    },
+
+    fetchHistory(monitorId) {
+      sendSilent({ cmd: "history.get", monitor_id: monitorId });
+    },
+
+    openReview(reviewId) {
+      set({ reviewId });
+      forgetUnshownSnapshots();
+    },
+
+    fetchReview(id) {
+      sendSilent({ cmd: "review.get", id });
     },
 
     openPrint(printId) {
@@ -725,34 +970,44 @@ export const useStore = create<PgStore>((set, get) => {
       set((s) => ({ staged: s.staged.filter((p) => p.id !== id) }));
     },
 
-    uploadPrint(draft) {
+    uploadPrint(draft, thumbnailFrom, signal) {
       const id = ++uploadSeq;
       set((s) => ({ uploads: [...s.uploads, { id, name: draft.name || draft.file.name, progress: 0 }] }));
-      (draft.drawPreview ? withPreview(draft.file) : Promise.resolve(draft.file))
+      return (thumbnailFrom ? withPreview(draft.file, thumbnailFrom).catch(() => draft.file) : Promise.resolve(draft.file))
         .then((body) =>
-          sendPrint(draft, body, (progress) => set((s) => ({ uploads: s.uploads.map((u) => (u.id === id ? { ...u, progress } : u)) }))),
+          sendPrint(draft, body, (progress) => set((s) => ({ uploads: s.uploads.map((u) => (u.id === id ? { ...u, progress } : u)) })), signal),
         )
-        .catch((err: Error) => get().toast("error", `${draft.file.name}: ${err.message}`))
         .finally(() => set((s) => ({ uploads: s.uploads.filter((u) => u.id !== id) })));
     },
 
     fetchSnapshot(monitorId, id) {
       if (get().snapshotCache[id]) return;
-      get().send({ cmd: "snapshot.get", monitor_id: monitorId, id });
+      sendSilent({ cmd: "snapshot.get", monitor_id: monitorId, id });
     },
 
     clearCreatedToken() {
       set({ createdToken: null });
     },
 
-    testPrinter(provider, config) {
-      set({ printerTest: null, testing: true });
-      get().send({ cmd: "printer.test", provider, config });
+    testPrinter(target, provider, config, id) {
+      const asked = get().send({ cmd: "printer.test", provider, config, id }) !== null;
+      set({ printerTest: null, testing: asked ? target : null });
     },
 
-    testNotifier(provider, config) {
-      set({ notifyTest: null, testingNotifier: provider });
-      get().send({ cmd: "notify.test", provider, config });
+    addPublishedCamera(name, path) {
+      const reqId = get().send({ cmd: "camera.add", name, source: { kind: "path", path } });
+      if (reqId) publishRequests.set(reqId, path);
+      else stopPublishing(path);
+    },
+
+    testNotifier(target, provider, config) {
+      const asked = get().send({ cmd: "notify.test", provider, config }) !== null;
+      set({ notifyTest: null, testingNotifier: asked ? target : null });
+    },
+
+    signIn(pluginId) {
+      const req_id = get().send({ cmd: "plugin.oauth", id: pluginId, action: "start", origin: window.location.origin });
+      if (req_id) signInTabs.set(req_id, "pywebview" in window ? null : window.open("about:blank"));
     },
 
     toast(kind, text) {

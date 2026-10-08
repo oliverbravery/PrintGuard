@@ -8,7 +8,7 @@ disk. Those services live behind these protocols, implemented by the hub in
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, AsyncIterable, Awaitable, Callable, Protocol
+from typing import TYPE_CHECKING, Any, AsyncIterable, AsyncIterator, Awaitable, Callable, Literal, Protocol
 
 import numpy as np
 
@@ -16,6 +16,31 @@ from . import sockets
 
 if TYPE_CHECKING:
     from .registry import Plugin
+
+PLUGIN_HEADER = "X-PrintGuard-Plugin"
+"""The header on every request, sign-in and socket made for a plugin. The hub
+refuses whatever arrives carrying it, so a plugin that may reach this network
+cannot read the dashboard through the hub's own API."""
+
+Redirects = Literal["follow", "answer", "refuse"]
+"""What a request does with a 3xx: follow it, hand it back as the answer, or fail naming where it points."""
+
+
+def plain_failure(failure: Exception, what: str) -> Exception:
+    """Rewrites a failed platform call so that nothing a stranger chose is in its message.
+
+    A library's message can quote the address, a header or a name from the other
+    end. A ``RuntimeError`` is the platform's own refusal and quotes nothing
+    like that, so it stands, and anything else is reduced to its type.
+
+    Args:
+        failure: What the platform call raised.
+        what: What was being done, in a few words that start the message.
+
+    Returns:
+        The error to raise in its place.
+    """
+    return failure if isinstance(failure, RuntimeError) else RuntimeError(f"{what} failed ({type(failure).__name__})")
 
 
 @dataclass
@@ -32,6 +57,22 @@ class Frame:
     rgb: np.ndarray
     seq: float
     ts: float
+
+
+@dataclass
+class Notice:
+    """Something the runtime worked around that the user should know of.
+
+    Attributes:
+        message: What happened, as the dashboard shows it.
+        recovered: Whether this says an earlier fault is over.
+        camera_id: The camera it concerns, which the engine names in front of
+            the message, or None when it concerns the whole hub.
+    """
+
+    message: str
+    recovered: bool = False
+    camera_id: str | None = None
 
 
 class FrameSource(Protocol):
@@ -54,12 +95,17 @@ class FrameSource(Protocol):
         ...
 
 
-class FileStore(Protocol):
-    """Where uploaded print files and their previews live.
+async def as_chunks(data: bytes) -> AsyncIterator[bytes]:
+    """Presents bytes already in memory as the chunks a file store writes."""
+    yield data
 
-    A sliced file is far too large for the state the engine persists as JSON,
-    so the bytes are kept here under a key the engine chooses and the state
-    carries only the record describing them.
+
+class FileStore(Protocol):
+    """Where uploaded print files, their previews and kept frames live.
+
+    A sliced file or a JPEG is far too large for the state the engine persists
+    as JSON, so the bytes are kept here under a key the engine chooses and the
+    state carries only the record describing them.
     """
 
     async def store(self, key: str, chunks: AsyncIterable[bytes]) -> int:
@@ -98,8 +144,15 @@ class PluginRuntime(Protocol):
         """Accepts an engine event for delivery to the running plugins."""
         ...
 
-    async def reload(self, running: "list[Plugin]") -> None:
-        """Replaces the running set, starting and stopping sandboxes to match."""
+    async def reload(self, running: "list[Plugin]", failed_gates: set[str]) -> None:
+        """Replaces the running set, starting and stopping sandboxes to match.
+
+        Args:
+            running: The enabled plugins.
+            failed_gates: Plugins that were gating and stopped on a failure,
+                or that the hub stood down or could not read at start. Every
+                request is refused while there is one.
+        """
         ...
 
     async def serve(self, plugin_id: str, request: dict[str, Any]) -> dict[str, Any] | None:
@@ -107,7 +160,9 @@ class PluginRuntime(Protocol):
         ...
 
     async def authorise(self, request: dict[str, Any]) -> bool | None:
-        """Asks any gating plugin to allow a request, returning None when none gates."""
+        """Asks any gating plugin to allow a request, returning None when none gates.
+
+        A gate that has failed refuses."""
         ...
 
     def gate_paths(self) -> tuple[str, ...]:
@@ -141,10 +196,24 @@ class Platform(Protocol):
     switched off at boot."""
 
     files: FileStore
-    """Where uploaded print files are kept."""
+    """Where uploaded print files and kept frames are stored."""
+
+    secrets: frozenset[str]
+    """Credentials the deployment holds outside the engine's state, such as the
+    login in the address of an external video server. The engine scrubs them
+    from every message and report."""
 
     async def configure(self, settings: dict[str, Any]) -> None:
         """Applies platform-owned settings before inference starts."""
+        ...
+
+    def take_notices(self) -> list[Notice]:
+        """Hands over what the runtime has had to work around since the last call.
+
+        The runtime meets these on its own threads, such as an accelerator it
+        passed over for the CPU or a live view it cannot publish, so they wait
+        here until the engine collects them and raises each as a ``warning``.
+        """
         ...
 
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
@@ -170,24 +239,62 @@ class Platform(Protocol):
         *,
         headers: dict[str, str] | None = None,
         json: dict[str, Any] | None = None,
-        data: bytes | None = None,
+        data: bytes | AsyncIterable[bytes] | None = None,
         binary: bool = False,
         timeout: float = 10.0,
+        redirects: Redirects = "follow",
+        max_bytes: int | None = None,
+        public_only: bool = False,
     ) -> tuple[int, Any]:
-        """Performs an HTTP request and returns (status, parsed body)."""
+        """Performs an HTTP request and returns (status, parsed body).
+
+        A plugin's request passes ``redirects="answer"`` and gets the
+        redirect itself back, since only the address it named was checked
+        against its grant. An adapter's or a notifier's passes ``"refuse"``,
+        so the address that redirects is reported while it is registered and
+        no command or key is sent anywhere else. A plugin's request passes
+        ``max_bytes`` too, as do a plugin install, the catalogue and the
+        update check, since none of those answers comes from anywhere
+        PrintGuard trusts.
+
+        A request that may not reach this network passes ``public_only``. The
+        name is resolved once, every answer is checked and the connection goes
+        to an address that was, so a name that answers differently a second
+        time gets nowhere.
+
+        Raises:
+            PermissionError: If ``public_only`` is set and the host is, or
+                resolves to, an address on this network.
+            RuntimeError: If a redirect is refused, if following one would send
+                the request under another method, so a command never arrives as
+                a read, or if
+                the body is larger than ``max_bytes`` once decompressed, which
+                is noticed while it arrives and not after, or a capped request
+                is answered in an encoding other than gzip. A capped request's
+                message quotes nothing the answer chose, since a plugin hears it.
+        """
         ...
 
-    async def open_socket(self, url: str, arrived: Callable[[str, str], None]) -> sockets.Socket:
-        """Opens a WebSocket and reports every frame through the callback.
+    async def open_socket(self, url: str, arrived: Callable[[str, str], None], public_only: bool = False) -> sockets.Socket:
+        """Opens a plugin's WebSocket and reports every frame through the callback.
+
+        A redirect is a failed handshake, never followed, since only ``url``
+        was checked. The handshake carries ``PLUGIN_HEADER``.
 
         Args:
             url: A ``ws://`` or ``wss://`` URL, already checked against the
                 plugin's grant.
             arrived: Called with ``open``, then ``message`` per frame, then
                 ``closed`` once, whatever ends it.
+            public_only: Whether the connection is refused, as ``http`` refuses
+                it, when the host is or resolves to an address on this network.
 
         Returns:
             The connection, for writing to and closing.
+
+        Raises:
+            PermissionError: If ``public_only`` is set and the host is on this
+                network.
         """
         ...
 

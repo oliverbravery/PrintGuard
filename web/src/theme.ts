@@ -1,3 +1,4 @@
+import { writeStored } from "./storage";
 import type { CustomTheme, Glass, ThemeBase, ThemeTokenKey } from "./types";
 
 interface TokenMeta {
@@ -51,13 +52,13 @@ export const PALETTES: Record<ThemeBase, Palette> = {
     ink0: "#0b0c0a", ink1: "#11130e", ink2: "#181b13", ink3: "#20241a",
     line0: "#262b20", line1: "#39402f",
     text0: "#eceee6", text1: "#a8af9c", text2: "#7e866d",
-    accent: "#ff4d00", ok: "#8ac926", warn: "#ffb000", bad: "#ff3b30",
+    accent: "#ff4d00", ok: "#8ac926", warn: "#ffb000", bad: "#ff3f34",
   },
   light: {
     ink0: "#e7e8e0", ink1: "#f2f3ec", ink2: "#fbfcf6", ink3: "#dfe1d6",
     line0: "#d3d5c8", line1: "#c2c5b4",
     text0: "#1b1d16", text1: "#4a4f40", text2: "#646959",
-    accent: "#bc3809", ok: "#487212", warn: "#8d5d00", bad: "#c42920",
+    accent: "#b53608", ok: "#487212", warn: "#8d5d00", bad: "#bd271f",
   },
 };
 
@@ -66,9 +67,11 @@ export const GLASS = "glass";
 export const GLASS_DEFAULT: Glass = { opacity: 0, tone: 0 };
 const PREFERRED_MUTED = 0.85;
 const AA = 4.5;
+const STATUS_SHARE_TOWARDS_INK = 0.5;
 const BACKDROP_CELLS = 8;
 const SATURATION_HEADROOM = 0.05;
 const MEDIA = "(prefers-color-scheme: dark)";
+const STATUS_TOKENS = ["accent", "ok", "warn", "bad"] as const;
 
 interface Resolved {
   base: ThemeBase;
@@ -83,18 +86,37 @@ function levelOf(luminance: number): number {
   return luminance <= 0.0031308 ? luminance * 12.92 : 1.055 * luminance ** (1 / 2.4) - 0.055;
 }
 
-function mutedRatio(level: number, ink: number, alpha: number): number {
-  const muted = grey(ink * alpha + level * (1 - alpha));
-  const surface = grey(level);
-  return (Math.max(muted, surface) + 0.05) / (Math.min(muted, surface) + 0.05);
+function channels(hex: string): number[] {
+  const packed = parseInt(hex.slice(1), 16);
+  return [(packed >> 16) & 255, (packed >> 8) & 255, packed & 255].map((channel) => channel / 255);
 }
 
-function boundary(ink: number, alpha: number): number {
+function luminance([red, green, blue]: number[]): number {
+  return 0.2126 * grey(red) + 0.7152 * grey(green) + 0.0722 * grey(blue);
+}
+
+function contrast(one: number, other: number): number {
+  return (Math.max(one, other) + 0.05) / (Math.min(one, other) + 0.05);
+}
+
+function mutedRatio(level: number, ink: number, alpha: number): number {
+  return contrast(grey(ink * alpha + level * (1 - alpha)), grey(level));
+}
+
+function statusRatio(level: number, ink: number): number {
+  const palette = PALETTES[ink ? "dark" : "light"];
+  const surface = grey(level);
+  return Math.min(
+    ...STATUS_TOKENS.map((token) => contrast(luminance(channels(palette[token]).map((channel) => channel + (ink - channel) * STATUS_SHARE_TOWARDS_INK)), surface)),
+  );
+}
+
+function boundary(ink: number, ratioAt: (level: number) => number): number {
   let low = 0;
   let high = 1;
   for (let step = 0; step < 24; step += 1) {
     const mid = (low + high) / 2;
-    if ((mutedRatio(mid, ink, alpha) >= AA) === (ink < 0.5)) high = mid;
+    if ((ratioAt(mid) >= AA) === (ink < 0.5)) high = mid;
     else low = mid;
   }
   return ink < 0.5 ? high : low;
@@ -112,17 +134,39 @@ function mutedAlpha(level: number, ink: number): number {
   return high;
 }
 
-const LIGHTEST_UNDER_WHITE_INK = boundary(1, 1);
-const DARKEST_UNDER_BLACK_INK = boundary(0, 1);
+function legibleStatus(hex: string, level: number, ink: number): string {
+  const surface = grey(level);
+  const towardsInk = (share: number) => channels(hex).map((channel) => channel + (ink - channel) * share);
+  const readable = (share: number) => {
+    const status = luminance(towardsInk(share));
+    return (ink ? status > surface : status < surface) && contrast(status, surface) >= AA;
+  };
+  let low = 0;
+  let high = 1;
+  if (!readable(low)) {
+    for (let step = 0; step < 24; step += 1) {
+      const mid = (low + high) / 2;
+      if (readable(mid)) high = mid;
+      else low = mid;
+    }
+    low = high;
+  }
+  const settle = ink ? Math.ceil : Math.floor;
+  return `rgb(${towardsInk(low).map((channel) => settle(channel * 255)).join(" ")})`;
+}
+
+const DARKEST_UNDER_BLACK_INK = boundary(0, (level) => mutedRatio(level, 0, 1));
+const LIGHTEST_UNDER_STATUS_COLOURS = boundary(1, (level) => statusRatio(level, 1));
+const DARKEST_UNDER_STATUS_COLOURS = boundary(0, (level) => statusRatio(level, 0));
 
 let cover: { lo: number; hi: number } | null = null;
 
-export function litGlass(tone: number): boolean {
+function litGlass(tone: number): boolean {
   return tone >= DARKEST_UNDER_BLACK_INK;
 }
 
 function behindTheGlass(tone: number): { lo: number; hi: number } {
-  const page = levelOf(luminance(PALETTES[litGlass(tone) ? "light" : "dark"].ink0));
+  const page = levelOf(luminance(channels(PALETTES[litGlass(tone) ? "light" : "dark"].ink0)));
   return {
     lo: Math.min(cover ? cover.lo : page, tone),
     hi: Math.min(1, Math.max(cover ? cover.hi : page, tone) + SATURATION_HEADROOM),
@@ -132,11 +176,11 @@ function behindTheGlass(tone: number): { lo: number; hi: number } {
 function readableAt(tint: number, tone: number): boolean {
   const { lo, hi } = behindTheGlass(tone);
   return litGlass(tone)
-    ? tint * tone + (1 - tint) * lo >= DARKEST_UNDER_BLACK_INK
-    : tint * tone + (1 - tint) * hi <= LIGHTEST_UNDER_WHITE_INK;
+    ? tint * tone + (1 - tint) * lo >= DARKEST_UNDER_STATUS_COLOURS
+    : tint * tone + (1 - tint) * hi <= LIGHTEST_UNDER_STATUS_COLOURS;
 }
 
-export function clearestTint(tone: number): number {
+function clearestTint(tone: number): number {
   if (readableAt(0, tone)) return 0;
   let low = 0;
   let high = 1;
@@ -148,52 +192,61 @@ export function clearestTint(tone: number): number {
   return high;
 }
 
-export function glassMaterial({ opacity, tone }: Glass): { lit: boolean; vars: Record<string, string> } {
+function glassMaterial({ opacity, tone: chosenTone }: Glass): { lit: boolean; vars: Record<string, string> } {
+  const level = Math.round(chosenTone * 255);
+  const tone = level / 255;
   const lit = litGlass(tone);
   const floor = clearestTint(tone);
-  const settled = floor + opacity * (1 - floor);
+  const settled = Math.ceil((floor + opacity * (1 - floor)) * 1000) / 1000;
   const { lo, hi } = behindTheGlass(tone);
-  const alpha = mutedAlpha(settled * tone + (1 - settled) * (lit ? lo : hi), lit ? 0 : 1);
-  const level = Math.round(tone * 255);
-  const channels = lit ? "0 0 0" : "255 255 255";
+  const ink = lit ? 0 : 1;
+  const hardest = settled * tone + (1 - settled) * (lit ? lo : hi);
+  const alpha = Math.ceil(mutedAlpha(hardest, ink) * 1000) / 1000;
+  const inked = lit ? "0 0 0" : "255 255 255";
+  const palette = PALETTES[lit ? "light" : "dark"];
   return {
     lit,
     vars: {
       "--glass-surface": `rgb(${level} ${level} ${level} / ${settled.toFixed(3)})`,
-      "--glass-ink": `rgb(${channels})`,
-      "--glass-muted": `rgb(${channels} / ${alpha.toFixed(3)})`,
+      "--glass-ink": `rgb(${inked})`,
+      "--glass-muted": `rgb(${inked} / ${alpha.toFixed(3)})`,
       "--glass-contrast": lit ? "rgb(255 255 255)" : "rgb(0 0 0)",
+      ...Object.fromEntries(STATUS_TOKENS.map((token) => [`--glass-${token}`, legibleStatus(palette[token], hardest, ink)])),
     },
   };
 }
 
-export async function measureCover(src: string | null): Promise<void> {
-  if (!src) cover = null;
-  else {
-    const picture = new Image();
-    picture.src = src;
-    await picture.decode();
-    const canvas = document.createElement("canvas");
-    canvas.width = BACKDROP_CELLS;
-    canvas.height = BACKDROP_CELLS;
-    const paper = canvas.getContext("2d", { willReadFrequently: true })!;
-    paper.drawImage(picture, 0, 0, BACKDROP_CELLS, BACKDROP_CELLS);
-    const { data } = paper.getImageData(0, 0, BACKDROP_CELLS, BACKDROP_CELLS);
-    let lo = 1;
-    let hi = 0;
-    for (let at = 0; at < data.length; at += 4) {
-      const level = levelOf(
-        0.2126 * grey(data[at] / 255) + 0.7152 * grey(data[at + 1] / 255) + 0.0722 * grey(data[at + 2] / 255),
-      );
-      lo = Math.min(lo, level);
-      hi = Math.max(hi, level);
-    }
-    cover = { lo, hi };
+async function coverRange(src: string): Promise<{ lo: number; hi: number }> {
+  const picture = new Image();
+  picture.src = src;
+  await picture.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = BACKDROP_CELLS;
+  canvas.height = BACKDROP_CELLS;
+  const paper = canvas.getContext("2d", { willReadFrequently: true })!;
+  paper.drawImage(picture, 0, 0, BACKDROP_CELLS, BACKDROP_CELLS);
+  const { data } = paper.getImageData(0, 0, BACKDROP_CELLS, BACKDROP_CELLS);
+  let lo = 1;
+  let hi = 0;
+  for (let at = 0; at < data.length; at += 4) {
+    const level = levelOf(luminance([data[at] / 255, data[at + 1] / 255, data[at + 2] / 255]));
+    lo = Math.min(lo, level);
+    hi = Math.max(hi, level);
   }
+  return { lo, hi };
+}
+
+let coverShown: string | null = null;
+
+export async function measureCover(src: string | null): Promise<void> {
+  coverShown = src;
+  const measured = src ? await coverRange(src).catch(() => null) : null;
+  if (coverShown !== src) return;
+  cover = measured;
   applyTheme(current.themeId, current.themes, current.glass);
 }
 
-export function resolveTheme(themeId: string, themes: CustomTheme[], glass: Glass = GLASS_DEFAULT): Resolved {
+function resolveTheme(themeId: string, themes: CustomTheme[], glass: Glass = GLASS_DEFAULT): Resolved {
   const custom = themes.find((t) => t.id === themeId);
   if (custom) return { base: custom.base, colors: { ...PALETTES[custom.base], ...custom.colors } };
   if (themeId === "light" || themeId === "dark") return { base: themeId, colors: null };
@@ -201,21 +254,17 @@ export function resolveTheme(themeId: string, themes: CustomTheme[], glass: Glas
   return { base: window.matchMedia(MEDIA).matches ? "dark" : "light", colors: null };
 }
 
-function luminance(hex: string): number {
-  const n = parseInt(hex.slice(1), 16);
-  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
-    const s = v / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-}
+const ON_ACCENT_INKS = ["#0b0c0a", "#f3f4ed"];
 
 function readableOn(hex: string): string {
-  return luminance(hex) > 0.42 ? "#0b0c0a" : "#f3f4ed";
+  const accent = luminance(channels(hex));
+  const [dark, light] = ON_ACCENT_INKS;
+  return contrast(accent, luminance(channels(dark))) >= contrast(accent, luminance(channels(light))) ? dark : light;
 }
 
 let current: { themeId: string; themes: CustomTheme[]; glass: Glass } = { themeId: "system", themes: [], glass: GLASS_DEFAULT };
 let previewing = false;
+let applied = "";
 
 export function beginPreview(): void {
   previewing = true;
@@ -227,6 +276,9 @@ export function endPreview(): void {
 export function applyTheme(themeId: string, themes: CustomTheme[], given?: Partial<Glass>, force = false): void {
   if (previewing && !force) return;
   const glass = { ...GLASS_DEFAULT, ...given };
+  const asked = JSON.stringify([themeId, themes, glass, cover, window.matchMedia(MEDIA).matches, previewing]);
+  if (asked === applied && !force) return;
+  applied = asked;
   current = { themeId, themes, glass };
   const { base, colors } = resolveTheme(themeId, themes, glass);
   const material = glassMaterial(glass).vars;
@@ -239,8 +291,11 @@ export function applyTheme(themeId: string, themes: CustomTheme[], given?: Parti
     if (colors) root.style.setProperty(t.cssVar, colors[t.key]);
     else root.style.removeProperty(t.cssVar);
   }
-  if (colors) root.style.setProperty("--color-on-accent", readableOn(colors.accent));
-  else root.style.removeProperty("--color-on-accent");
+  const inks = { "--color-on-accent": colors && readableOn(colors.accent), "--color-on-bad": colors && readableOn(colors.bad) };
+  for (const [name, ink] of Object.entries(inks)) {
+    if (ink) root.style.setProperty(name, ink);
+    else root.style.removeProperty(name);
+  }
   for (const [name, value] of Object.entries(material)) {
     if (glassy) root.style.setProperty(name, value);
     else root.style.removeProperty(name);
@@ -249,11 +304,11 @@ export function applyTheme(themeId: string, themes: CustomTheme[], given?: Parti
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", bg);
   if (previewing) return;
   const vars = colors
-    ? { ...Object.fromEntries(TOKENS.map((t) => [t.cssVar, colors[t.key]])), "--color-on-accent": readableOn(colors.accent) }
+    ? { ...Object.fromEntries(TOKENS.map((t) => [t.cssVar, colors[t.key]])), ...inks }
     : glassy
       ? material
       : null;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ id: themeId, base, vars, bg, glass: glassy }));
+  writeStored(STORAGE_KEY, JSON.stringify({ id: themeId, base, vars, bg, glass: glassy }));
 }
 
 window.matchMedia(MEDIA).addEventListener("change", () => {

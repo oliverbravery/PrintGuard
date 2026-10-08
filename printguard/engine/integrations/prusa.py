@@ -19,27 +19,55 @@ Printer-side setup (enabling PrusaLink, the password): https://help.prusa3d.com/
 
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
 import httpx
 from pyprusalink import PrusaLink
 from pyprusalink.client import DigestAuthWorkaround
+from pyprusalink.types import Conflict, InvalidAuth, NotFound
 
-from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
+from ..adapters import redirect_message
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, require_reply
 
 _USERNAME = "maker"
 _TIMEOUT_S = 10.0
 _UPLOAD_TIMEOUT_S = 180.0
-_UPLOAD_HEADERS = {"Content-Type": "application/octet-stream", "Print-After-Upload": "?1", "Overwrite": "?1"}
+_UPLOAD_HEADERS = {"Content-Type": "text/x.gcode", "Print-After-Upload": "?1", "Overwrite": "?1"}
+_TLS = httpx.create_ssl_context()
+"""One TLS context for every client. A client builds its own otherwise, which reads the CA bundle on the event loop at every poll."""
 
+_JOB_COMMANDS = {
+    DeviceAction.PAUSE: ("PUT", "/pause"),
+    DeviceAction.RESUME: ("PUT", "/resume"),
+    DeviceAction.CANCEL: ("DELETE", ""),
+}
 _STATUS_MAP = {
     "PRINTING": DeviceStatus.PRINTING,
     "PAUSED": DeviceStatus.PAUSED,
+    "ATTENTION": DeviceStatus.UNKNOWN,
     "FINISHED": DeviceStatus.IDLE,
     "STOPPED": DeviceStatus.IDLE,
+    "IDLE": DeviceStatus.IDLE,
+    "READY": DeviceStatus.IDLE,
     "ERROR": DeviceStatus.ERROR,
+    "BUSY": DeviceStatus.UNKNOWN,
 }
+"""The printer's states, which PrusaLink on a Raspberry Pi also gives as the job's state, and the job's own.
+
+Buddy firmware shows a warning dialog over a print that keeps running and reports it as ATTENTION, or as a PAUSED
+job, so neither says the print stopped."""
+
+
+def _username(config: dict[str, Any]) -> str:
+    return config.get("username") or _USERNAME
+
+
+def _failure(response: httpx.Response) -> str:
+    if response.is_redirect:
+        return redirect_message(response)
+    return f"PrusaLink answered HTTP {response.status_code}"
 
 
 class PrusaAdapter(IntegrationAdapter):
@@ -51,7 +79,7 @@ class PrusaAdapter(IntegrationAdapter):
     setup_url = "https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293"
     setup_hint = (
         "Enable PrusaLink on the printer (Settings > Network > PrusaLink) and use the password "
-        "shown there. The username is always 'maker'."
+        "shown there. The username is 'maker' unless you chose another setting PrusaLink up on a Raspberry Pi."
     )
     experimental = False
     formats = ("gcode", "bgcode")
@@ -63,6 +91,12 @@ class PrusaAdapter(IntegrationAdapter):
                 "format": "uri",
                 "title": "Base URL",
                 "placeholder": "http://192.168.1.80",
+            },
+            "username": {
+                "type": "string",
+                "title": "Username",
+                "default": _USERNAME,
+                "placeholder": "maker, unless you set another on a Raspberry Pi",
             },
             "password": {
                 "type": "string",
@@ -77,25 +111,30 @@ class PrusaAdapter(IntegrationAdapter):
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
         """Reads the active job from /api/v1/job and the heaters from /api/v1/status.
 
-        No active job (HTTP 204) is idle; any failure to reach or authenticate
-        with the printer is offline, which keeps inference watching. The HTTP
-        function is unused - pyprusalink owns the digest-authenticated client.
+        With no active job (HTTP 204) the printer's own state is the answer,
+        unknown when it says none. The HTTP function is unused - pyprusalink owns
+        the digest-authenticated client.
+
+        Raises:
+            PermissionError: If PrusaLink rejects the username or password.
+            RuntimeError: If it answers with an error or a redirect.
+            httpx.HTTPError: If the printer cannot be reached.
         """
-        try:
-            job, status = await self._read(config)
-        except Exception:
-            return DeviceState(DeviceStatus.OFFLINE)
+        job, status = await self._read(config)
         printer = status.get("printer") or {}
         heaters = {
             "nozzle": Heater.reported(printer.get("temp_nozzle"), printer.get("target_nozzle")),
             "bed": Heater.reported(printer.get("temp_bed"), printer.get("target_bed")),
         }
         if not job:
-            return DeviceState(DeviceStatus.IDLE, **heaters)
+            return DeviceState(_STATUS_MAP.get(str(printer.get("state", "")).upper(), DeviceStatus.UNKNOWN), **heaters)
         file = job.get("file") or {}
         remaining = job.get("time_remaining")
+        job_status = _STATUS_MAP.get(str(job.get("state", "")).upper(), DeviceStatus.UNKNOWN)
+        if job_status is DeviceStatus.PAUSED and str(printer.get("state", "")).upper() == "ATTENTION":
+            job_status = DeviceStatus.UNKNOWN
         return DeviceState(
-            _STATUS_MAP.get(str(job.get("state", "")).upper(), DeviceStatus.UNKNOWN),
+            job_status,
             float(job.get("progress") or 0.0),
             file.get("display_name") or file.get("name"),
             remaining_s=int(remaining) if remaining is not None else None,
@@ -103,36 +142,49 @@ class PrusaAdapter(IntegrationAdapter):
         )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:
-        """Pauses, resumes or cancels the active job by its id."""
+        """Pauses, resumes or cancels the active job by its id.
+
+        Raises:
+            PermissionError: If PrusaLink rejects the username or password.
+            RuntimeError: If there is no active job, or PrusaLink refuses the command.
+        """
         job = await self._job(config)
         if not job:
             raise RuntimeError(f"Prusa printer has no active job to {action.value}")
         await self._command(config, int(job["id"]), action)
 
     async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
-        """Puts the file onto the printer's first available storage and prints it.
+        """Puts the file onto the printer's first writable storage and prints it.
 
         PrusaLink starts the job itself on ``Print-After-Upload``, and the
         storage is whichever the printer offers: the USB stick on a printer
         running PrusaLink itself, local storage on a Raspberry Pi running it.
+        One client asks for the storage and then uploads, so the digest
+        challenge the first request answers also signs the second and the
+        file is sent once.
+
+        Raises:
+            RuntimeError: If the printer has no storage to write to, or
+                refuses the listing or the file.
         """
-        storage = await self._storage(config)
-        await self._upload(config, f"/api/v1/files{storage}{filename}", _UPLOAD_HEADERS, data)
-
-    async def _storage(self, config: dict[str, Any]) -> str:
-        async with self._link(config) as link:
-            storages = await link.get_storage()
-        available = next((s["path"] for s in storages if s.get("available")), None)
-        if not available:
-            raise RuntimeError("Prusa printer has no storage to upload to")
-        return available if available.endswith("/") else f"{available}/"
-
-    async def _upload(self, config: dict[str, Any], path: str, headers: dict[str, str], data: bytes) -> None:
-        auth = DigestAuthWorkaround(username=_USERNAME, password=str(config.get("password", "")))
-        async with httpx.AsyncClient(timeout=_UPLOAD_TIMEOUT_S) as client:
-            response = await client.put(f"{str(config['base_url']).rstrip('/')}{path}", content=data, headers=headers, auth=auth)
-        if response.status_code >= 400:
-            raise RuntimeError(f"PrusaLink rejected the file: HTTP {response.status_code}")
+        auth = DigestAuthWorkaround(username=_username(config), password=str(config.get("password", "")))
+        async with httpx.AsyncClient(base_url=str(config["base_url"]).rstrip("/"), auth=auth, timeout=_UPLOAD_TIMEOUT_S, verify=_TLS) as client:
+            listing = await client.get("/api/v1/storage", timeout=_TIMEOUT_S)
+            if listing.is_redirect:
+                raise RuntimeError(redirect_message(listing))
+            if listing.status_code >= 400:
+                raise RuntimeError(f"PrusaLink refused to list its storage: HTTP {listing.status_code}")
+            try:
+                storages = listing.json()["storage_list"]
+            except (json.JSONDecodeError, KeyError, TypeError):
+                raise RuntimeError("PrusaLink did not answer like its API") from None
+            storage = next((s["path"] for s in storages if s.get("available") and not s.get("read_only")), None)
+            if not storage:
+                raise RuntimeError("Prusa printer has no storage to upload to")
+            stored = await client.put(f"/api/v1/files{storage.rstrip('/')}/{filename}", content=data, headers=_UPLOAD_HEADERS)
+        if stored.is_redirect:
+            raise RuntimeError(redirect_message(stored))
+        require_reply("PrusaLink", "the file", stored.status_code, stored.status_code == 201)
 
     async def _read(self, config: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
         async with self._link(config) as link:
@@ -146,15 +198,30 @@ class PrusaAdapter(IntegrationAdapter):
         return dict(job) if job else None
 
     async def _command(self, config: dict[str, Any], job_id: int, action: DeviceAction) -> None:
-        async with self._link(config) as link:
-            if action is DeviceAction.PAUSE:
-                await link.pause_job(job_id)
-            elif action is DeviceAction.RESUME:
-                await link.resume_job(job_id)
-            else:
-                await link.cancel_job(job_id)
+        """Pauses, resumes or cancels a job, each of which PrusaLink answers with 204.
+
+        pyprusalink's own calls drop the answer, so the request goes through its client.
+
+        Raises:
+            PermissionError: If PrusaLink rejects the username or password.
+            RuntimeError: If PrusaLink answers with anything but 204.
+        """
+        method, path = _JOB_COMMANDS[action]
+        async with self._link(config) as link, link.client.request(method, f"/api/v1/job/{job_id}{path}") as response:
+            require_reply("PrusaLink", action.value, response.status_code, response.status_code == 204)
 
     @asynccontextmanager
     async def _link(self, config: dict[str, Any]) -> AsyncIterator[Any]:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
-            yield PrusaLink(client, str(config["base_url"]).rstrip("/"), _USERNAME, str(config.get("password", "")))
+        async with httpx.AsyncClient(timeout=_TIMEOUT_S, verify=_TLS) as client:
+            try:
+                yield PrusaLink(client, str(config["base_url"]).rstrip("/"), _username(config), str(config.get("password", "")))
+            except InvalidAuth:
+                raise PermissionError("PrusaLink rejected the username or password") from None
+            except httpx.HTTPStatusError as exc:
+                raise RuntimeError(_failure(exc.response)) from None
+            except Conflict:
+                raise RuntimeError("PrusaLink refused it with HTTP 409, since the printer is not in a state that allows it") from None
+            except NotFound:
+                raise RuntimeError("PrusaLink did not answer like its API: HTTP 404") from None
+            except json.JSONDecodeError:
+                raise RuntimeError("PrusaLink did not answer like its API") from None

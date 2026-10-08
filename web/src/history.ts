@@ -3,9 +3,10 @@ import type { HistoryBucket } from "./types";
 export type Period = "1h" | "6h" | "24h" | "all";
 
 export const PERIODS: Period[] = ["1h", "6h", "24h", "all"];
+export const HISTORY_BUCKET_MS = 60_000;
 
 const WINDOW_S: Record<Period, number> = { "1h": 3600, "6h": 21600, "24h": 86400, all: Infinity };
-const GROUP_S: Record<Period, number> = { "1h": 60, "6h": 300, "24h": 900, all: 3600 };
+export const GROUP_S: Record<Period, number> = { "1h": 60, "6h": 300, "24h": 900, all: 3600 };
 
 export interface GroupedBucket {
   t: number;
@@ -37,4 +38,14 @@ export function groupBuckets(buckets: HistoryBucket[], period: Period, now: numb
   return [...groups.values()]
     .sort((a, b) => a.t - b.t)
     .map(({ sum, ...g }) => ({ ...g, avg: g.n ? sum / g.n : 0 }));
+}
+
+const ALERT_OUTCOMES: Record<string, string> = {
+  pause: "print paused",
+  cancel: "print cancelled",
+  failed: "the printer did not take the command",
+};
+
+export function alertOutcome(action: string): string {
+  return ALERT_OUTCOMES[action] ?? "";
 }

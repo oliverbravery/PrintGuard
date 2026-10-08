@@ -6,6 +6,7 @@ export type LaunchOptions = { cameraUrl: string };
 const VERSION = readFileSync(new URL("../../pyproject.toml", import.meta.url), "utf8").match(/^version = "(.+)"$/m)![1];
 const APP_WINDOW = process.env.PRINTGUARD_CDP;
 const APP_LOG = process.env.PRINTGUARD_LOG;
+const HEALTHY_WATCH_MS = 5_000;
 const FEEDS = [
   { camera: "Healthy feed", monitor: "Healthy print", path: "healthy.mjpg" },
   { camera: "Failing feed", monitor: "Failing print", path: "defect.mjpg" },
@@ -80,8 +81,9 @@ test("a failing print is caught end to end", async ({ page, baseURL, cameraUrl }
     await expect(tile(page, feed.monitor).getByText(/^(?!0\.0\/)\d+\.\d\/\d+\.\d$/)).toBeVisible({ timeout: 30_000 });
   }
   await expect(tile(page, "Failing print").getByText("DEFECT DETECTED")).toBeVisible({ timeout: 90_000 });
-  await expect(tile(page, "Healthy print").getByText("DEFECT DETECTED")).toBeHidden();
   await expect.poll(async () => (await risk(page, "Failing print")) - (await risk(page, "Healthy print"))).toBeGreaterThan(0);
+  await page.waitForTimeout(HEALTHY_WATCH_MS);
+  await expect(tile(page, "Healthy print").getByText("DEFECT DETECTED")).toBeHidden();
   await page.screenshot({ path: test.info().outputPath("dashboard.png") });
   expect(crashes).toEqual([]);
 });

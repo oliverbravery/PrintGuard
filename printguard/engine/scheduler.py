@@ -1,34 +1,40 @@
 """Demand-driven inference scheduling with max-min fair rate allocation.
 
 Capacity is never benchmarked up front: a smoothed estimate of observed
-inference latency continuously yields the sustainable total rate, which is
-water-filled across cameras so no camera is allocated beyond its native
-frame rate and spare capacity flows to cameras that can use it. Frames are
-grabbed at dispatch time and identified by sequence, so a frame is never
-inferred twice and results always describe the present.
+inference latency, a camera's own image adjustments included, continuously
+yields the sustainable total rate, which is water-filled across cameras so no
+camera is allocated beyond its effective rate (its native frame rate, held to
+the cap its user set) and spare capacity flows to cameras that can use it.
+Frames are grabbed at dispatch time and identified by sequence, so a frame is
+never inferred twice and results always describe the present.
 """
 
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import time
 from typing import Any, Awaitable, Callable
 
-from . import vision
+from . import logs, vision
 from .platform import Frame, Platform
 from .registry import Camera, CameraRegistry
 
 logger = logging.getLogger(__name__)
 
 LATENCY_SMOOTHING = 0.25
-IDLE_POLL_S = 0.05
-DISPATCH_POLL_S = 0.005
+IDLE_POLL_S = 0.25
 STALE_RETRY_S = 0.1
 ERROR_THROTTLE_S = 30.0
 
 ResultSink = Callable[[Camera, Frame, dict[str, Any]], Awaitable[None]]
 ErrorSink = Callable[[str], None]
+
+
+def _interval(camera: Camera) -> float:
+    """Seconds between a camera's inferences at the rate it is allocated."""
+    return 1.0 / max(0.1, camera.target_fps or camera.effective_fps)
 
 
 class Scheduler:
@@ -39,11 +45,12 @@ class Scheduler:
         self._registry = registry
         self._on_result = on_result
         self._on_error = on_error
-        self._last_error_at = 0.0
+        self._last_error_at: dict[str, float] = {}
         self._dispatch_lock = asyncio.Lock()
         self._jobs: set[asyncio.Task[None]] = set()
         self._camera_jobs: dict[str, asyncio.Task[None]] = {}
         self._slots = asyncio.Semaphore(platform.workers)
+        self._job_finished = asyncio.Event()
         self.infer_ms = 0.0
 
     def reset(self) -> None:
@@ -52,10 +59,13 @@ class Scheduler:
         self.infer_ms = 0.0
 
     async def reconfigure(self, configure: Callable[[], Awaitable[None]]) -> None:
-        """Drains active work and applies a new inference configuration."""
+        """Drains active work and applies a new inference configuration.
+
+        An inference cancelled while it drains, as a camera restart does, has
+        finished as far as the switch is concerned.
+        """
         async with self._dispatch_lock:
-            if self._jobs:
-                await asyncio.gather(*self._jobs)
+            await asyncio.gather(*self._jobs, return_exceptions=True)
             await configure()
             self.reset()
 
@@ -76,10 +86,10 @@ class Scheduler:
     def allocate(self) -> None:
         """Water-fills capacity into per-camera target rates.
 
-        Cameras are visited in ascending order of native frame rate; each
-        takes the smaller of its native rate and an equal share of what
-        remains, releasing any surplus to faster cameras. Until the first
-        latency observation exists, targets fall back to native rates and
+        Cameras are visited in ascending order of effective rate; each takes
+        the smaller of its effective rate and an equal share of what remains,
+        releasing any surplus to faster cameras. Until the first latency
+        observation exists, targets fall back to effective rates and
         the worker semaphore alone provides backpressure.
         """
         cameras = self._registry.schedulable()
@@ -88,50 +98,70 @@ class Scheduler:
         remaining = self.capacity_fps()
         if remaining <= 0:
             for camera in cameras:
-                camera.target_fps = camera.max_fps
+                camera.target_fps = camera.effective_fps
             return
-        for index, camera in enumerate(sorted(cameras, key=lambda c: c.max_fps)):
+        for index, camera in enumerate(sorted(cameras, key=lambda c: c.effective_fps)):
             share = remaining / (len(cameras) - index)
-            camera.target_fps = min(camera.max_fps, share)
+            camera.target_fps = min(camera.effective_fps, share)
             remaining -= camera.target_fps
 
     def cancel_camera(self, camera: Camera) -> None:
-        """Cancels the active inference job for a restarted camera."""
+        """Cancels the active inference job of a camera that is restarted or removed."""
         if task := self._camera_jobs.get(camera.id):
             task.cancel()
 
-    async def run(self) -> None:
-        """Dispatch loop that hands the most overdue camera to a free worker."""
-        while True:
-            async with self._dispatch_lock:
-                self.allocate()
-                now = time.monotonic()
-                due = [c for c in self._registry.schedulable() if not c.inferring and now >= c.next_due]
-                if due:
-                    camera = min(due, key=lambda c: c.next_due)
-                    await self._slots.acquire()
-                    camera.inferring = True
-                    camera.next_due = time.monotonic() + 1.0 / max(0.1, camera.target_fps or camera.max_fps)
-                    task = asyncio.create_task(self._job(camera))
-                    self._jobs.add(task)
-                    task.add_done_callback(self._jobs.discard)
-                    self._camera_jobs[camera.id] = task
+    def cancel_all(self) -> None:
+        """Cancels every inference job, including one whose camera is no longer registered."""
+        for task in self._jobs:
+            task.cancel()
 
-                    def forget(done: asyncio.Task[None], camera_id: str = camera.id) -> None:
-                        if self._camera_jobs.get(camera_id) is done:
-                            self._camera_jobs.pop(camera_id)
+    async def dispatch(self) -> float:
+        """Hands the most overdue camera to a free worker, or waits for one to fall due.
 
-                    task.add_done_callback(forget)
-                    continue
-                sleep_s = self._sleep_until_due(now)
-            await asyncio.sleep(sleep_s)
+        A camera can be dispatched again once its interval has passed and its
+        last inference has come back. Only the first has a known time, so a
+        pass that finds nothing due sleeps until the earliest idle camera's
+        interval is up or any inference finishes, whichever comes first.
+        Sleeping on the idle cameras alone would hold a fast camera that is
+        mid-inference to the pace of a slow one beside it. A camera whose rate
+        was raised is due within its new interval, not the one it was
+        dispatched at.
 
-    def _sleep_until_due(self, now: float) -> float:
-        cameras = self._registry.schedulable()
-        if not cameras:
-            return IDLE_POLL_S
-        waits = [c.next_due - now for c in cameras if not c.inferring]
-        return min(max(min(waits, default=0.0), DISPATCH_POLL_S), 0.25)
+        Returns:
+            Seconds until another pass is worth making, which is always none.
+        """
+        async with self._dispatch_lock:
+            self._job_finished.clear()
+            self.allocate()
+            now = time.monotonic()
+            idle = [c for c in self._registry.schedulable() if not c.inferring]
+            for camera in idle:
+                camera.next_due = min(camera.next_due, now + _interval(camera))
+            due = [c for c in idle if now >= c.next_due]
+            if due:
+                camera = min(due, key=lambda c: c.next_due)
+                await self._slots.acquire()
+                camera.inferring = True
+                camera.next_due = time.monotonic() + _interval(camera)
+                task = asyncio.create_task(self._job(camera))
+                self._jobs.add(task)
+                task.add_done_callback(self._jobs.discard)
+                self._camera_jobs[camera.id] = task
+
+                def forget(done: asyncio.Task[None]) -> None:
+                    if self._camera_jobs.get(camera.id) is done:
+                        self._camera_jobs.pop(camera.id)
+
+                task.add_done_callback(forget)
+                task.add_done_callback(functools.partial(self._release, camera))
+                return 0.0
+            wait = min((c.next_due - now for c in idle), default=IDLE_POLL_S)
+        try:
+            async with asyncio.timeout(min(wait, IDLE_POLL_S)):
+                await self._job_finished.wait()
+        except TimeoutError:
+            pass
+        return 0.0
 
     async def _job(self, camera: Camera) -> None:
         try:
@@ -140,7 +170,9 @@ class Scheduler:
                 camera.next_due = time.monotonic() + STALE_RETRY_S
                 return
             camera.last_seq = frame.seq
-            rgb = vision.transform(
+            started = time.monotonic()
+            rgb = await asyncio.to_thread(
+                vision.transform,
                 frame.rgb,
                 rotation=camera.rotation,
                 crop=camera.crop,
@@ -148,7 +180,6 @@ class Scheduler:
                 contrast=camera.contrast,
                 sharpness=camera.sharpness,
             )
-            started = time.monotonic()
             result = await self._platform.infer(rgb)
             elapsed_ms = (time.monotonic() - started) * 1000.0
             self.infer_ms = (
@@ -161,9 +192,12 @@ class Scheduler:
         except Exception as exc:
             camera.next_due = time.monotonic() + STALE_RETRY_S
             logger.debug("inference failed on '%s'", camera.name, exc_info=True)
-            if time.monotonic() - self._last_error_at > ERROR_THROTTLE_S:
-                self._last_error_at = time.monotonic()
-                self._on_error(f"inference failed on '{camera.name}': {exc}")
-        finally:
-            camera.inferring = False
-            self._slots.release()
+            if time.monotonic() - self._last_error_at.get(camera.id, float("-inf")) > ERROR_THROTTLE_S:
+                self._last_error_at[camera.id] = time.monotonic()
+                self._on_error(f"inference failed on '{camera.name}': {logs.describe(exc)}")
+
+    def _release(self, camera: Camera, _: asyncio.Task[None]) -> None:
+        """Frees a job's worker slot and camera, even for a job cancelled before it ran a step."""
+        camera.inferring = False
+        self._slots.release()
+        self._job_finished.set()

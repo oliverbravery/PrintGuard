@@ -1,11 +1,13 @@
 import type { HeaterName } from "./components/PrinterControls";
+import { tooLargeToDraw, type ToolpathSource } from "./toolpath";
 import type { EngineState, PrintFile, PrintMeta, Printer } from "./types";
 
 export const FORMATS = ["gcode", "gco", "g", "bgcode", "3mf"];
-export const ACCEPT = FORMATS.map((format) => `.${format}`).join(",");
+export const ACCEPT = [...FORMATS.map((format) => `.${format}`), "application/octet-stream"].join(",");
 const TEXT_FORMATS = ["gcode", "gco", "g"];
 const SAMPLE_HEAD = 4 * 1024 * 1024;
 const SAMPLE_TAIL = 512 * 1024;
+const UNZIP_STEP = 64 * 1024;
 const PLATE_GCODE = /^Metadata\/plate_(\d+)\.gcode$/;
 
 export type Temperatures = Partial<Record<HeaterName, number>>;
@@ -15,7 +17,10 @@ export interface PrintDraft {
   name: string;
   printerIds: string[];
   temperatures: Temperatures;
-  drawPreview: boolean;
+}
+
+export interface SlicedGcode extends ToolpathSource {
+  sample: Blob;
 }
 
 export interface Inspection {
@@ -45,10 +50,10 @@ export function eligiblePrinters(engine: EngineState, print: PrintFile): Printer
 }
 
 export function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.round((seconds % 3600) / 60);
+  const minutes = Math.round(seconds / 60);
+  const h = Math.floor(minutes / 60);
   if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
-  return h ? `${h}h ${m}m` : `${m}m`;
+  return h ? `${h}h ${minutes % 60}m` : `${minutes}m`;
 }
 
 export function formatFilament(meta: PrintMeta): string | null {
@@ -64,7 +69,8 @@ export function formatBytes(bytes: number): string {
 
 export function ago(ts: number): string {
   const s = Math.max(0, Date.now() / 1000 - ts);
-  if (s < 3600) return `${Math.max(1, Math.floor(s / 60))}m ago`;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
 }
@@ -78,28 +84,69 @@ export function isText(filename: string): boolean {
   return TEXT_FORMATS.includes(extOf(filename));
 }
 
-export async function toolpathOf(file: File): Promise<Blob | null> {
-  const ext = extOf(file.name);
-  if (ext === "bgcode") return null;
-  if (ext !== "3mf") return file;
-  const { unzipSync } = await import("fflate");
-  const archive = new Uint8Array(await file.arrayBuffer());
-  const plates: string[] = [];
-  unzipSync(archive, {
-    filter: ({ name }) => {
-      if (PLATE_GCODE.test(name)) plates.push(name);
-      return false;
-    },
-  });
-  const [plate] = plates.sort((a, b) => Number(PLATE_GCODE.exec(a)![1]) - Number(PLATE_GCODE.exec(b)![1]));
-  if (!plate) throw new Error("this 3mf has not been sliced, export it from Bambu Studio or Orca with the gcode included");
-  return new Blob([unzipSync(archive, { filter: ({ name }) => name === plate })[plate] as Uint8Array<ArrayBuffer>]);
+function sampleOf(source: Blob): Blob {
+  return source.size > SAMPLE_HEAD + SAMPLE_TAIL ? new Blob([source.slice(0, SAMPLE_HEAD), "\n", source.slice(-SAMPLE_TAIL)]) : source;
 }
 
-export async function inspectPrint(file: File, toolpath: Blob | null): Promise<Inspection> {
-  const source = toolpath ?? file;
-  const sample =
-    source.size > SAMPLE_HEAD + SAMPLE_TAIL ? new Blob([source.slice(0, SAMPLE_HEAD), "\n", source.slice(-SAMPLE_TAIL)]) : source;
+function drawable(gcode: Blob): SlicedGcode {
+  return { size: gcode.size, text: () => gcode.text(), sample: sampleOf(gcode) };
+}
+
+class PlateGcode {
+  size = 0;
+  private head: Uint8Array<ArrayBuffer>[] = [];
+  private headRoom = SAMPLE_HEAD;
+  private kept: Uint8Array<ArrayBuffer>[] = [];
+  private keptSize = 0;
+
+  constructor(readonly plate: number) {}
+
+  take(chunk: Uint8Array<ArrayBuffer>) {
+    this.size += chunk.length;
+    if (this.headRoom > 0) {
+      this.head.push(chunk.subarray(0, this.headRoom));
+      this.headRoom -= chunk.length;
+    }
+    this.kept.push(chunk);
+    this.keptSize += chunk.length;
+    if (tooLargeToDraw(this)) while (this.keptSize - this.kept[0].length >= SAMPLE_TAIL) this.keptSize -= this.kept.shift()!.length;
+  }
+
+  sliced(): SlicedGcode {
+    if (!tooLargeToDraw(this)) return drawable(new Blob(this.kept));
+    const sample = new Blob([...this.head, "\n", new Blob(this.kept).slice(-SAMPLE_TAIL)]);
+    return { size: this.size, text: () => sample.text(), sample };
+  }
+}
+
+export async function toolpathOf(file: File): Promise<SlicedGcode | null> {
+  const ext = extOf(file.name);
+  if (ext === "bgcode") return null;
+  if (ext !== "3mf") return drawable(file);
+  const { Unzip, UnzipInflate } = await import("fflate");
+  let first: PlateGcode | undefined;
+  const archive = new Unzip((entry) => {
+    const plate = Number(PLATE_GCODE.exec(entry.name)?.[1] ?? NaN);
+    if (!(plate < (first?.plate ?? Infinity))) return;
+    const gcode = (first = new PlateGcode(plate));
+    entry.ondata = (error, chunk) => {
+      if (error) throw error;
+      gcode.take(chunk as Uint8Array<ArrayBuffer>);
+    };
+    entry.start();
+  });
+  archive.register(UnzipInflate);
+  const reader = file.stream().getReader();
+  for (let read = await reader.read(); !read.done; read = await reader.read()) {
+    for (let at = 0; at < read.value.length; at += UNZIP_STEP) archive.push(read.value.subarray(at, at + UNZIP_STEP));
+  }
+  archive.push(new Uint8Array(0), true);
+  if (!first) throw new Error("this 3mf has not been sliced, export it from Bambu Studio or Orca with the gcode included");
+  return first.sliced();
+}
+
+export async function inspectPrint(file: File, toolpath: SlicedGcode | null): Promise<Inspection> {
+  const sample = toolpath?.sample ?? sampleOf(file);
   const ext = extOf(file.name) === "3mf" ? "gcode" : extOf(file.name);
   const response = await fetch(`api/prints/inspect?${new URLSearchParams({ ext })}`, {
     method: "POST",
@@ -118,8 +165,9 @@ function errorDetail(status: number, body: string): string {
   }
 }
 
-export function sendPrint(draft: PrintDraft, body: Blob, onProgress: (fraction: number) => void): Promise<void> {
+export function sendPrint(draft: PrintDraft, body: Blob, onProgress: (fraction: number) => void, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
     const request = new XMLHttpRequest();
     const params = new URLSearchParams({ filename: draft.file.name, name: draft.name, printer_ids: draft.printerIds.join(",") });
     for (const [heater, target] of Object.entries(draft.temperatures)) params.set(heater, String(target));
@@ -128,6 +176,8 @@ export function sendPrint(draft: PrintDraft, body: Blob, onProgress: (fraction: 
     request.upload.onprogress = (event) => event.lengthComputable && onProgress(event.loaded / event.total);
     request.onload = () => (request.status < 400 ? resolve() : reject(new Error(errorDetail(request.status, request.responseText))));
     request.onerror = () => reject(new Error("the upload did not reach the hub"));
+    request.onabort = () => reject(signal.reason);
+    signal.addEventListener("abort", () => request.abort(), { once: true });
     request.send(body);
   });
 }

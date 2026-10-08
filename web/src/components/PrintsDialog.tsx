@@ -1,7 +1,8 @@
-import { useRef, useState, type DragEvent } from "react";
-import { ACCEPT, ago, formatBytes, summary } from "../prints";
+import { useEffect, useRef, useState } from "react";
+import { ACCEPT, acceptedTags, ago, formatBytes, summary } from "../prints";
 import { useStore } from "../store";
 import type { PrintFile } from "../types";
+import { ConfirmButton } from "./ConfirmButton";
 import { Dialog } from "./Dialog";
 import { NameField } from "./NameField";
 import { PrinterTags } from "./PrinterTags";
@@ -20,12 +21,13 @@ function Thumbnail({ print }: { print: PrintFile }) {
 }
 
 function PrintRow({ print }: { print: PrintFile }) {
-  const { send, isPending, openPrint } = useStore();
+  const { send, isPending, openPrint, updatePrint } = useStore();
   const [editing, setEditing] = useState(false);
-  const removing = isPending("print.remove");
+  const removing = isPending("print.remove", print.id);
   const toggleTag = (id: string) => {
-    const printer_ids = print.printer_ids.includes(id) ? print.printer_ids.filter((p) => p !== id) : [...print.printer_ids, id];
-    send({ cmd: "print.update", id: print.id, patch: { printer_ids } });
+    const engine = useStore.getState().engine!;
+    const tags = acceptedTags(engine, engine.prints.find((p) => p.id === print.id)!.printer_ids, print.ext);
+    updatePrint(print.id, { printer_ids: tags.includes(id) ? tags.filter((p) => p !== id) : [...tags, id] });
   };
   return (
     <div className="panel space-y-2.5 px-3 py-2.5">
@@ -44,16 +46,12 @@ function PrintRow({ print }: { print: PrintFile }) {
           <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setEditing((v) => !v)}>
             {editing ? "Hide" : "Edit"}
           </button>
-          <button
-            className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
-            disabled={removing}
-            onClick={() => send({ cmd: "print.remove", id: print.id })}
-          >
+          <ConfirmButton className="!py-1 !px-2.5 !text-[0.62rem]" disabled={removing} onConfirm={() => send({ cmd: "print.remove", id: print.id })}>
             {removing ? "Removing…" : "Remove"}
-          </button>
+          </ConfirmButton>
         </div>
       </div>
-      {editing && <NameField name={print.name} onRename={(name) => send({ cmd: "print.update", id: print.id, patch: { name } })} />}
+      {editing && <NameField name={print.name} onRename={(name) => updatePrint(print.id, { name })} />}
       <PrinterTags selected={print.printer_ids} ext={print.ext} onToggle={toggleTag} />
       <SendToPrinter print={print} />
     </div>
@@ -65,27 +63,36 @@ function DropZone() {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const take = (files: FileList | null) => files && stagePrints(Array.from(files));
-  const onDrop = (event: DragEvent) => {
-    event.preventDefault();
-    setOver(false);
-    take(event.dataTransfer.files);
-  };
+
+  useEffect(() => {
+    const carriesFiles = (event: DragEvent) => event.dataTransfer?.types.includes("Files") ?? false;
+    const allowDrop = (event: DragEvent) => carriesFiles(event) && event.preventDefault();
+    const takeDrop = (event: DragEvent) => {
+      if (!carriesFiles(event)) return;
+      event.preventDefault();
+      setOver(false);
+      take(event.dataTransfer!.files);
+    };
+    window.addEventListener("dragover", allowDrop);
+    window.addEventListener("drop", takeDrop);
+    return () => {
+      window.removeEventListener("dragover", allowDrop);
+      window.removeEventListener("drop", takeDrop);
+    };
+  }, []);
+
   return (
     <div
       className={`rounded border border-dashed px-4 py-5 text-center transition-colors ${over ? "border-accent bg-accent/5" : "border-line-1 bg-ink-0/40"}`}
-      onDragOver={(event) => {
-        event.preventDefault();
-        setOver(true);
-      }}
+      onDragOver={() => setOver(true)}
       onDragLeave={() => setOver(false)}
-      onDrop={onDrop}
     >
       <input
         ref={input}
         type="file"
         accept={ACCEPT}
         multiple
-        className="sr-only"
+        hidden
         onChange={(e) => {
           take(e.target.files);
           e.target.value = "";
@@ -93,7 +100,7 @@ function DropZone() {
       />
       <p className="text-sm text-text-0">
         Drop sliced files here, or{" "}
-        <button type="button" className="text-accent underline hover:opacity-80" onClick={() => input.current?.click()}>
+        <button type="button" className="tap-target text-accent underline hover:opacity-80" onClick={() => input.current?.click()}>
           browse
         </button>
       </p>
@@ -104,14 +111,15 @@ function DropZone() {
 
 export function PrintsDialog() {
   const { engine, openDialog, uploads } = useStore();
-  const [filter, setFilter] = useState("");
+  const [chosenPrinter, setFilter] = useState("");
   const close = () => openDialog(null);
   const printers = engine?.printers ?? [];
+  const filter = printers.some((p) => p.id === chosenPrinter) ? chosenPrinter : "";
   const library = engine?.prints ?? [];
   const prints = library.filter((p) => !filter || p.printer_ids.includes(filter)).sort((a, b) => b.uploaded - a.uploaded);
   return (
     <Dialog title="Print library" size="wide" fixed onClose={close}>
-      <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="flex h-full min-h-0 flex-col gap-4 [@media(max-height:30rem)]:overflow-y-auto">
         <div className="space-y-2.5">
           <DropZone />
           {uploads.map((upload) => (
@@ -147,7 +155,7 @@ export function PrintsDialog() {
             </select>
           )}
         </div>
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto [@media(max-height:30rem)]:flex-none [@media(max-height:30rem)]:overflow-visible">
           {prints.map((print) => (
             <PrintRow key={print.id} print={print} />
           ))}

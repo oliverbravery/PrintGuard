@@ -14,3 +14,5 @@ web/dist-site/
 web/test-results/
 plugins/*.zip
 .claude/settings.local.json
+auto.key
+auto.crt

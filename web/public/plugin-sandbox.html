@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; connect-src 'none'; img-src 'none'; media-src 'none'; style-src 'none'; font-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
+      content="default-src 'none'; script-src 'sha256-q2Ec/JyYWEbUIeCj1aaFaQCOghZYiTyQ44IWEI7K1sc=' 'unsafe-eval'; connect-src 'none'; img-src 'none'; media-src 'none'; style-src 'none'; font-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
     />
     <title>PrintGuard plugin sandbox</title>
   </head>
@@ -19,6 +19,20 @@
       same reason: it is always fetched in CORS mode, which an opaque origin can
       never satisfy.
 
+      The script below is allowed by its hash and nothing else inline is, so a
+      frame the plugin makes for itself inherits this policy and can run only
+      this same script. That is what makes deleting a global stick: there is no
+      fresh window to take it back from. Change a character of the script and
+      the hash in the policy has to change with it, which the browser console
+      prints.
+
+      WebRTC is the reason. No policy directive governs it in any engine yet,
+      so removing its constructors is the only thing that closes it.
+
+      PrintGuard talks to this document over a message port it hands over once.
+      A page that replaced this one would hold no port, and the dashboard
+      removes the frame the moment it loads anything a second time.
+
       The plugin is a pure function. It is handed state and its own stored data,
       and hands back a view and a list of effects for PrintGuard to carry out,
       every one of which is checked against the permissions the user granted
@@ -28,11 +42,12 @@
       (function () {
         "use strict";
 
-        for (const name of ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "Worker", "SharedWorker", "indexedDB", "caches", "AudioContext", "webkitAudioContext", "speechSynthesis"]) {
+        const closed = ["fetch", "fetchLater", "XMLHttpRequest", "WebSocket", "WebSocketStream", "WebTransport", "EventSource", "Worker", "SharedWorker", "indexedDB", "caches", "AudioContext", "webkitAudioContext", "speechSynthesis"];
+        for (const name of [...closed, ...Object.getOwnPropertyNames(window).filter((name) => name.includes("RTC"))]) {
           try {
             delete window[name];
           } catch {
-            /* frozen on some engines; the policy above is what actually closes these */
+            /* frozen on some engines; the policy above is what actually closes all but WebRTC */
           }
         }
         try {
@@ -136,24 +151,29 @@
           return { tree, targets, store, effects };
         }
 
-        addEventListener("message", (message) => {
-          if (message.source !== parent) return;
+        let port = null;
+
+        function answer(message) {
           const { id, t } = message.data || {};
           try {
             if (t === "init") {
               store = message.data.store || {};
               assets = message.data.assets || {};
               load(message.data.code);
-              parent.postMessage({ id, t: "ready" }, "*");
+              port.postMessage({ id, t: "ready" });
               return;
             }
-            parent.postMessage({ id, t: "result", ...run(message.data) }, "*");
+            port.postMessage({ id, t: "result", ...run(message.data) });
           } catch (err) {
-            parent.postMessage({ id, t: "failed", message: String((err && err.message) || err) }, "*");
+            port.postMessage({ id, t: "failed", message: String((err && err.message) || err) });
           }
-        });
+        }
 
-        parent.postMessage({ t: "booted" }, "*");
+        addEventListener("message", (handover) => {
+          if (handover.source !== parent || port || !handover.ports[0]) return;
+          port = handover.ports[0];
+          port.onmessage = answer;
+        });
       })();
     </script>
   </body>

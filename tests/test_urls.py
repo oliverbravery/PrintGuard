@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+import ipaddress
+import json
+import shutil
+import subprocess
+import time
+from pathlib import Path
+
 import pytest
 
 from printguard.engine import urls
@@ -17,6 +24,16 @@ MATCHING = [
     ("http://192.168.1.50:8080/*", "http://192.168.1.50:8080/status"),
     ("https://example.com/*", "https://example.com:443/a"),
     ("*://*/*", "https://anything.at.all/x"),
+    ("http://[fd00::1]/*", "http://[fd00::1]/status"),
+    ("http://[fd00::1]:8080/*", "http://[FD00::1]:8080/status"),
+    ("https://example.com/v1/*", "https://example.com/v1/a..b/.hidden"),
+    ("https://api.telegram.org/bot*/sendMessage", "https://api.telegram.org/bot123:abc/sendMessage"),
+    ("HTTPS://API.Telegram.org/bot*/sendMessage", "https://API.telegram.ORG/bot1/sendMessage"),
+    ("https://example.com/*/jobs/*/cancel", "https://example.com/v1/jobs/7/jobs/8/cancel"),
+    ("https://example.com/a*a", "https://example.com/aa"),
+    ("https://example.com/*.json*", "https://example.com/feed.json?page=2"),
+    ("https://api.telegram.org/bot*/sendMessage", "https://api.telegram.org/bot1/sendMessage?chat_id=5"),
+    ("https://example.com/search?q=*", "https://example.com/search?q=benchy"),
 ]
 
 REFUSED = [
@@ -28,6 +45,31 @@ REFUSED = [
     ("http://192.168.1.50:8080/*", "http://192.168.1.50/status"),
     ("https://example.com/*", "https://sub.example.com/a"),
     ("*://*/*", "rtsp://camera.local/stream"),
+    ("http://[fd00::1]/*", "http://[fd00::2]/status"),
+    ("https://example.com/v1/*", "https://example.com/v1/../admin"),
+    ("https://example.com/v1/*", "https://example.com/v1/%2e%2e/admin"),
+    ("https://example.com/v1/*", "https://example.com/v1/.%2E/admin"),
+    ("https://example.com/v1/*", "https://example.com/v1/a/./../../admin"),
+    ("https://example.com/v1/*", "https://example.com/v1/..\\admin"),
+    ("https://example.com/v1/*", "https://example.com/v1/.."),
+    ("https://api.telegram.org/bot*/sendMessage", "https://api.telegram.org/bot1/sendmessage"),
+    ("https://example.com/a*a", "https://example.com/a"),
+    ("https://example.com/*/jobs/*/cancel", "https://example.com/v1/jobs/cancel"),
+    ("https://example.com/v1/*/a", "https://example.com/v1/b/ab"),
+    ("https://api.telegram.org/bot*/sendMessage", "https://api.telegram.org/bot1/getUpdates?x=/sendMessage"),
+    ("https://example.com/*/cancel", "https://example.com/v1/delete?then=/cancel"),
+    ("https://example.com/search?q=*", "https://example.com/search?page=2"),
+    ("https://example.com/*", "https://user:pw@example.com/"),
+    ("https://example.com/*", "https://example.com\\@evil.test/"),
+    ("https://evil.test/*", "https://example.com\\@evil.test/"),
+    ("https://example.com/*", "https://example.com/a/../b"),
+    ("https://example.com/*", "https://example.com/%2e%2e/x"),
+    ("https://example.com/*", "https://example.com/a\\..\\b"),
+    ("https://example.com/*", "https://example.com/a/..\t"),
+    ("https://example.com/*", " https://example.com/a"),
+    ("https://example.com/*", "https://example.com:65536/a"),
+    ("http://127.0.0.1/*", "http://127.1/status"),
+    ("http://[fd00::1]/*", "http://[fd00:0::1]/status"),
 ]
 
 
@@ -39,6 +81,28 @@ def test_a_pattern_covers_what_it_should(pattern: str, url: str) -> None:
 @pytest.mark.parametrize("pattern,url", REFUSED)
 def test_a_pattern_covers_nothing_else(pattern: str, url: str) -> None:
     assert not urls.matches(pattern, url)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="the dashboard's copy of the rules runs on node")
+def test_the_dashboard_matches_a_pattern_as_the_engine_does() -> None:
+    cases = MATCHING + REFUSED
+    script = "import('./src/urls.ts').then((urls) => console.log(JSON.stringify(JSON.parse(process.argv[1]).map(([pattern, url]) => urls.matches(pattern, url)))))"
+    answered = subprocess.run(["node", "-e", script, json.dumps(cases)], cwd=Path(__file__).resolve().parent.parent / "web", capture_output=True, text=True, check=True)
+    assert json.loads(answered.stdout) == [urls.matches(pattern, url) for pattern, url in cases]
+
+
+def test_a_pattern_keeps_the_case_of_its_path_and_drops_that_of_its_host() -> None:
+    assert urls.sanitise(["HTTPS://API.Telegram.org/bot*/sendMessage"]) == ["https://api.telegram.org/bot*/sendMessage"]
+
+
+def test_a_pattern_full_of_wildcards_is_matched_as_fast_as_any_other() -> None:
+    """The match runs on the event loop, so a slow one stops detection."""
+    pattern = "https://example.com/" + "*a" * 24 + "b"
+    started = time.perf_counter()
+
+    assert not urls.matches(pattern, "https://example.com/" + "a" * 4000)
+    assert urls.matches(pattern, "https://example.com/" + "a" * 4000 + "b")
+    assert time.perf_counter() - started < 0.5
 
 
 def test_malformed_patterns_are_refused_rather_than_ignored() -> None:
@@ -55,17 +119,130 @@ def test_a_pattern_reaching_this_network_is_told_apart_from_one_that_does_not() 
     assert not any(urls.reaches_local(pattern) for pattern in public)
 
 
-def test_a_public_name_pointing_at_a_private_address_counts_as_local(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The literal says nothing, so the answer decides."""
-    monkeypatch.setattr(urls.socket, "getaddrinfo", lambda *_: [(2, 1, 6, "", ("10.0.0.5", 0))])
+WILDCARD_PATTERNS = [
+    "http://*.local/*",
+    "https://*.lan/*",
+    "http://*.home.arpa/*",
+    "ws://*.internal/*",
+    "http://*.localhost:8000/*",
+    "http://*.168.1.50/*",
+    "http://*.1/*",
+    "http://*.0x1/*",
+    "https://*.github.com/*",
+    "https://*.example.com/*",
+    "https://*.1password.com/*",
+]
 
-    assert urls.resolves_local("https://looks-public.example/x")
+
+@pytest.mark.parametrize("pattern", WILDCARD_PATTERNS[:5])
+def test_a_wildcard_over_a_local_suffix_reaches_this_network(pattern: str) -> None:
+    assert urls.reaches_local(pattern)
 
 
-def test_a_name_that_will_not_resolve_is_not_local(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(urls.socket, "getaddrinfo", lambda *_: (_ for _ in ()).throw(OSError()))
+@pytest.mark.parametrize(("pattern", "address"), list(zip(WILDCARD_PATTERNS[5:8], ["http://192.168.1.50/", "http://127.0.0.1/", "http://127.0.0x1/"])))
+def test_a_wildcard_over_the_end_of_an_address_reaches_this_network(pattern: str, address: str) -> None:
+    """These were listed under the internet in the consent dialog while they matched a private address."""
+    assert urls.matches(pattern, address) and urls.is_local_url(address)
+    assert urls.reaches_local(pattern)
 
-    assert not urls.resolves_local("https://nowhere.example/x")
+
+@pytest.mark.parametrize("pattern", WILDCARD_PATTERNS[8:])
+def test_a_wildcard_over_a_public_name_does_not(pattern: str) -> None:
+    assert not urls.reaches_local(pattern)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="the dashboard's copy of the rules runs on node")
+def test_the_dashboard_sorts_wildcard_patterns_as_the_engine_does() -> None:
+    script = "import('./src/urls.ts').then((urls) => console.log(JSON.stringify(JSON.parse(process.argv[1]).map(urls.reachesLocal))))"
+    answered = subprocess.run(
+        ["node", "-e", script, json.dumps(WILDCARD_PATTERNS)], cwd=Path(__file__).resolve().parent.parent / "web", capture_output=True, text=True, check=True
+    )
+    assert json.loads(answered.stdout) == [urls.reaches_local(pattern) for pattern in WILDCARD_PATTERNS]
+
+
+@pytest.mark.parametrize("host", ["2130706433", "127.1", "0x7f.0.0.1", "017700000001", "192.168.257", "0xc0a80132"])
+def test_an_address_is_local_however_it_is_spelt(host: str) -> None:
+    assert urls.is_local_address(host)
+    assert urls.reaches_local(f"http://{host}/*"), "a plugin asked for this network under the public permission"
+
+
+@pytest.mark.parametrize("host", ["[fec0::1]", "[feff::1]", "[ff02::1]", "[ff0e::1]", "224.0.0.1", "239.255.255.250"])
+def test_a_site_local_or_multicast_address_is_local(host: str) -> None:
+    """The standard library calls these global, and a connection to one stays on this network."""
+    assert urls.is_local_address(host)
+    assert urls.reaches_local(f"http://{host}/*"), "a plugin asked for this network under the public permission"
+
+
+@pytest.mark.parametrize(
+    "host", ["[64:ff9b::c0a8:101]", "[64:ff9b::7f00:1]", "[::192.168.1.1]", "[::c0a8:101]", "[::ffff:0:c0a8:101]", "[::ffff:192.168.1.1]", "[::7f00:1]"]
+)
+def test_an_ipv4_address_inside_an_ipv6_one_is_local_when_the_ipv4_address_is(host: str) -> None:
+    """NAT64 and the other embeddings deliver to the IPv4 address, which the standard library calls global."""
+    assert urls.is_local_address(host)
+    assert "." in host or urls.reaches_local(f"http://{host}/*")
+
+
+@pytest.mark.parametrize("host", ["[64:ff9b::808:808]", "[::808:808]", "[::ffff:0:808:808]", "[::ffff:8.8.8.8]"])
+def test_an_ipv4_address_inside_an_ipv6_one_is_public_when_the_ipv4_address_is(host: str) -> None:
+    assert not urls.is_local_address(host)
+
+
+@pytest.mark.parametrize("host", ["134744072", "8.8.2056", "0x8.8.8.8", "1.1.1.1.1", "example.com"])
+def test_an_oddly_spelt_public_address_is_not_local(host: str) -> None:
+    assert not urls.is_local_address(host)
+
+
+@pytest.mark.parametrize("host", ["localhost.", "127.0.0.1.", "127.1.", "printer.lan.", "octopi.local.", "router.home.arpa."])
+def test_a_dot_ending_a_host_does_not_make_it_public(host: str) -> None:
+    """A fully qualified name is the same place, and a sign-in at one installed without the local network permission."""
+    assert urls.is_local_address(host)
+    assert urls.is_local_url(f"https://{host}/authorize")
+    assert not urls.is_local_address("example.com.")
+
+
+@pytest.mark.parametrize("host", ["256.256.256.256", "1.2.3.4.5", "x.0x", "example.1", "1.2.3.4.5.", "08", "a.0xzz.0x1f"])
+def test_a_host_ending_in_a_number_that_is_no_ipv4_address_is_not_a_plain_one(host: str) -> None:
+    """A browser reads such a host as an IPv4 address and refuses the URL, so the hub would hold an address nobody can open."""
+    assert not urls.is_plain(f"https://{host}/a")
+    assert not urls.matches("https://*/*", f"https://{host}/a")
+
+
+@pytest.mark.parametrize("host", ["93.184.216.34", "93.184.216.34.", "127.1", "0x7f.0.0.1", "2130706433", "example.com", "example.com.", "1e3.example", "x1", "[::1]"])
+def test_a_host_a_browser_can_read_is_a_plain_one(host: str) -> None:
+    assert urls.is_plain(f"https://{host}/a")
+
+
+def edges() -> list[str]:
+    """Hosts either side of every boundary the address rules draw."""
+    constants = (ipaddress._IPv4Constants, ipaddress._IPv6Constants)
+    networks = [network for family in constants for network in (*family._private_networks, *family._private_networks_exceptions)]
+    networks.append(ipaddress._IPv4Constants._public_network)
+    networks.extend((*urls.EMBEDDING_IPV4, *urls.UNROUTED))
+    hosts = ["2130706433", "127.1", "0x7f.0.0.1", "134744072", "1.1.1.1.1", "localhost", "octopi.local", "example.com", "local"]
+    for network in networks:
+        first, last = int(network.network_address), int(network.broadcast_address)
+        for number in {max(first - 1, 0), first, last, min(last + 1, 2**network.max_prefixlen - 1)}:
+            address = ipaddress.ip_address(number) if network.version == 4 else ipaddress.IPv6Address(number)
+            hosts.append(str(address) if network.version == 4 else f"[{address}]")
+            if network.version == 4:
+                hosts.extend(f"[{prefix}{address}]" for prefix in ("::ffff:", "::ffff:0:", "64:ff9b::", "::"))
+    return sorted(set(hosts))
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="the dashboard's copy of the rules runs on node")
+def test_the_dashboard_calls_local_exactly_what_the_engine_does() -> None:
+    """The consent sheet sorts a plugin's addresses with its own copy of the rules.
+
+    Those rules are the ones Python settled on in 3.12.4, the oldest it runs on.
+    """
+    hosts = edges()
+    script = "import('./src/urls.ts').then((urls) => console.log(JSON.stringify(JSON.parse(process.argv[1]).map(urls.isLocalAddress))))"
+    answered = subprocess.run(
+        ["node", "-e", script, json.dumps(hosts)], cwd=Path(__file__).resolve().parent.parent / "web", capture_output=True, text=True, check=True
+    )
+
+    dashboard = dict(zip(hosts, json.loads(answered.stdout)))
+    assert dashboard == {host: urls.is_local_address(host) for host in hosts}
 
 
 def test_a_pattern_reads_back_in_words() -> None:

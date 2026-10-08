@@ -2,7 +2,7 @@
 
 # Deploying a hub securely
 
-[Docs](README.md) · [Architecture](architecture.md) · [Printers & cameras](printers.md) · [Hardware](hardware.md) · **Deployment** · [API & MCP](api.md) · [Plugins](plugins.md) · [Troubleshooting](troubleshooting.md)
+[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Training frames](feedback.md) · [Hardware](hardware.md) · **Deployment** · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 
@@ -15,9 +15,13 @@ your trusted network.
 - [Option 1: Tailscale](#option-1-tailscale)
 - [Option 2: Cloudflare Tunnel and Access](#option-2-cloudflare-tunnel-and-access)
 - [Option 3: oauth2-proxy on your own domain](#option-3-oauth2-proxy-on-your-own-domain)
-- [Origin checking](#origin-checking)
+- [Host and origin checking](#host-and-origin-checking)
 - [Plugins](#plugins)
 - [Hardening checklist](#hardening-checklist)
+- [What the hub reaches out to](#what-the-hub-reaches-out-to)
+- [Environment variables](#environment-variables)
+- [Your data and backups](#your-data-and-backups)
+- [Running the container as your own user](#running-the-container-as-your-own-user)
 - [Staying up to date](#staying-up-to-date)
 
 > [!CAUTION]
@@ -47,10 +51,21 @@ flowchart LR
 | `8000` | In | Always. Dashboard, engine WebSocket, live video, device publishing |
 | `8554` | In | A camera pushes RTSP into PrintGuard |
 | `1935` | In | A camera pushes RTMP |
-| `9997`, `8888` | Internal | Never. They bind to `127.0.0.1` inside the container |
+| `9997`, `8888` | Internal | Never. They bind to `127.0.0.1`, inside the container or on the computer the desktop app runs on |
 
 Cameras that PrintGuard pulls from, and printers it talks to, need no published ports at
-all.
+all. The compose file publishes `8000` and `8554`, so add `"1935:1935"` for an RTMP push.
+
+Ports `8554` and `1935` take no login to publish, because cameras push to the hub that way, so anyone who can reach them can publish a stream of their own, or publish over the path of a camera that pushes one and take its place.
+Reading a stream from them needs a login the hub makes up each time it starts, so nobody else can watch a camera from there. Remove `"8554:8554"` from the compose file if no camera pushes to the hub.
+
+The desktop app listens on the same three ports on every interface of the computer it runs on,
+so the same rule applies to it on a network you don't trust.
+
+On the desktop app `9997` and `8888` are that computer's own loopback, which a web page open in
+its browser can reach, including one that points a name at it. The MediaMTX control API on `9997` and the HLS muxer on `8888`
+only answer a login the hub makes up each time it starts and passes to MediaMTX in its environment, so it is never on disk.
+Neither port sends CORS headers either.
 
 ## Choosing an approach
 
@@ -79,7 +94,13 @@ authentication is your tailnet identity.
    sudo tailscale serve --bg --https=443 8000
    ```
 
-   Then open `https://<hub-machine-name>.<tailnet>.ts.net`.
+   Then open `https://<hub-machine-name>.<tailnet>.ts.net`, after
+   [naming it to the hub](#host-and-origin-checking):
+
+   ```yaml
+       environment:
+         PRINTGUARD_ORIGINS: "https://<hub-machine-name>.<tailnet>.ts.net"
+   ```
 
 ## Option 2: Cloudflare Tunnel and Access
 
@@ -97,7 +118,8 @@ pass a Cloudflare Access policy first.
    ```
 
 2. Give the tunnel a public hostname, for example `hub.example.com`, pointing at
-   `http://printguard:8000`.
+   `http://printguard:8000`, and [name it to the hub](#host-and-origin-checking) with
+   `PRINTGUARD_ORIGINS: "https://hub.example.com"` in the `printguard` service's environment.
 3. In Zero Trust, under Access and then Applications, add a self-hosted application for that
    hostname, with a policy that allows the emails of the people you trust. Visitors now authenticate
    before anything reaches PrintGuard.
@@ -124,43 +146,73 @@ GitHub, Google or any OIDC provider and proxies everything, WebSockets included:
       - --cookie-secure=true
       - --reverse-proxy=true
     environment:
-      OAUTH2_PROXY_CLIENT_ID: "…"
-      OAUTH2_PROXY_CLIENT_SECRET: "…"
-      OAUTH2_PROXY_COOKIE_SECRET: "…"   # openssl rand -base64 32 | tr -- '+/' '-_'
+      OAUTH2_PROXY_CLIENT_ID: "<client id>"
+      OAUTH2_PROXY_CLIENT_SECRET: "<client secret>"
+      OAUTH2_PROXY_COOKIE_SECRET: "<cookie secret>"   # openssl rand -base64 32 | tr -- '+/' '-_'
     ports:
       - "4180:4180"
 ```
 
 Terminate TLS in front with Caddy, nginx or a Cloudflare Tunnel pointed at `:4180`, and bind
-PrintGuard's own port to localhost so the proxy is the only way in.
+PrintGuard's own port to localhost so the proxy is the only way in. Then
+[name the public address to the hub](#host-and-origin-checking) with
+`PRINTGUARD_ORIGINS: "https://hub.example.com"`.
 
-## Origin checking
+## Host and origin checking
 
-The hub rejects any WebSocket whose `Origin` is not its own. This matters because an auth
-proxy checks the session cookie, and the browser attaches that cookie to sockets opened by
-other sites too, so origin checking is what stops a logged-in user's unrelated tabs from
-driving the engine.
+The hub only answers requests addressed to a name it knows. Without that, a web page you visit
+could point its own domain at your hub's address and read it as if it were the same site, which
+is called DNS rebinding.
 
-The hub recognises the dashboard automatically when the proxy preserves `Host` or sends
-`X-Forwarded-Host`. Tailscale, Cloudflare and oauth2-proxy all do. If yours rewrites the
-host, list your public origin:
+| You open the hub as | Setup |
+|---|---|
+| An IP address, such as `http://192.168.1.20:8000` | None |
+| `localhost`, which is what the desktop app uses | None |
+| A name with no dot in it, such as `http://tower:8000` or a Tailscale machine name | None |
+| A name ending `.local`, `.lan`, `.home`, `.home.arpa`, `.internal` or `.localhost` | None |
+| Any other name, such as `hub.example.com` or `<machine>.<tailnet>.ts.net` | List it in `PRINTGUARD_ORIGINS` |
 
 ```yaml
     environment:
       PRINTGUARD_ORIGINS: "https://hub.example.com"   # comma-separate several
 ```
 
+Each entry needs its scheme, which is `http` or `https`. Capitals, a `:443` or `:80` and a trailing dot on the name make no
+difference, and the hub logs a warning at start for an entry it can't read. There are no wildcards, so an entry such as `https://*.example.com` is ignored with a warning and each name has to be listed in full. A name with letters outside ASCII, such as
+`https://drucker.müller.example`, can be listed as written or in punycode.
+
+Every request for a name that isn't covered gets a `403` that says which line to add, and the
+hub logs the same line once for each of the first 32 names. A request with no `Host` header gets a `403` saying it names no host. A WebSocket is closed with no text,
+so look in the log. That includes the REST API, the MCP server and `/api/health`, so point an
+uptime check at the hub's address or list the name it uses.
+
+The check reads both `Host` and `X-Forwarded-Host`, so it works whether your proxy keeps the
+host or forwards it. Tailscale, Cloudflare and oauth2-proxy all do one or the other.
+
+The hub also rejects any WebSocket, print upload, camera stream, REST API or MCP request a browser sends from an
+`Origin` that is not the address the request was for, with the same scheme and port, or one listed in
+`PRINTGUARD_ORIGINS`. Behind a proxy that ends TLS, send `X-Forwarded-Proto` so the scheme matches. It can be `http`, `https`, `ws` or `wss`, and a value that is none of those only stops the hub matching its own address, so a listed origin still gets in. An upload, stream, REST API or MCP
+request with no `Origin`, which is what a script or an agent sends, is let through. A WebSocket with none is refused,
+since every browser sends one and only the dashboard opens them. An `Origin` that isn't a valid
+address is refused too, with a `403` or by closing the WebSocket. An auth proxy checks the session cookie,
+and the browser attaches that cookie to sockets opened by other sites too, so this is what stops
+a signed-in user's other tabs from driving the engine.
+
+The dashboard and its files carry `X-Frame-Options: SAMEORIGIN` and a `frame-ancestors 'self'` policy, so no other site can frame the hub and click through it. An origin listed in `PRINTGUARD_ORIGINS` can frame it too, such as a Home Assistant panel, and with one listed the hub sends the `frame-ancestors` policy alone, since `X-Frame-Options` can't name more than one origin.
+
 ## Plugins
 
-Plugins run in a sandbox with no network and no reach into your credentials, cameras or
-tokens. Two permissions still change what an exposed hub looks like:
+Plugins run in a sandbox and reach only what you grant them, which
+[permissions](plugins.md#permissions) lists. Two permissions change what an exposed hub looks
+like:
 
 | Permission | What it means for an exposed hub |
 |---|---|
 | **Serve its own pages** | The plugin answers requests under `/plugins/<id>/`. Those responses go out through your proxy like anything else, so whatever it serves is as exposed as the dashboard. It is served into a sandboxed origin, so it can never act as the dashboard |
-| **Authorise every request** | The plugin sees every request to the hub, headers included, and can refuse it. That is how an accounts plugin can protect a hub, and it also means a broken one can lock you out |
+| **Authorise every request** | The plugin is asked about every request to the hub except `/api/health` and its own pages, with its cookie and authorisation headers, and can refuse it. A yes is reused for 10 seconds for a request that is the same in everything the plugin is shown, which is the method, path, query and the cookie, authorisation, accept, content type, forwarded-for and user agent headers. That is how an accounts plugin can protect a hub, and it also means a broken one can lock you out. One that fails is disabled and every request is refused until you deal with it |
 
-To start the hub with every plugin switched off, add this and then remove the plugin:
+To start the hub with every plugin switched off, add this and then remove the plugin or enable it
+again. The value has to be exactly `off`:
 
 ```yaml
     environment:
@@ -176,18 +228,127 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 | Check | Why |
 |---|---|
 | No router port-forwards for `8000`, `8554` or `1935` | The hub has no authentication of its own |
-| Only admit people you would hand the printer to | There are no per-user roles, so anyone who authenticates sees every camera and controls every printer |
-| Bind ports to `127.0.0.1:…` when a proxy on the same host is the only client | Keeps the app unreachable except through the proxy |
-| Leave `9997` and `8888` unpublished | The MediaMTX control API and HLS muxer bind to loopback inside the container, and the hub proxies HLS out through `:8000` |
-| Set `PRINTGUARD_ORIGINS` only if your proxy rewrites the host header | Otherwise the automatic origin check already covers you |
+| Only admit people you would hand the printer to | There are no per-user roles, so anyone who authenticates sees every camera and controls every printer. They can replace a saved key or password but can't read one back, since [no stored secret leaves the hub](api.md#the-resource-model) |
+| Bind ports to `127.0.0.1` when a proxy on the same host is the only client | Keeps the app unreachable except through the proxy |
+| Leave `9997` and `8888` unpublished | The MediaMTX control API and HLS muxer bind to loopback, and the hub proxies HLS out through `:8000`. Both only answer the hub's own login |
+| List in `PRINTGUARD_ORIGINS` only the addresses you open the hub at | Every name in it is one a web page may reach the hub under. See [host and origin checking](#host-and-origin-checking) |
+| Publish `8554` and `1935` only to a network you trust, or not at all | The streaming server takes no login to publish. Anyone who can reach those ports can publish a stream of their own, and reading one needs the hub's own login. A hub that only pulls from its cameras needs neither port published |
 | Serve over HTTPS if you issue API tokens | Bearer tokens must never travel in clear. See [API & MCP](api.md) |
 | Grant a plugin nothing you would not grant its author | Especially **Control printers** and **Authorise every request**. `PRINTGUARD_PLUGINS=off` is the way back from a lockout |
 | Keep the image current | `latest` moves on every release |
 
+## What the hub reaches out to
+
+| Host | When |
+|---|---|
+| `api.github.com` | At start and then once a day for the update check, 15 minutes after one that failed, when you switch the check on or press **Check now**, and to resolve a plugin's commit when you install or update it |
+| `raw.githubusercontent.com` | The plugin catalogue and a plugin's files, when you browse the store or install one |
+| `*.ingest.de.sentry.io` | Only when you send a bug report |
+| `printguard-feedback.oliverbravery.uk` | Only when you [send a print's frames](feedback.md) |
+| Your printers, cameras, notification services and MQTT broker | As you configure them |
+| Microsoft, through Windows ML | Only in the Windows desktop app on Windows 11 24H2 or newer, when the provider for your GPU isn't installed yet. Windows does the download, at the first start |
+| The addresses a plugin's manifest lists, and the service it signs you in to | Only for a plugin you granted [`net`, `net:local` or `oauth`](plugins.md#permissions). A redirect from one of them is not followed, and a plugin without `net:local` is never connected to an address on your network, however its name resolves |
+
+## Environment variables
+
+Everything else is set from the dashboard. These are the ones a deployment sets, and
+[Architecture](architecture.md#configuration) lists the ones the image and the desktop app set
+for themselves.
+
+| Variable | Default | Does |
+|---|---|---|
+| `PRINTGUARD_ORIGINS` | Unset | The addresses you open the hub at when they are not an IP address or a local name, comma-separated and each with its scheme, such as `https://hub.example.com`. See [host and origin checking](#host-and-origin-checking) |
+| `PRINTGUARD_PLUGINS` | On | `off`, written exactly so, starts the hub with every plugin switched off |
+| `PRINTGUARD_CAMERAS` | `auto` in the image | Anything else, such as `off`, leaves [cameras passed into the container](cameras.md#cameras-plugged-into-the-hub) to be added by hand |
+| `MEDIAMTX_API` | `http://localhost:9997` | Where the hub finds MediaMTX. The hub only gives a MediaMTX its camera paths again when it supervises that server, so after one you run yourself restarts, restart the hub too. One started from the shipped `mediamtx.yml` needs a login for its API and for reading, in `MEDIAMTX_API`, `MEDIAMTX_RTSP` and `MEDIAMTX_HLS`. [Architecture](architecture.md#configuration) has the rest |
+| `PORT` | `8000` | The port the hub listens on |
+| `DATA_DIR` | `/data` in the image | Where state and print files are kept |
+| `LOG_LEVEL` | `INFO` | `DEBUG` adds command traces, printer state changes and exception tracebacks |
+| `LOG_FILE` | Unset in the image | Also writes a log file at this path, rotated at 2 MB with two older ones kept beside it as `.1` and `.2`. The desktop app sets it |
+| `NVIDIA_VISIBLE_DEVICES` | Every GPU | Picks one card on the [`latest-nvidia`](hardware.md#nvidia-gpu) image |
+| `NVIDIA_DRIVER_CAPABILITIES` | `compute,utility` in the image | What the NVIDIA Container Toolkit mounts into the container. Leave it as it is |
+
+The hub starts the bundled MediaMTX with its own environment, and MediaMTX reads any `MTX_`
+variable as a setting, so don't set one on the hub.
+
+## Your data and backups
+
+Everything PrintGuard keeps is in its data directory, bar one file. The desktop app's notifier
+writes the picture of the latest alert to `printguard-alert.jpg` in the system's temporary folder
+and overwrites it each time.
+
+| Path | Holds |
+|---|---|
+| `state.json` | Cameras, printers, monitors, settings, themes, layout, installed plugins, the print library's records and the record of each print's kept frames, with printer passwords, notifier keys, the MQTT broker password, camera addresses that carry a login and a Bambu camera's access code, plugin credentials, API token hashes and the token the hub sends training frames with. Written readable only by the account running the hub |
+| `state.tmp` | The next `state.json` while it is being written. It's only there for a moment |
+| `state.json.corrupt` | A `state.json` that would not parse at start, or held something the hub never saves, [kept so you can recover it](troubleshooting.md#starting-up). It's only there after that has happened. A later damaged file is kept beside it as `state.json.corrupt.1` up to `.4`, and the first is never replaced |
+| `prints/` | The files of the [print library](printers.md#sending-prints), and the [frames kept from each print](feedback.md#whats-kept-on-your-hub). At start the hub deletes any upload there that never finished, and any file `state.json` doesn't name. Those are kept while a `state.json.corrupt` is waiting to be recovered and on a start that finds no `state.json`, so a backup you put back still finds its files. It leaves folders alone, such as a NAS's `@eaDir`. Files are written readable only by the account running the hub, and ones from before 2.6.0 keep the mode they had |
+
+| At start, a `state.json` that | Does |
+|---|---|
+| Isn't there | Starts an empty hub |
+| Was saved with a UTF-8 byte order mark, as Notepad does | Is read as it is |
+| Won't parse, isn't a JSON object, or has a section of the wrong type, such as `monitors` holding text | Is moved to `state.json.corrupt` and the hub starts empty |
+| Is a folder, which Docker makes when you mount a `state.json` that isn't there | [Stops the hub](troubleshooting.md#starting-up) with a log line saying it is a directory |
+| The hub's user may not read, or may not move aside when it is damaged | [Stops the hub](troubleshooting.md#starting-up) with a log line naming the data directory and its owner, which has to be that user |
+| Holds a camera, printer, monitor, print, review, plugin or API token record of the wrong shape | Loads without that record, which is logged and shown as a startup warning, `A saved camera (name) could not be read and was dropped`, and gone from the file at the next save. A monitor bound to a printer that was dropped loses that link, with a warning |
+| Holds a number that is NaN or infinite, which a 2.5 hub could be sent over REST | Loads without that number, which is logged, and the file is kept as it is until the next save |
+| Holds a setting of the wrong kind, such as `mqtt` set to `null` or a `feedback` that is neither `ask` nor `off` | Loads with that setting at its default, which is logged and shown as a startup warning, `The saved mqtt setting could not be used, so it was reset` |
+
+| Install | Data directory |
+|---|---|
+| Docker | The `/data` volume |
+| macOS app | `~/Library/Application Support/PrintGuard` |
+| Windows app | `%LOCALAPPDATA%\PrintGuard\PrintGuard` |
+
+The desktop app also keeps `printguard.log` there with `printguard.log.1` and `.2`, and on
+Windows its window's own storage in the `webview` folder. On macOS the window's storage is
+WebKit's, under `~/Library/WebKit`. **Start at login** is kept outside the data directory, as a
+file in `~/Library/LaunchAgents` on macOS and a value under the `Run` registry key on Windows.
+The installed app points it at itself each time it starts, and a copy run from a disk image or from source leaves it alone.
+
+To back up, copy that directory with the hub stopped. In Docker the hub runs as root unless you
+[set a user](#running-the-container-as-your-own-user), so a bind-mounted `state.json` belongs
+to root and copying it needs `sudo`. To move to another machine, put the copy
+in place before the first start. The risk chart and the alert log are held in memory and aren't
+part of it.
+
+## Running the container as your own user
+
+The image runs as root. That is left as it is because a data directory an earlier version
+created belongs to root, and a hub started as anyone else could not read its own
+`state.json`. To run it as another user, hand the directory over first:
+
+```bash
+docker compose down
+sudo chown -R 1000:1000 ./data
+```
+
+```yaml
+services:
+  printguard:
+    user: "1000:1000"
+    group_add:
+      - "44"    # video, for a camera under devices:
+      - "993"   # render, for /dev/dri on the latest-intel image
+```
+
+| Needs | Because |
+|---|---|
+| The data directory and everything in it owned by that user | The hub writes `state.json` and `prints/` there. It stops at start if it can't read `state.json` or write to the directory or to `prints/`, naming the directory and its owner in the log. A disk that fills or goes read-only later raises a dashboard warning at the next save. Saves are written in the background, so a slow disk never holds up a camera |
+| The host's `video` group in `group_add` | A [passed-in camera](cameras.md#cameras-plugged-into-the-hub) is readable by that group only. `getent group video` gives the number |
+| The host's `render` group in `group_add` | The same for `/dev/dri` on the [Intel image](hardware.md#intel-gpu). `getent group render` gives the number |
+
+Nothing in the container needs a port below 1024. Only the standard image on its CPU runtime has
+been run this way. The camera and GPU groups follow from how Linux guards those devices and are
+untested, as is the `latest-nvidia` image.
+
 ## Staying up to date
 
-The hub checks GitHub releases once a day and the header's version chip turns into an update
-badge. Open it to read the changelog for any release, then update:
+The hub checks GitHub releases at start and then once a day, and the header's version chip turns
+into an update badge. Open it to read the changelog for any release, then update. The check sends nothing about
+you, and **Automatically check for updates** in the **Updates** tab in Settings turns that
+check off.
 
 ```bash
 docker compose pull && docker compose up -d --wait

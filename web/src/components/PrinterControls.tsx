@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
+import { useFocusKept } from "../a11y";
 import { formatDuration } from "../prints";
 import { useStore } from "../store";
 import type { DeviceState, Heater, PreheatPreset, Printer } from "../types";
+import { ConfirmButton } from "./ConfirmButton";
 
 export const HEATERS = ["nozzle", "bed"] as const;
 export type HeaterName = (typeof HEATERS)[number];
 export const HEATER_MAX: Record<HeaterName, number> = { nozzle: 350, bed: 150 };
+
+const clampTarget = (name: HeaterName, target: number) => Math.min(HEATER_MAX[name], Math.max(0, target));
 
 export function activeJob(state: DeviceState | null | undefined): state is DeviceState {
   return state?.status === "printing" || state?.status === "paused";
@@ -34,14 +38,16 @@ export function ProgressBar({ state, className = "" }: { state: DeviceState; cla
   );
 }
 
-function TargetField({ name, heater, busy, onCommit }: { name: HeaterName; heater: Heater; busy: boolean; onCommit: (target: number) => void }) {
+function TargetField({ name, heater, busy, onCommit }: { name: HeaterName; heater: Heater; busy: boolean; onCommit: (target: number) => boolean }) {
   const [draft, setDraft] = useState(String(Math.round(heater.target)));
-  useEffect(() => setDraft(String(Math.round(heater.target))), [heater.target]);
+  useEffect(() => {
+    if (!busy) setDraft(String(Math.round(heater.target)));
+  }, [heater.target, busy]);
   const commit = () => {
-    const target = Math.min(HEATER_MAX[name], Math.max(0, Number(draft)));
+    const target = clampTarget(name, Number(draft));
     if (draft.trim() === "" || Number.isNaN(target)) return setDraft(String(Math.round(heater.target)));
-    setDraft(String(target));
-    if (target !== Math.round(heater.target)) onCommit(target);
+    const sent = target === Math.round(heater.target) || onCommit(target);
+    setDraft(String(sent ? target : Math.round(heater.target)));
   };
   return (
     <label className="flex items-center gap-1.5">
@@ -63,7 +69,7 @@ function TargetField({ name, heater, busy, onCommit }: { name: HeaterName; heate
   );
 }
 
-function HeaterCard({ name, heater, control, busy, onTarget }: { name: HeaterName; heater: Heater; control: boolean; busy: boolean; onTarget: (target: number) => void }) {
+function HeaterCard({ name, heater, control, busy, onTarget }: { name: HeaterName; heater: Heater; control: boolean; busy: boolean; onTarget: (target: number) => boolean }) {
   const heating = heater.target > 0;
   return (
     <div className="panel flex items-center gap-3 px-3 py-2">
@@ -74,19 +80,21 @@ function HeaterCard({ name, heater, control, busy, onTarget }: { name: HeaterNam
       {control ? (
         <TargetField name={name} heater={heater} busy={busy} onCommit={onTarget} />
       ) : (
-        <span className="mono text-[0.7rem] text-text-2">{heating ? `→ ${Math.round(heater.target)}°` : "off"}</span>
+        <span className="mono text-[0.7rem] text-text-2">{heating ? `to ${Math.round(heater.target)}°` : "off"}</span>
       )}
     </div>
   );
 }
 
 function PresetRow({ preset, onChange, onRemove }: { preset: PreheatPreset; onChange: (next: PreheatPreset) => void; onRemove: () => void }) {
-  const [draft, setDraft] = useState(preset);
-  useEffect(() => setDraft(preset), [preset.name, preset.nozzle, preset.bed]);
+  const typed = () => ({ name: preset.name, nozzle: String(preset.nozzle), bed: String(preset.bed) });
+  const [draft, setDraft] = useState(typed);
+  useEffect(() => setDraft(typed()), [preset.name, preset.nozzle, preset.bed]);
   const commit = () => {
-    const next = { ...draft, name: draft.name.trim(), nozzle: Number(draft.nozzle) || 0, bed: Number(draft.bed) || 0 };
-    if (!next.name) return setDraft(preset);
+    const next = { name: draft.name.trim(), nozzle: clampTarget("nozzle", Number(draft.nozzle) || 0), bed: clampTarget("bed", Number(draft.bed) || 0) };
+    if (!next.name) return setDraft(typed());
     if (next.name !== preset.name || next.nozzle !== preset.nozzle || next.bed !== preset.bed) onChange(next);
+    else setDraft(typed());
   };
   const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => e.key === "Enter" && e.currentTarget.blur();
   return (
@@ -110,7 +118,7 @@ function PresetRow({ preset, onChange, onRemove }: { preset: PreheatPreset; onCh
           min={0}
           max={HEATER_MAX[name]}
           value={draft[name]}
-          onChange={(e) => setDraft({ ...draft, [name]: e.target.value === "" ? 0 : Number(e.target.value) })}
+          onChange={(e) => setDraft({ ...draft, [name]: e.target.value })}
           onBlur={commit}
           onKeyDown={blurOnEnter}
         />
@@ -125,6 +133,7 @@ function PresetRow({ preset, onChange, onRemove }: { preset: PreheatPreset; onCh
 function Presets({ presets, busy, onApply }: { presets: PreheatPreset[]; busy: boolean; onApply: (nozzle: number, bed: number) => void }) {
   const updateSettings = useStore((s) => s.updateSettings);
   const [editing, setEditing] = useState(false);
+  const rows = useFocusKept<HTMLDivElement>();
   const save = (next: PreheatPreset[]) => updateSettings({ preheat: next });
   return (
     <div className="space-y-2">
@@ -136,8 +145,8 @@ function Presets({ presets, busy, onApply }: { presets: PreheatPreset[]; busy: b
         </button>
       </div>
       {editing ? (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 pr-9">
+        <div ref={rows} className="space-y-2">
+          <div className="flex items-center gap-2 pr-9 pointer-coarse:pr-[3.25rem]">
             <span className="label flex-1">Name</span>
             {HEATERS.map((name) => (
               <span key={name} className="label w-16 text-right">
@@ -191,8 +200,14 @@ export function PrinterControls({ printer }: { printer: Printer }) {
   const presets = engine?.settings.preheat ?? [];
   const acting = isPending("printer.action");
   const heating = isPending("printer.heat");
+  const [committed, setCommitted] = useState<HeaterName[]>([]);
   const heat = (targets: Partial<Record<HeaterName, number>>) => send({ cmd: "printer.heat", id: printer.id, ...targets });
   const heaters = HEATERS.filter((name) => state?.[name]);
+  const permitted = { pause: state?.status === "printing", resume: state?.status === "paused", cancel: activeJob(state) };
+  const act = (name: keyof typeof permitted) => {
+    setAction(name);
+    send({ cmd: "printer.action", id: printer.id, action: name });
+  };
 
   return (
     <div className="space-y-4">
@@ -208,28 +223,33 @@ export function PrinterControls({ printer }: { printer: Printer }) {
         </div>
       )}
       <div className="grid grid-cols-3 gap-2">
-        {(["pause", "resume", "cancel"] as const).map((name) => (
-          <button
-            key={name}
-            className={`btn ${name === "cancel" ? "btn-danger" : ""}`}
-            disabled={acting}
-            onClick={() => {
-              setAction(name);
-              send({ cmd: "printer.action", id: printer.id, action: name });
-            }}
-          >
+        {(["pause", "resume"] as const).map((name) => (
+          <button key={name} className="btn" disabled={acting || !permitted[name]} onClick={() => act(name)}>
             {acting && action === name ? `${name}…` : name}
           </button>
         ))}
+        <ConfirmButton disabled={acting || !permitted.cancel} onConfirm={() => act("cancel")}>
+          {acting && action === "cancel" ? "cancel…" : "cancel"}
+        </ConfirmButton>
       </div>
       {heaters.length > 0 && (
         <div className="grid gap-2 sm:grid-cols-2">
           {heaters.map((name) => (
-            <HeaterCard key={name} name={name} heater={state![name]!} control={control} busy={heating} onTarget={(target) => heat({ [name]: target })} />
+            <HeaterCard
+              key={name}
+              name={name}
+              heater={state![name]!}
+              control={control}
+              busy={heating && committed.includes(name)}
+              onTarget={(target) => {
+                setCommitted(heating ? [...committed, name] : [name]);
+                return heat({ [name]: target }) !== null;
+              }}
+            />
           ))}
         </div>
       )}
-      {control && state && <Presets presets={presets} busy={heating} onApply={(nozzle, bed) => heat({ nozzle, bed })} />}
+      {control && state && <Presets presets={presets} busy={heating} onApply={(nozzle, bed) => heat({ nozzle: clampTarget("nozzle", nozzle), bed: clampTarget("bed", bed) })} />}
     </div>
   );
 }

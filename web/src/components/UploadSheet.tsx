@@ -1,17 +1,31 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { acceptedTags, extOf, formatBytes, inspectPrint, isText, toolpathOf, type Inspection, type Temperatures } from "../prints";
 import { useStore, type StagedPrint } from "../store";
+import { useConfirm } from "./ConfirmButton";
 import { Sheet } from "./Dialog";
 import { HEATER_MAX, HEATERS, type HeaterName } from "./PrinterControls";
 import { PrinterTags } from "./PrinterTags";
 import { PrintStats } from "./PrintStats";
+import type { ParsedToolpath } from "../toolpath";
 import { Toolpath } from "./Toolpath";
 
 function stem(filename: string): string {
   return filename.includes(".") ? filename.slice(0, filename.lastIndexOf(".")) : filename;
 }
 
-function TemperatureField({ heater, value, heats, onChange }: { heater: HeaterName; value: string; heats: boolean; onChange: (value: string) => void }) {
+function TemperatureField({
+  heater,
+  value,
+  heats,
+  invalid,
+  onChange,
+}: {
+  heater: HeaterName;
+  value: string;
+  heats: boolean;
+  invalid: boolean;
+  onChange: (value: string) => void;
+}) {
   return (
     <label className="flex items-center gap-2">
       <span className="label w-12">{heater}</span>
@@ -21,8 +35,9 @@ function TemperatureField({ heater, value, heats, onChange }: { heater: HeaterNa
         inputMode="numeric"
         min={1}
         max={HEATER_MAX[heater]}
-        placeholder="—"
+        placeholder={heats ? undefined : "none"}
         disabled={!heats}
+        aria-invalid={invalid}
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
@@ -47,7 +62,10 @@ function StagedPrintForm({
   const ext = extOf(file.name);
   const [toolpath] = useState(() => toolpathOf(file));
   const [inspection, setInspection] = useState<Inspection | null>(null);
+  const [drawn, setDrawn] = useState<ParsedToolpath | null>();
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const uploadAbort = useRef<AbortController>(null);
   const [name, setName] = useState(stem(file.name));
   const [drafts, setDrafts] = useState<Record<HeaterName, string>>({ nozzle: "", bed: "" });
   const printerIds = engine ? acceptedTags(engine, tags, ext) : [];
@@ -64,33 +82,36 @@ function StagedPrintForm({
       .catch((err: Error) => current && setError(err.message));
     return () => {
       current = false;
+      uploadAbort.current?.abort();
     };
   }, []);
 
   const temperatures: Temperatures = {};
-  let valid = inspection !== null;
+  const invalidHeaters: HeaterName[] = [];
   for (const heater of HEATERS) {
     const sliced = inspection?.meta[heater];
     const target = Number(drafts[heater]);
     if (!sliced) continue;
-    if (!drafts[heater].trim() || !(target > 0 && target <= HEATER_MAX[heater])) valid = false;
+    if (!drafts[heater].trim() || !(target > 0 && target <= HEATER_MAX[heater])) invalidHeaters.push(heater);
     else if (target !== sliced) temperatures[heater] = target;
   }
+  const valid = inspection !== null && drawn !== undefined && invalidHeaters.length === 0;
 
   const upload = () => {
-    uploadPrint({
-      file,
-      name: name.trim(),
-      printerIds,
-      temperatures,
-      drawPreview: isText(file.name) && !inspection!.thumbnail,
-    });
-    onDone();
+    setError(null);
+    setUploading(true);
+    uploadAbort.current = new AbortController();
+    uploadPrint({ file, name: name.trim(), printerIds, temperatures }, isText(file.name) && !inspection!.thumbnail ? drawn! : null, uploadAbort.current.signal)
+      .then(onDone)
+      .catch((err: Error) => {
+        setError(err.message);
+        setUploading(false);
+      });
   };
 
   return (
     <>
-      <Toolpath label={file.name} load={() => toolpath.then((path) => path && path.text())} />
+      <Toolpath label={file.name} load={() => toolpath} onSettled={setDrawn} />
 
       <div className="flex-1 space-y-4 px-5 py-4">
         <PrintStats meta={inspection?.meta ?? null} />
@@ -107,10 +128,16 @@ function StagedPrintForm({
                 heater={heater}
                 value={drafts[heater]}
                 heats={Boolean(inspection?.meta[heater])}
+                invalid={invalidHeaters.includes(heater)}
                 onChange={(value) => setDrafts((d) => ({ ...d, [heater]: value }))}
               />
             ))}
           </div>
+          {invalidHeaters.length > 0 && (
+            <p className="mono mt-1.5 text-[0.66rem] text-bad">
+              Upload needs {invalidHeaters.map((heater) => `${heater} between 1 and ${HEATER_MAX[heater]} °C`).join(" and ")}
+            </p>
+          )}
           {ext === "bgcode" && <p className="mono mt-1.5 text-[0.66rem] text-text-2">binary gcode prints at the temperatures it was sliced with</p>}
         </div>
         <div>
@@ -128,8 +155,8 @@ function StagedPrintForm({
         <button className="btn" onClick={onDone}>
           Discard
         </button>
-        <button className="btn btn-primary" disabled={!valid} onClick={upload}>
-          {inspection || error ? "Upload" : "Reading…"}
+        <button className="btn btn-primary" disabled={!valid || uploading} onClick={upload}>
+          {uploading ? "Uploading…" : (inspection && drawn !== undefined) || error ? "Upload" : "Reading…"}
         </button>
       </div>
     </>
@@ -140,18 +167,24 @@ export function UploadSheet() {
   const { staged, unstage } = useStore();
   const [tags, setTags] = useState<string[]>([]);
   const [current] = staged;
-  const close = () => staged.forEach((p) => unstage(p.id));
+  const closing = useConfirm(() => staged.forEach((p) => unstage(p.id)));
   return (
     <Sheet
       title={`Upload ${current.file.name}`}
-      onClose={close}
+      onClose={closing.press}
       closeLabel="Cancel uploads"
       width="sm:w-[680px]"
       meta={
-        <>
-          {staged.length > 1 && <span className="chip">{staged.length - 1} more</span>}
-          <span className="chip">{formatBytes(current.file.size)}</span>
-        </>
+        <span role="status" className="flex shrink-0 gap-2.5">
+          {closing.armed ? (
+            <span className="chip chip-bad">Close again to discard</span>
+          ) : (
+            <>
+              {staged.length > 1 && <span className="chip">{staged.length - 1} more</span>}
+              <span className="chip">{formatBytes(current.file.size)}</span>
+            </>
+          )}
+        </span>
       }
     >
       <StagedPrintForm

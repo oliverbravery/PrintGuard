@@ -48,7 +48,7 @@ function VersionChip() {
       title={available ? `Update available: v${update!.latest}` : `PrintGuard v${version}`}
       onClick={() => openDialog("update")}
     >
-      {available ? `↑ v${update!.latest}` : `v${version}`}
+      {available ? `update v${update!.latest}` : `v${version}`}
     </button>
   );
 }
@@ -69,7 +69,7 @@ function ThemeToggle() {
           const next = nextScheme(theme);
           applyTheme(next, themes, stored);
           updateSettings({ theme: next });
-          if (next === GLASS) document.getElementById(GLASS_TUNER)?.showPopover();
+          if (next === GLASS) document.getElementById(GLASS_TUNER)?.showPopover?.();
         }}
       >
         {glyph}
@@ -130,7 +130,7 @@ function MoreChip() {
   const available = useStore((s) => s.engine?.update?.available ?? false);
   return (
     <button
-      className={`chip inline-flex cursor-pointer items-center hover:opacity-80 sm:hidden ${available ? "chip-accent" : ""}`}
+      className={`chip tap-target inline-flex cursor-pointer items-center hover:opacity-80 sm:hidden ${available ? "chip-accent" : ""}`}
       title="More"
       aria-label={available ? "More, update available" : "More"}
       onClick={() => openDialog("more")}
@@ -141,12 +141,13 @@ function MoreChip() {
 }
 
 export function Header() {
-  const { engine, openSettings } = useStore();
+  const { engine, openSettings, reconnecting } = useStore();
   const stats = engine?.stats;
   return (
     <header className="sticky top-0 z-30 border-b border-line-0 bg-ink-0/90 backdrop-blur-sm">
-      <div className="mx-auto flex max-w-[1500px] items-center gap-x-3 px-4 py-3 sm:px-6">
+      <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 sm:px-6">
         <Wordmark />
+        <span role="status">{reconnecting && <span className="chip chip-warn boot-cursor">reconnecting</span>}</span>
         <div className="hidden sm:contents">
           <VersionChip />
           <ThemeToggle />
@@ -154,21 +155,22 @@ export function Header() {
           <GuideChip />
           <ReportChip />
         </div>
-        <div className="flex-1" />
-        {stats && (
-          <div className="hidden items-center gap-5 sm:flex lg:mr-2">
-            <Readout
-              label="compute"
-              value={stats.inference_device.toLowerCase()}
-              className="hidden xl:block"
-              onClick={() => openSettings("advanced")}
-            />
-            <Readout label="capacity" value={`${stats.capacity_fps.toFixed(1)} fps`} />
-            <Readout label="latency" value={`${stats.infer_ms.toFixed(0)} ms`} />
-          </div>
-        )}
-        <HeaderActions />
-        <MoreChip />
+        <div className="ml-auto flex items-center gap-x-3">
+          {stats && (
+            <div className="hidden items-center gap-5 sm:flex lg:mr-2">
+              <Readout
+                label="compute"
+                value={stats.inference_device.toLowerCase()}
+                className="hidden xl:block"
+                onClick={() => openSettings("advanced")}
+              />
+              <Readout label="capacity" value={`${stats.capacity_fps.toFixed(1)} fps`} />
+              <Readout label="latency" value={`${stats.infer_ms.toFixed(0)} ms`} />
+            </div>
+          )}
+          <HeaderActions />
+          <MoreChip />
+        </div>
       </div>
     </header>
   );

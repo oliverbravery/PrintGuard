@@ -6,10 +6,12 @@ import type { Camera } from "../types";
 export function Feed({
   camera,
   active = true,
+  banner,
   children,
 }: {
   camera: Camera | undefined;
   active?: boolean;
+  banner?: ReactNode;
   children?: ReactNode;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -22,14 +24,16 @@ export function Feed({
   const rotation = camera?.rotation ?? 0;
   const useCanvas = sharpness > 0 || crop !== null || brightness !== 1 || contrast !== 1 || rotation !== 0;
 
-  useVideoStream(videoRef, camera, active);
+  const { streaming, refused } = useVideoStream(videoRef, camera, active);
+  const idle = !camera || !playing;
+  const tapToPlay = Boolean(camera) && active && refused && !playing;
 
   useEffect(() => {
     const video = videoRef.current;
     return video && camera ? registerFeed(camera.id, video) : undefined;
   }, [camera?.id]);
 
-  useEffect(() => setPlaying(false), [camera?.id, active]);
+  useEffect(() => setPlaying(false), [camera?.id, streaming]);
 
   useEffect(() => {
     if (!useCanvas) return;
@@ -65,13 +69,24 @@ export function Feed({
         className={useCanvas ? "absolute inset-0 w-full h-full object-contain invisible" : "absolute inset-0 w-full h-full object-contain"}
       />
       {useCanvas && <canvas ref={canvasRef} className="absolute inset-0 m-auto" />}
-      {(!camera || !playing) && (
-        <div className="feed-veil absolute inset-0 grid place-items-center bg-ink-0/85 z-[2] pointer-events-none">
-          <span className="mono text-[0.65rem] tracking-[0.2em] text-text-2 uppercase">
-            {!camera ? "no camera bound" : camera.standby || camera.online ? "starting stream" : "no signal"}
-          </span>
+      {idle && <div className="pointer-events-none absolute inset-0 z-[2] bg-ink-0/85" />}
+      <div className="pointer-events-none absolute inset-0 grid place-items-center">
+        <div className="relative grid justify-items-center">
+          {banner}
+          <div className={banner ? "absolute top-full mt-2 w-max" : ""}>
+            {idle && !tapToPlay && (
+              <span className="mono relative z-[2] text-[0.65rem] tracking-[0.2em] text-text-2 uppercase">
+                {!camera ? "no camera bound" : !active ? "feed paused" : camera.standby || camera.online ? "starting stream" : "no signal"}
+              </span>
+            )}
+            {tapToPlay && (
+              <button className="btn pointer-events-auto relative z-[3]" onClick={() => void videoRef.current?.play()}>
+                Tap to play
+              </button>
+            )}
+          </div>
         </div>
-      )}
+      </div>
       {children}
     </div>
   );

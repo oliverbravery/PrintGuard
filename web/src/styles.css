@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "react-image-crop/dist/ReactCrop.css";
+@import "./fonts/fonts.css";
 
 @theme {
   --color-ink-0: #0b0c0a;
@@ -14,8 +15,9 @@
   --color-accent: #ff4d00;
   --color-ok: #8ac926;
   --color-warn: #ffb000;
-  --color-bad: #ff3b30;
+  --color-bad: #ff3f34;
   --color-on-accent: #0b0c0a;
+  --color-on-bad: #0b0c0a;
   --font-display: "Saira Condensed", "Arial Narrow", sans-serif;
   --font-body: "Saira", system-ui, sans-serif;
   --font-mono: "Chivo Mono", ui-monospace, monospace;
@@ -34,11 +36,12 @@
   --color-text-0: #1b1d16;
   --color-text-1: #4a4f40;
   --color-text-2: #646959;
-  --color-accent: #bc3809;
+  --color-accent: #b53608;
   --color-ok: #487212;
   --color-warn: #8d5d00;
-  --color-bad: #c42920;
+  --color-bad: #bd271f;
   --color-on-accent: #f3f4ed;
+  --color-on-bad: #f3f4ed;
 }
 
 html {
@@ -50,7 +53,7 @@ html {
 
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
   background:
     radial-gradient(1100px 700px at 75% -10%, rgba(255, 77, 0, 0.06), transparent 60%),
     radial-gradient(900px 600px at -10% 110%, rgba(138, 201, 38, 0.04), transparent 55%),
@@ -72,6 +75,10 @@ body {
 }
 
 :where(a, button, [role="button"], [role="switch"], [role="tab"], input, select, textarea, [tabindex]):focus:not(:focus-visible) {
+  outline: none;
+}
+
+:root[data-input="pointer"] :where(a, button, [role="button"], [role="switch"], [role="tab"]):focus-visible {
   outline: none;
 }
 
@@ -129,23 +136,32 @@ body {
   --theme-ink-1: var(--color-ink-1);
   --theme-ink-2: var(--color-ink-2);
   --theme-ink-3: var(--color-ink-3);
+  --theme-accent: var(--color-accent);
+  --theme-ok: var(--color-ok);
+  --theme-warn: var(--color-warn);
+  --theme-bad: var(--color-bad);
 }
 
 :root[data-glass] body {
   --color-text-0: var(--painted-ink);
   --color-text-1: var(--painted-ink);
   --color-text-2: var(--painted-muted);
+  --color-accent: var(--glass-accent, var(--theme-accent));
+  --color-ok: var(--glass-ok, var(--theme-ok));
+  --color-warn: var(--glass-warn, var(--theme-warn));
+  --color-bad: var(--glass-bad, var(--theme-bad));
   --color-ink-1: color-mix(in srgb, var(--painted-contrast) 12%, transparent);
   --color-ink-2: color-mix(in srgb, var(--painted-contrast) 8%, transparent);
   --color-ink-3: color-mix(in srgb, var(--painted-contrast) 20%, transparent);
 }
 
 :root[data-glass] dialog.modal::backdrop {
-  background: var(--painted-scrim);
+  background: var(--painted-scrim, rgb(0 0 0 / 0.3));
 }
 
 :root[data-glass] .panel,
 :root[data-glass] .tile,
+:root[data-glass] .sheet,
 :root[data-glass] header,
 :root[data-glass] .app-nav,
 :root[data-glass] .plate {
@@ -211,6 +227,10 @@ body {
     --color-text-0: var(--theme-text-0);
     --color-text-1: var(--theme-text-1);
     --color-text-2: var(--theme-text-2);
+    --color-accent: var(--theme-accent);
+    --color-ok: var(--theme-ok);
+    --color-warn: var(--theme-warn);
+    --color-bad: var(--theme-bad);
     --color-ink-1: var(--theme-ink-1);
     --color-ink-2: var(--theme-ink-2);
     --color-ink-3: var(--theme-ink-3);
@@ -257,13 +277,21 @@ body {
 }
 
 .btn-primary:hover {
-  background: color-mix(in srgb, var(--color-accent) 88%, white);
+  background: color-mix(in srgb, var(--color-accent) 88%, var(--color-text-0));
   color: var(--color-on-accent);
 }
 
 .btn-danger:hover {
   border-color: var(--color-bad);
   color: var(--color-bad);
+}
+
+.btn-armed,
+.btn-armed:hover,
+:root[data-glass] .btn-armed {
+  background: var(--color-bad) !important;
+  border-color: var(--color-bad);
+  color: var(--color-on-bad);
 }
 
 .btn:disabled {
@@ -288,6 +316,10 @@ body {
 .chip-warn { color: var(--color-warn); border-color: color-mix(in srgb, var(--color-warn) 45%, transparent); }
 .chip-bad { color: var(--color-bad); border-color: color-mix(in srgb, var(--color-bad) 45%, transparent); }
 .chip-accent { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 50%, transparent); }
+
+.app {
+  padding-right: env(safe-area-inset-right);
+}
 
 .app-nav {
   position: fixed;
@@ -341,7 +373,7 @@ body {
 }
 
 .nav-item[data-primary]:hover .nav-icon {
-  background: color-mix(in srgb, var(--color-accent) 88%, white);
+  background: color-mix(in srgb, var(--color-accent) 88%, var(--color-text-0));
 }
 
 @media (width < 40rem) {
@@ -456,6 +488,23 @@ body {
   backdrop-filter: var(--painted-glass);
   border-top: 1px solid var(--painted-edge, var(--color-line-0));
   border-left: 1px solid var(--painted-edge, var(--color-line-0));
+}
+
+@supports not selector(:popover-open) {
+  .tuner {
+    display: none;
+  }
+}
+
+@supports not (anchor-name: --theme-chip) {
+  .tuner {
+    top: 3.25rem;
+    left: 1rem;
+  }
+
+  .tuner::after {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -702,6 +751,10 @@ dialog.modal::backdrop {
   justify-content: flex-end;
 }
 
+.sheet {
+  padding-right: env(safe-area-inset-right);
+}
+
 .slide-in {
   animation: slide-in 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -801,7 +854,8 @@ video {
 }
 
 .changelog li::before {
-  content: "—";
+  content: "-";
+  content: "-" / "";
   position: absolute;
   left: 0;
   color: var(--color-accent);
@@ -908,23 +962,45 @@ video {
 
 @media (pointer: coarse) {
   .btn {
-    min-height: 2.5rem;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
   }
 
   .field {
     font-size: 1rem;
   }
 
+  input[type="range"] {
+    height: 2rem;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    width: 24px;
+    height: 24px;
+    margin-top: -10.5px;
+  }
+
+  input[type="range"]::-moz-range-thumb {
+    width: 24px;
+    height: 24px;
+  }
+
   button.chip,
-  .toggle {
+  .toggle,
+  .tap-target {
     position: relative;
   }
 
   button.chip::before,
-  .toggle::before {
+  .toggle::before,
+  button.tap-target::before {
     content: "";
     position: absolute;
-    inset: -0.6rem -0.25rem;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 2.75rem);
+    height: max(100%, 2.75rem);
+    translate: -50% -50%;
   }
 }
 

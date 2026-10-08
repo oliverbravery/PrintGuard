@@ -1,13 +1,12 @@
 api: yes
 apiAddress: 127.0.0.1:9997
+apiAllowOrigins: []
 
+# Anyone may publish, since cameras push here. Reading and the API belong to a login the hub adds at start.
 authInternalUsers:
   - user: any
     permissions:
       - action: publish
-      - action: read
-      - action: playback
-      - action: api
 
 rtsp: yes
 rtspAddress: :8554
@@ -18,12 +17,14 @@ rtmpAddress: :1935
 
 hls: yes
 hlsAddress: 127.0.0.1:8888
+hlsAllowOrigins: []
 hlsVariant: fmp4
 hlsSegmentCount: 3
 hlsSegmentDuration: 1s
 
 webrtc: no
 srt: no
+moq: no
 
 paths:
   all_others:

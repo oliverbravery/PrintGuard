@@ -30,7 +30,7 @@
     "react-dom": "^19.2.0",
     "react-image-crop": "^11.1.2",
     "tailwindcss": "^4.3.0",
-    "three": "^0.185.0",
+    "three": "^0.159.0",
     "zustand": "^5.0.13"
   },
   "devDependencies": {
@@ -38,7 +38,7 @@
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
-    "@types/three": "^0.185.0",
+    "@types/three": "^0.159.0",
     "@vitejs/plugin-react": "^6.0.1",
     "typescript": "^5.9.0",
     "vite": "^8.0.8"

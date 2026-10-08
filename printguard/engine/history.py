@@ -1,41 +1,55 @@
-"""Per-monitor risk history, rolled-up time buckets and alert snapshots.
+"""Per-monitor risk history, rolled-up time buckets and the alert log.
 
 Each inference score is folded into a fixed-interval rollup bucket (count, sum,
-min, max and a defect tally); every fired alert is logged and keeps the JPEG of
-the frame that triggered it. Both series are bounded in-memory rings, read on
-demand by the detailed monitor view over the engine protocol; nothing here is
-platform specific.
+min, max and a defect tally) and every fired alert is logged. Both series are
+bounded in-memory rings, read on demand by the detailed monitor view over the
+engine protocol. The frames that fired the alerts are kept by the review
+library.
 """
 
 from __future__ import annotations
 
-import uuid
 from collections import deque
 from typing import Any
 
 BUCKET_S = 60
 BUCKET_CAP = 1440
-SNAP_CAP = 40
 ALERT_CAP = 50
+WATCH_GAP_S = 30.0
 
 
 class MonitorHistory:
-    """Bounded rollup buckets and alert snapshots for one monitor."""
+    """Bounded rollup buckets and the alert log for one monitor."""
 
     def __init__(self) -> None:
         self.buckets: deque[dict[str, Any]] = deque(maxlen=BUCKET_CAP)
-        self.snaps: deque[dict[str, Any]] = deque(maxlen=SNAP_CAP)
         self.alerts: deque[dict[str, Any]] = deque(maxlen=ALERT_CAP)
         self._last_score = 0.0
+        self._last_ts: float | None = None
 
     def record(self, ts: float, score: float, threshold: float) -> None:
-        """Folds one inference score into its fixed-interval bucket."""
+        """Folds one inference score into its fixed-interval bucket.
+
+        The time since the previous reading counts as watched unless it is
+        longer than WATCH_GAP_S, since a monitor that stood down or lost its
+        camera in between was not watching. A gap that spans two buckets is
+        split at the boundary, so no bucket reports more than BUCKET_S. A
+        reading from before the last bucket, as a clock set back gives, goes
+        into the last bucket so the series stays in time order.
+        """
         self._last_score = score
         start = int(ts // BUCKET_S) * BUCKET_S
-        bucket = self.buckets[-1] if self.buckets else None
-        if bucket is None or bucket["t"] != start:
-            bucket = {"t": start, "n": 0, "sum": 0.0, "min": score, "max": score, "defects": 0}
+        previous = self.buckets[-1] if self.buckets else None
+        bucket = previous
+        if bucket is None or bucket["t"] < start:
+            bucket = {"t": start, "n": 0, "sum": 0.0, "min": score, "max": score, "defects": 0, "watched": 0.0}
             self.buckets.append(bucket)
+        if self._last_ts is not None and 0 < ts - self._last_ts <= WATCH_GAP_S:
+            gap_start = max(self._last_ts, start)
+            bucket["watched"] += ts - gap_start
+            if previous is not bucket:
+                previous["watched"] += gap_start - self._last_ts
+        self._last_ts = ts
         bucket["n"] += 1
         bucket["sum"] += score
         bucket["min"] = min(bucket["min"], score)
@@ -43,21 +57,16 @@ class MonitorHistory:
         if score >= threshold:
             bucket["defects"] += 1
 
-    def record_alert(self, ts: float, score: float, action: str, jpeg: bytes | None) -> None:
-        """Logs a fired alert and keeps its triggering frame as a snapshot."""
+    def record_alert(self, ts: float, score: float, action: str) -> None:
+        """Logs a fired alert."""
         self.alerts.append({"ts": ts, "score": score, "action": action})
-        if jpeg:
-            self.snaps.append({"id": uuid.uuid4().hex[:12], "ts": ts, "score": score, "action": action, "jpeg": jpeg})
 
-    def snapshot(self, snap_id: str) -> bytes | None:
-        """Returns the stored JPEG bytes for a snapshot id, or None."""
-        for snap in self.snaps:
-            if snap["id"] == snap_id:
-                return snap["jpeg"]
-        return None
+    def series(self, snaps: list[dict[str, Any]]) -> dict[str, Any]:
+        """Builds the buckets, snapshot index, alert log and summary statistics.
 
-    def series(self) -> dict[str, Any]:
-        """Builds the buckets, snapshot index, alert log and summary statistics."""
+        Args:
+            snaps: The kept alert frames of the monitor, oldest first.
+        """
         buckets = [{k: v for k, v in b.items()} for b in self.buckets]
         inferences = sum(b["n"] for b in buckets)
         defect_frames = sum(b["defects"] for b in buckets)
@@ -71,12 +80,12 @@ class MonitorHistory:
             "defect_frames": defect_frames,
             "defect_pct": round(100.0 * defect_frames / inferences, 1) if inferences else 0.0,
             "alerts": len(self.alerts),
-            "watch_min": sum(1 for b in buckets if b["n"] > 0),
-            "snaps": len(self.snaps),
+            "watch_min": round(sum(b["watched"] for b in buckets) / 60),
+            "snaps": len(snaps),
         }
         return {
             "buckets": buckets,
-            "snaps": [{"id": s["id"], "ts": s["ts"], "score": s["score"], "action": s["action"]} for s in self.snaps],
+            "snaps": [{"id": s["id"], "ts": s["ts"], "score": s["score"], "action": s["action"]} for s in snaps],
             "alerts": list(self.alerts),
             "stats": stats,
         }

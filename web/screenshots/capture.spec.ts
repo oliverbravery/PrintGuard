@@ -17,8 +17,8 @@ const series = (fn: (i: number) => number, n = 48): ScorePoint[] =>
   Array.from({ length: n }, (_, i) => ({ ts: NOW - (n - i) * 1500, score: Math.min(1, Math.max(0, fn(i))) }));
 
 const camera = (id: string, name: string, source: Camera["source"], inferring = false): Camera => ({
-  id, name, source, printer_id: null, max_fps: 30, brightness: 1, contrast: 1, sharpness: 0,
-  crop: null, rotation: 0, target_fps: 30, achieved_fps: 29.8, inferring, in_use: true, online: true, last_result: null,
+  id, name, source, printer_id: null, max_fps: 30, detect_fps: 60, brightness: 1, contrast: 1, sharpness: 0,
+  crop: null, rotation: 0, target_fps: 30, achieved_fps: 29.8, inferring, in_use: true, standby: false, online: true, last_result: null,
 });
 
 const idle: DeviceState = { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: { actual: 24.3, target: 0 }, bed: { actual: 23.1, target: 0 } };
@@ -73,15 +73,17 @@ function engine(): EngineState {
       print("f2", "wall_bracket", "gcode", 2_104_880, ["p2"], { slicer: "OrcaSlicer 2.2.0", time_s: 3540, filament_g: 8.1, printer_model: "Creality Ender-3 V3", nozzle: 220, bed: 55 }),
       print("f3", "cable_clip", "gcode", 611_002, [], { slicer: "Cura 5.7.0", time_s: 1260, filament_mm: 2100, printer_model: null, nozzle: 200, bed: 60 }),
     ],
+    reviews: [], feedback_hub: null,
     monitors: [
       monitor("m1", "Prusa MK4", "c1", "p1"),
       monitor("m2", "Ender 3 V3", "c2", "p2", true),
       monitor("m3", "Bambu X1C", "c3", ""),
     ],
-    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT },
+    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], glass: { opacity: 0, tone: 0 }, inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT, feedback: "ask" },
     tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: INTEGRATIONS, notifiers: [],
     plugins: [], plugin_permissions: PERMISSIONS, plugin_events: {}, plugin_platforms: PLATFORMS,
     plugin_event_permissions: { state: "state:read", frame: "camera:frames", history: "history:read" },
+    plugin_oauth_callback: "", plugin_assets: {},
   };
 }
 
@@ -111,28 +113,28 @@ const PERMISSIONS = [
 
 const CATALOGUE = [
   {
-    id: "picture-in-picture", name: "Picture in picture", version: "1.2.0", author: "oliverbravery",
+    id: "picture-in-picture", name: "Picture in picture", version: "1.0.0", author: "oliverbravery",
     description: "Puts a pop-out button on every monitor that floats its camera above your other windows.",
     icon: "icon.png", media: ["shots/monitor.png"],
     repo: "oliverbravery/PrintGuard", path: "plugins/picture-in-picture", ref: "a".repeat(40),
     permissions: ["state:read", "camera:view"], platforms: [], surfaces: ["monitor", "float"], digests: {},
   },
   {
-    id: "alert-sounds", name: "Alert sounds", version: "1.1.0", author: "oliverbravery",
+    id: "alert-sounds", name: "Alert sounds", version: "1.0.0", author: "oliverbravery",
     description: "Sounds a horn, a bell or an alarm the moment a defect is caught, on the monitors you switch it on for.",
     icon: "icon.png", media: ["shots/settings.png"],
     repo: "oliverbravery/PrintGuard", path: "plugins/alert-sounds", ref: "c".repeat(40),
     permissions: ["state:read", "sound"], platforms: [], surfaces: ["settings"], digests: {},
   },
   {
-    id: "progress-reports", name: "Progress reports", version: "1.0.0", author: "oliverbravery",
+    id: "progress-reports", name: "Progress reports", version: "1.0.1", author: "oliverbravery",
     description: "Sends how far a print has got and how many defects it has seen, as often as you ask, on the monitors you switch it on for.",
     icon: "icon.png", media: ["shots/settings.png"],
     repo: "oliverbravery/PrintGuard", path: "plugins/progress-reports", ref: "d".repeat(40),
     permissions: ["state:read", "alert:send"], platforms: [], surfaces: ["settings"], digests: {},
   },
   {
-    id: "spotify", name: "Spotify", version: "1.0.0", author: "oliverbravery",
+    id: "spotify", name: "Spotify", version: "1.0.1", author: "oliverbravery",
     description: "Puts the current cover behind the dashboard, with the track and the transport in a panel.",
     icon: "icon.png", media: ["shots/dashboard.jpg"],
     repo: "oliverbravery/PrintGuard", path: "plugins/spotify", ref: "e".repeat(40),
@@ -153,7 +155,7 @@ function installed(id: string, name: string, permissions: string[], surfaces: st
   return {
     id,
     manifest: {
-      id, name, version: "1.0.0", description: "", author: "oliverbravery", homepage: "",
+      id, name, version: CATALOGUE.find((listed) => listed.id === id)!.version, description: "", author: "oliverbravery", homepage: "",
       icon: "icon.png", media: [],
       permissions, reasons: {}, surfaces, platforms: [], assets: [], urls: [],
       secrets: {}, provides: {}, consumes: [], oauth: {}, events: files.includes("panel.html") ? ["http"] : [], tick_s: 0,
@@ -174,7 +176,7 @@ function installed(id: string, name: string, permissions: string[], surfaces: st
 const INSTALLED = {
   id: "picture-in-picture",
   manifest: {
-    id: "picture-in-picture", name: "Picture in picture", version: "1.2.0", author: "oliverbravery", homepage: "",
+    id: "picture-in-picture", name: "Picture in picture", version: "1.0.0", author: "oliverbravery", homepage: "",
     icon: "icon.png", media: ["shots/monitor.png"],
     description: "Puts a pop-out button on every monitor that floats its camera above your other windows.",
     permissions: ["state:read", "camera:view"], reasons: {}, surfaces: ["monitor"], platforms: [], assets: [],
@@ -225,7 +227,70 @@ const idlePrinters = (e: EngineState) => {
   e.printers[1] = { ...e.printers[1], device_state: idle };
 };
 
+const REVIEW_FRAMES = [
+  ...[0.04, 0.06, 0.05, 0.07, 0.08, 0.11].map((score, index) => ({ id: `s${index}`, kind: "spaced" as const, score, ts: NOW / 1000 - 5400 + index * 600, action: "none", size: 41_000 })),
+  ...[0.58, 0.66].map((score, index) => ({ id: `n${index}`, kind: "near" as const, score, ts: NOW / 1000 - 1500 + index * 300, action: "none", size: 43_000 })),
+  { id: "a0", kind: "alert" as const, score: 0.91, ts: NOW / 1000 - 600, action: "pause", size: 44_000 },
+];
+const REVIEW = {
+  id: "r1", monitor_id: "m2", started: NOW / 1000 - 5400, ended: NOW / 1000 - 300, status: "ready" as const,
+  frames: REVIEW_FRAMES.length, alerts: 1, chosen: 0, sent: 0, code: null, retry_at: null,
+};
+
+async function openReview(page: Page): Promise<void> {
+  await page.evaluate(
+    ({ review, frames, pictures }) => {
+      (window as unknown as { __pg: { setState: (s: unknown) => void } }).__pg.setState({
+        reviewId: review.id,
+        reviewData: { [review.id]: { ...review, frames } },
+        snapshotCache: Object.fromEntries(frames.map((frame) => [frame.id, frame.score > 0.5 ? pictures.defect : pictures.healthy])),
+      });
+    },
+    { review: REVIEW, frames: REVIEW_FRAMES, pictures: FRAMES },
+  );
+  await page.getByRole("button", { name: "No, it failed" }).click();
+  await page.getByRole("button", { name: /^Frame \d+ of \d+ at .* marked Good/ }).last().click();
+}
+
+const HISTORY_SNAPS = [0.86, 0.91, 0.78].map((score, index) => ({ id: `h${index}`, ts: NOW / 1000 - 120 - index * 1500, score, action: index === 2 ? "none" : "pause" }));
+const HISTORY = {
+  now: NOW / 1000,
+  buckets: Array.from({ length: 60 }, (_, minute) => minute)
+    .filter((minute) => minute < 22 || minute > 27)
+    .map((minute) => {
+      const avg = minute < 50 ? 0.14 + 0.05 * Math.sin(minute / 4) : 0.2 + (minute - 50) * 0.07;
+      return { t: Math.floor(NOW / 60_000) * 60 - (59 - minute) * 60, n: 300, sum: avg * 300, min: avg - 0.05, max: avg + 0.1, defects: avg > 0.5 ? Math.round((avg - 0.4) * 300) : 0, watched: 60 };
+    }),
+  snaps: HISTORY_SNAPS,
+  alerts: HISTORY_SNAPS.map(({ ts, score, action }) => ({ ts, score, action })),
+  stats: { current: 0.86, avg: 0.21, max: 0.91, defect_pct: 6, inferences: 16_200, alerts: 3, watch_min: 54 },
+};
+const PRINTS_KEPT = [{ ...REVIEW, id: "r0", started: REVIEW.started - 172_800, ended: REVIEW.ended - 172_800, status: "sent" as const, frames: 12, sent: 12 }, REVIEW];
+
+async function openHistory(page: Page): Promise<void> {
+  await page.evaluate(
+    ({ history, picture }) => {
+      (window as unknown as { __pg: { setState: (s: unknown) => void } }).__pg.setState({
+        statsMonitorId: "m2",
+        historyData: { m2: history },
+        snapshotCache: Object.fromEntries(history.snaps.map((snap) => [snap.id, picture])),
+      });
+    },
+    { history: HISTORY, picture: FRAMES.defect },
+  );
+  await page.getByRole("button", { name: /^Snapshot at/ }).first().waitFor();
+}
+
+async function openCameraEditor(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Edit", exact: true }).first().click();
+  await page.getByRole("slider", { name: "Detection rate" }).scrollIntoViewIfNeeded();
+}
+
 const SCENES: Scene[] = [
+  { name: "review", width: 1360, height: 860, theme: "dark", mutate: (e) => void (e.reviews = [REVIEW]), prepare: openReview },
+  { name: "history", width: 1360, height: 860, theme: "dark", mutate: (e) => void (e.reviews = PRINTS_KEPT), prepare: openHistory },
+  { name: "camera-editor", width: 1360, height: 680, theme: "dark", dialog: "cameras", prepare: openCameraEditor },
+  { name: "settings-advanced", width: 1360, height: 860, theme: "dark", settingsTab: "advanced" },
   { name: "dashboard", width: 1360, height: 620, theme: "dark" },
   { name: "dashboard-light", width: 1360, height: 620, theme: "light" },
   { name: "printer-detail", width: 1360, height: 860, theme: "dark", detailId: "m1" },
@@ -249,7 +314,7 @@ const SCENES: Scene[] = [
   {
     name: "plugin-page", width: 1360, height: 900, theme: "dark", settingsTab: "plugins", catalogue: CATALOGUE,
     prepare: async (page) => {
-      await page.locator('[role="button"]', { hasText: "Spotify" }).first().click();
+      await page.getByRole("button", { name: "Spotify", exact: true }).click();
       await page.waitForTimeout(700);
       await page.waitForFunction(() => Array.from(document.images).every((i) => i.complete));
     },
@@ -276,18 +341,48 @@ const stoodDown = (e: EngineState) => {
 
 const NOTIFIERS = [
   {
-    id: "ntfy", label: "ntfy", docs_url: "",
-    schema: { properties: { url: { type: "string", title: "Topic URL", placeholder: "https://ntfy.sh/my-prints" } }, required: ["url"] },
+    id: "ntfy", label: "ntfy", docs_url: "https://docs.ntfy.sh/publish/", setup_url: "https://docs.ntfy.sh/subscribe/phone/",
+    setup_hint: "Subscribe to your topic in the ntfy app to receive alerts. Use a hard-to-guess name, anyone with it can read; protected topics need an access token.",
+    schema: {
+      properties: {
+        url: { type: "string", title: "Topic URL", secret: true, placeholder: "https://ntfy.sh/my-printers" },
+        token: { type: "string", title: "Access token (optional)", secret: true, placeholder: "Leave blank for open topics" },
+      },
+      required: ["url"],
+    },
   },
   {
-    id: "pushover", label: "Pushover", docs_url: "",
-    schema: { properties: { api_token: { type: "string", title: "Application API token", secret: true }, user_key: { type: "string", title: "User key", secret: true } }, required: ["api_token", "user_key"] },
+    id: "pushover", label: "Pushover", docs_url: "https://pushover.net/api", setup_url: "https://pushover.net/apps/build",
+    setup_hint: "Create an application at pushover.net/apps/build for its API token. Your user key is on the Pushover dashboard, and the app is a one-off purchase per platform.",
+    schema: {
+      properties: {
+        api_token: { type: "string", title: "Application API token", secret: true, placeholder: "From pushover.net/apps/build" },
+        user_key: { type: "string", title: "User key", secret: true, placeholder: "From your Pushover dashboard" },
+        priority: {
+          type: "string", title: "Priority (applies to every notice)", default: "1", enum: ["-2", "-1", "0", "1"],
+          enum_labels: ["Lowest - no notification, badge only", "Low - notifies without a sound", "Normal - respects your quiet hours", "High - bypasses your quiet hours"],
+        },
+      },
+      required: ["api_token", "user_key"],
+    },
   },
   {
-    id: "telegram", label: "Telegram", docs_url: "",
-    schema: { properties: { token: { type: "string", title: "Bot token", secret: true }, chat_id: { type: "string", title: "Chat ID" } }, required: ["token", "chat_id"] },
+    id: "telegram", label: "Telegram", docs_url: "https://core.telegram.org/bots/api", setup_url: "https://core.telegram.org/bots/tutorial",
+    setup_hint: "Create a bot with @BotFather to get its token, then message the bot and read your chat ID from @userinfobot.",
+    schema: {
+      properties: {
+        bot_token: { type: "string", title: "Bot token", secret: true, placeholder: "From @BotFather" },
+        chat_id: { type: "string", title: "Chat ID", placeholder: "From @userinfobot, e.g. 123456789" },
+      },
+      required: ["bot_token", "chat_id"],
+    },
   },
-  { id: "discord", label: "Discord", docs_url: "", schema: { properties: { webhook: { type: "string", title: "Webhook URL" } }, required: ["webhook"] } },
+  {
+    id: "discord", label: "Discord", docs_url: "https://discord.com/developers/docs/resources/webhook#execute-webhook",
+    setup_url: "https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks",
+    setup_hint: "Create a webhook under Server Settings > Integrations > Webhooks and copy its URL.",
+    schema: { properties: { webhook_url: { type: "string", title: "Webhook URL", secret: true, placeholder: "https://discord.com/api/webhooks/…" } }, required: ["webhook_url"] },
+  },
 ];
 
 const DESK = { width: 1000, height: 820 } as const;
@@ -334,7 +429,8 @@ const CROPS: Crop[] = [
     target: (page) => page.locator("#settings-panel-alerts"),
     mutate: (e) => {
       e.notifiers = NOTIFIERS as never;
-      e.settings.notifiers = { ntfy: { url: "https://ntfy.sh/my-prints" } };
+      e.settings.notifiers = { ntfy: {} };
+      e.secrets_set = { notifiers: { ntfy: ["url"] }, mqtt: [] };
     },
   },
   {
@@ -464,7 +560,7 @@ async function stage(browser: Browser, scene: Scene): Promise<{ page: Page; clos
     ({ state, theme }) => {
       document.documentElement.dataset.theme = theme;
       document.documentElement.style.colorScheme = theme;
-      (window as { __pg: { setState: (s: unknown) => void } }).__pg.setState(state);
+      (window as unknown as { __pg: { setState: (s: unknown) => void } }).__pg.setState(state);
     },
     {
       theme: scene.theme,

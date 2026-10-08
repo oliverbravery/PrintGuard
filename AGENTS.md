@@ -12,8 +12,11 @@ Two rules from it that are easy to skip and expensive to miss:
   copy. Everything published, including PR descriptions and issue comments, is written in the
   first person as the maintainer, not in an assistant's voice.
 
-Deeper references: [docs/README.md](docs/README.md) indexes the documentation set;
-[docs/architecture.md](docs/architecture.md) covers the engine, the `Platform` contract,
-scheduling and the fail-safe design; [docs/api.md](docs/api.md) covers the hub's REST API and
-MCP server; [CONTRIBUTING.md](CONTRIBUTING.md) has dev setup, the release cycle and
-step-by-step guides for adding a printer integration or notification provider.
+Deeper references:
+
+| Page | Covers |
+|---|---|
+| [docs/README.md](docs/README.md) | The index of the documentation set |
+| [docs/architecture.md](docs/architecture.md) | The engine, the `Platform` contract, scheduling and the fail-safe design |
+| [docs/api.md](docs/api.md) | The hub's REST API and MCP server |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev setup, the release cycle and step-by-step guides for adding a printer integration or notification provider |

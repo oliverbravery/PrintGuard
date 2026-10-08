@@ -22,15 +22,28 @@ from urllib.parse import urlsplit
 
 from . import oauth, urls
 from .adapters import HttpFn
+from .bounds import clamp
 
 MANIFEST_FILE = "plugin.json"
 SOURCE_FILES = ("plugin.js", "worker.js", "panel.html")
 MAX_ASSET_BYTES = 4 * 1024 * 1024
 MAX_ASSETS_BYTES = 12 * 1024 * 1024
+MAX_ZIP_BYTES = 12 * 1024 * 1024
 SURFACES = ("panel", "monitor", "settings")
 MAX_SOURCE_BYTES = 256 * 1024
 MAX_CONFIG_BYTES = 16 * 1024
+MAX_DEPTH = 32
+"""How deep the JSON a plugin hands over may nest.
+
+Python walks JSON recursively, so a few kilobytes of nothing but nesting would
+otherwise fail every save of the state file.
+"""
+MAX_NAME_CHARS = 80
+MAX_SCOPES = 20
+LIST_FIELDS = ("permissions", "consumes", "media", "surfaces", "platforms", "assets", "urls", "events")
+MAP_FIELDS = ("reasons", "secrets", "provides", "oauth")
 MIN_TICK_S = 5.0
+MAX_TICK_S = 86400.0
 MAX_SECRETS = 8
 MAX_CHANNELS = 8
 MAX_CONSUMES = 16
@@ -49,12 +62,15 @@ GITHUB_COMMIT_URL = "https://api.github.com/repos/{repo}/commits/{ref}"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/{repo}/{sha}/{path}"
 GITHUB_HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
 TIMEOUT_S = 20.0
+MAX_LISTING_BYTES = 4 * 1024 * 1024
+"""The most the catalogue, or GitHub's description of a commit, may come to."""
 
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
 _REPO_PATTERN = re.compile(r"^[\w.-]+/[\w.-]+$")
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _PATH_PATTERN = re.compile(r"^[\w./-]*$")
-_ASSET_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
+MAX_ASSET_NAME_CHARS = 40
+_ASSET_PATTERN = re.compile(rf"^[a-z0-9][a-z0-9._-]{{0,{MAX_ASSET_NAME_CHARS - 1}}}$")
 VERSION_PATTERN = re.compile(r"^[\w.+-]{1,32}$")
 MEDIA_PATTERN = re.compile(r"^[a-z0-9][\w-]*(?:/[\w-]+)*\.(?:png|jpe?g|webp|gif|svg)$")
 MAX_MEDIA = 8
@@ -89,7 +105,7 @@ PERMISSIONS: dict[str, dict[str, Any]] = {
     },
     "camera:control": {
         "label": "Retune cameras",
-        "description": "Change any camera's picture and frame rate.",
+        "description": "Change any camera's picture and detection rate.",
         "commands": ["camera.update"],
     },
     "camera:manage": {
@@ -265,6 +281,11 @@ event missing from here never reaches one.
 
 EVENT_PERMISSIONS: dict[str, str] = {
     "state": "state:read",
+    "result": "state:read",
+    "alert": "state:read",
+    "warning": "state:read",
+    "device": "state:read",
+    "error": "state:read",
     "frame": "camera:frames",
     "history": "history:read",
     "call": "link:provide",
@@ -275,9 +296,17 @@ EVENT_PERMISSIONS: dict[str, str] = {
 
 Events broadcast to every plugin that named them, so one carrying a camera still
 or a monitor's history needs the grant its command needed. Without this a plugin
-could name the event, wait for somebody else to ask, and read the answer.
+could name the event, wait for somebody else to ask, and read the answer. Scores,
+alerts, warnings, printer status and errors are what the dashboard shows, so they
+need the grant that reads the dashboard.
 """
 
+
+LINK_ACTIONS = ("call", "answer", "publish")
+"""What a ``link`` effect may ask for, each a ``plugin.<action>`` command."""
+
+SIGN_IN_ENDPOINTS = ("authorize_url", "token_url")
+"""Where a manifest's ``oauth`` block sends the user and the tokens."""
 
 UI_EFFECTS: dict[str, str] = {"notify": "notify", "sound": "sound", "background": "background"}
 """Effects a dashboard carries out for a plugin, and the permission each needs.
@@ -289,6 +318,19 @@ The grant is checked at the engine as well as at the sandbox edge.
 
 MAX_EFFECT_BYTES = 3 * 1024 * 1024
 """How large one may be, which a background picture is the reason for."""
+
+BACKGROUND_IMAGE = re.compile(r"data:image/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}")
+
+
+def background_image(raw: Any) -> str:
+    """The picture a plugin asked to put behind the dashboard, or nothing.
+
+    Returns:
+        The image when it is a base64 ``data:`` URL of a type a plugin may
+        ship, and an empty string otherwise, which clears the background.
+    """
+    image = str(raw or "")
+    return image if BACKGROUND_IMAGE.fullmatch(image) else ""
 
 
 def sanitise_secrets(raw: Any, names: list[str]) -> dict[str, str]:
@@ -311,6 +353,16 @@ def sanitise_secrets(raw: Any, names: list[str]) -> dict[str, str]:
     return kept
 
 
+def fillable(secrets: dict[str, str]) -> dict[str, str]:
+    """The secrets a request may refer to, which leaves out the rest of a sign-in.
+
+    A plugin sends its access token, and holding the refresh token or the client
+    id is not needed for that. Letting a request carry them would let a plugin
+    with a second declared host keep the sign-in for itself.
+    """
+    return {name: value for name, value in secrets.items() if name not in oauth.WITHHELD}
+
+
 def missing_secrets(value: Any, secrets: dict[str, str]) -> set[str]:
     """Names the secrets a request refers to that the plugin has nothing for.
 
@@ -328,6 +380,15 @@ def missing_secrets(value: Any, secrets: dict[str, str]) -> set[str]:
     if isinstance(value, list):
         return set().union(*(missing_secrets(item, secrets) for item in value)) if value else set()
     return set()
+
+
+def addresses_a_secret(url: str) -> bool:
+    """Whether a URL refers to a secret anywhere before its path.
+
+    A secret there could move the request to a host the plugin never declared,
+    since the service a plugin signs in to chooses what the token says.
+    """
+    return SECRET_REFERENCE.search(re.split(r"(?<=[^/:])[/?#]", url, maxsplit=1)[0]) is not None
 
 
 def fill_secrets(value: Any, secrets: dict[str, str]) -> Any:
@@ -377,12 +438,32 @@ def same_source(previous: dict[str, Any], current: dict[str, Any]) -> bool:
     return (previous["repo"], previous.get("path", "")) == (current["repo"], current.get("path", ""))
 
 
+def same_sign_in(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Whether two manifests sign in at the same endpoints.
+
+    A stored refresh token is sent to the token endpoint, so an update naming a
+    different one would hand the session to wherever it says.
+
+    Args:
+        previous: The manifest the sign-in was made against.
+        current: The manifest being installed over it.
+
+    Returns:
+        True when the authorise and token addresses are unchanged, or neither
+        manifest signs in to anything.
+    """
+    return all(previous["oauth"].get(key) == current["oauth"].get(key) for key in SIGN_IN_ENDPOINTS)
+
+
 def widens(previous: dict[str, Any], current: dict[str, Any]) -> bool:
     """Whether an update reaches further than the manifest that was accepted.
 
-    Permissions, addresses and the plugins it calls are what the user agreed to,
-    so a change to any of them is a fresh question. Anything not written exactly
-    as before counts as wider, since a narrower-looking pattern can cover more.
+    Permissions, addresses, the plugins it calls, the channels it answers on,
+    where it signs in and the scopes it asks for there are what the user agreed
+    to, so a change to any of them is a fresh question. Anything not written
+    exactly as before counts as wider, since a narrower-looking pattern can
+    cover more, apart from the letter case of an address, which 2.5.0 stored
+    lowercased.
 
     Args:
         previous: The manifest the grants were given against.
@@ -391,7 +472,12 @@ def widens(previous: dict[str, Any], current: dict[str, Any]) -> bool:
     Returns:
         True when the new manifest asks for anything the old one did not.
     """
-    return any(not set(current[field]) <= set(previous[field]) for field in ("permissions", "urls", "consumes"))
+    return (
+        not same_sign_in(previous, current)
+        or not set(current["oauth"].get("scopes", [])) <= set(previous["oauth"].get("scopes", []))
+        or any(not set(current[field]) <= set(previous[field]) for field in ("permissions", "consumes", "provides"))
+        or not {url.lower() for url in current["urls"]} <= {url.lower() for url in previous["urls"]}
+    )
 
 
 def runs_here(platforms: list[str], host: str) -> bool:
@@ -437,12 +523,17 @@ def project_event(event: dict[str, Any], granted: list[str]) -> dict[str, Any] |
     Returns:
         The event carrying only the fields ``EVENTS`` lists for it, or None if
         no plugin may hook it or this one lacks the grant. A state event comes
-        back as the projection the grants allow.
+        back as the projection the grants allow. An error that answers a
+        command is not handed over, since it can quote what whoever sent the
+        command chose, and a plugin could send guesses and read each stored
+        credential off the ones the hub redacts.
     """
     name = str(event.get("event", ""))
     fields = EVENTS.get(name)
     needed = EVENT_PERMISSIONS.get(name)
     if fields is None or (needed is not None and needed not in granted):
+        return None
+    if name == "error" and event.get("req_id") is not None:
         return None
     if name == "state":
         return {"event": name, **project_state(event, granted)}
@@ -453,6 +544,25 @@ def asset_type(name: str) -> str | None:
     """The media type an asset is handed over as, or None if it may not ship."""
     extension = name.rsplit(".", 1)[-1] if "." in name else ""
     return ASSET_TYPES.get(extension) if _ASSET_PATTERN.match(name) else None
+
+
+def within_budget(name: str, size: int, held: int) -> int:
+    """Counts one more file towards what a plugin may ship.
+
+    Args:
+        name: The file, for the refusal.
+        size: How many bytes it is.
+        held: The bytes of the files counted before it.
+
+    Returns:
+        The running total with this file in it.
+
+    Raises:
+        ValueError: If the file is too large, or takes the plugin past its total.
+    """
+    if size > MAX_ASSET_BYTES or held + size > MAX_ASSETS_BYTES:
+        raise ValueError(f"{name} takes the plugin past {MAX_ASSETS_BYTES // 1024} KB of files")
+    return held + size
 
 
 def sanitise_assets(raw: dict[str, bytes]) -> dict[str, str]:
@@ -473,9 +583,7 @@ def sanitise_assets(raw: dict[str, bytes]) -> dict[str, str]:
         media = asset_type(name)
         if media is None:
             raise ValueError(f"{name} is not a kind of file a plugin may ship")
-        total += len(data)
-        if len(data) > MAX_ASSET_BYTES or total > MAX_ASSETS_BYTES:
-            raise ValueError(f"{name} takes the plugin past {MAX_ASSETS_BYTES // 1024} KB of files")
+        total = within_budget(name, len(data), total)
         starts = ASSET_MAGIC.get(media)
         if starts and not (data.startswith(starts) or (media == "video/mp4" and data[4:8] == b"ftyp")):
             raise ValueError(f"{name} is not really {media}")
@@ -530,11 +638,32 @@ def described(raw: Any, field: str, pattern: re.Pattern[str], cap: int, complain
     Raises:
         ValueError: If a name or its description is unusable.
     """
-    given = raw.get(field) if isinstance(raw.get(field), dict) else {}
-    lines = {str(name).strip().lower(): str(why).strip()[:200] for name, why in list(given.items())[:cap]}
+    lines = {str(name).strip().lower(): str(why).strip()[:200] for name, why in list(raw.get(field, {}).items())[:cap]}
     if any(not pattern.match(name) or not why for name, why in lines.items()):
         raise ValueError(complaint)
     return lines
+
+
+def shaped(raw: Any) -> dict[str, Any]:
+    """Checks a manifest is an object whose lists are lists and whose objects are objects.
+
+    Args:
+        raw: The parsed ``plugin.json``.
+
+    Returns:
+        The manifest, unchanged.
+
+    Raises:
+        ValueError: If it is not an object, or a field is the wrong kind of
+            value, naming the field.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(f"{MANIFEST_FILE} is not a JSON object")
+    for fields, kind, noun in ((LIST_FIELDS, list, "a list"), (MAP_FIELDS, dict, "an object")):
+        for field in fields:
+            if field in raw and not isinstance(raw[field], kind):
+                raise ValueError(f"{field} in {MANIFEST_FILE} must be {noun}")
+    return raw
 
 
 def sanitise_manifest(raw: Any) -> dict[str, Any]:
@@ -549,8 +678,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     Raises:
         ValueError: If the manifest is unusable.
     """
-    if not isinstance(raw, dict):
-        raise ValueError("plugin.json is not an object")
+    raw = shaped(raw)
     plugin_id = str(raw.get("id", "")).strip().lower()
     if not ID_PATTERN.match(plugin_id):
         raise ValueError("plugin id must be 3-40 lowercase letters, digits or hyphens")
@@ -558,8 +686,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     if not VERSION_PATTERN.match(version):
         raise ValueError("plugin version is missing or unusable")
     permissions = [p for p in PERMISSIONS if p in raw.get("permissions", [])]
-    given = raw.get("reasons") if isinstance(raw.get("reasons"), dict) else {}
-    reasons = {p: str(given.get(p, "")).strip()[:200] for p in permissions}
+    reasons = {p: str(raw.get("reasons", {}).get(p, "")).strip()[:200] for p in permissions}
     unexplained = [p for p, why in reasons.items() if not why]
     if unexplained:
         raise ValueError(f"reasons must say why the plugin wants {', '.join(unexplained)}")
@@ -573,14 +700,14 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     if consumes and "link:consume" not in permissions:
         raise ValueError("consumes needs the link:consume permission")
     sign_in = sanitise_sign_in(raw.get("oauth"))
-    if sign_in and "oauth" not in permissions:
-        raise ValueError("oauth needs the oauth permission")
+    if bool(sign_in) != ("oauth" in permissions):
+        raise ValueError("the oauth permission and the oauth block go together")
     if sign_in:
         wanted[oauth.CLIENT_ID] = f"The client id of the {sign_in['label']} app you registered"
-    icon = str(raw.get("icon", "")).strip().lower()
+    icon = str(raw.get("icon", "")).strip()
     if icon and not MEDIA_PATTERN.match(icon):
         raise ValueError("icon names an image file inside the plugin's folder")
-    media = [str(shot).strip().lower() for shot in raw.get("media", []) if str(shot).strip()][:MAX_MEDIA]
+    media = [str(shot).strip() for shot in raw.get("media", []) if str(shot).strip()][:MAX_MEDIA]
     if any(not MEDIA_PATTERN.match(shot) for shot in media):
         raise ValueError("each media entry names an image file inside the plugin's folder")
     surfaces = [s for s in raw.get("surfaces", []) if s in SURFACES] or ["panel"]
@@ -589,19 +716,19 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     if any(asset_type(name) is None for name in assets):
         raise ValueError(f"a plugin may only ship {', '.join(sorted(set(ASSET_TYPES)))}")
     patterns = urls.sanitise(raw.get("urls"))
-    local = [pattern for pattern in patterns if urls.reaches_local(pattern)]
+    local = [pattern for pattern in patterns if urls.reaches_local(pattern)] + local_sign_in(sign_in)
     if patterns and "net" not in permissions:
         raise ValueError("urls needs the net permission")
     if local and "net:local" not in permissions:
         raise ValueError(f"reaching {', '.join(local)} needs the net:local permission")
     events = sorted(({str(e).strip() for e in raw.get("events", [])} & set(EVENTS)) | linked_events(raw))
     try:
-        tick_s = max(0.0, float(raw.get("tick_s", 0)))
+        tick_s = clamp("tick_s", raw.get("tick_s", 0), 0.0, MAX_TICK_S)
     except (TypeError, ValueError):
         tick_s = 0.0
     return {
         "id": plugin_id,
-        "name": str(raw.get("name", "")).strip() or plugin_id,
+        "name": str(raw.get("name", "")).strip()[:MAX_NAME_CHARS] or plugin_id,
         "version": version,
         "description": str(raw.get("description", "")).strip()[:400],
         "author": str(raw.get("author", "")).strip()[:80],
@@ -619,8 +746,41 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         "consumes": consumes,
         "oauth": sign_in,
         "events": events,
-        "tick_s": min(tick_s, 86400.0) if tick_s >= MIN_TICK_S else 0.0,
+        "tick_s": tick_s if tick_s >= MIN_TICK_S else 0.0,
     }
+
+
+def restored_manifest(raw: Any) -> dict[str, Any]:
+    """Reads a manifest an earlier version stored.
+
+    One stored before 2.6.0 can name a local address, such as ``*.home.arpa`` or
+    ``127.1``, or sign in at one, without the ``net:local`` permission that now
+    covers it. It is
+    read as asking for that permission, which nobody has accepted, so the plugin
+    stays installed with its data and waits to be accepted.
+
+    Args:
+        raw: The stored manifest.
+
+    Returns:
+        The manifest as ``sanitise_manifest`` reads it, with ``net:local`` added
+        where only that was missing.
+
+    Raises:
+        ValueError: If the manifest is unusable for any other reason.
+    """
+    try:
+        return sanitise_manifest(raw)
+    except ValueError as refused:
+        if not isinstance(raw, dict) or not isinstance(raw.get("permissions"), list):
+            raise
+        reasons = raw.get("reasons") if isinstance(raw.get("reasons"), dict) else {}
+        try:
+            return sanitise_manifest(
+                {**raw, "permissions": [*raw["permissions"], "net:local"], "reasons": {**reasons, "net:local": "To reach the addresses it lists on your network."}}
+            )
+        except ValueError:
+            raise refused from None
 
 
 def linked_events(raw: Any) -> set[str]:
@@ -639,7 +799,13 @@ def outbound_link(plugin_id: str, kind: str, request: Any) -> dict[str, Any]:
 
     The id is set last, so a sandbox cannot spread over the command and speak as
     somebody else.
+
+    Raises:
+        ValueError: If the plugin named anything but one of those three, which
+            would otherwise reach any command that starts the same way.
     """
+    if kind not in LINK_ACTIONS:
+        raise ValueError(f"{kind!r} is not a way to talk to another plugin")
     fields = request if isinstance(request, dict) else {}
     return {
         "cmd": f"plugin.{kind}",
@@ -670,15 +836,29 @@ def sanitise_sign_in(raw: Any) -> dict[str, Any]:
     """
     if not isinstance(raw, dict) or not raw:
         return {}
-    endpoints = {key: str(raw.get(key, "")).strip() for key in ("authorize_url", "token_url")}
-    if any(not urls.parse(f"{value}{'' if '/' in value.split('://')[-1] else '/'}") for value in endpoints.values()):
-        raise ValueError("oauth needs an https authorize_url and token_url")
+    if not isinstance(raw.get("scopes", []), list):
+        raise ValueError("scopes in oauth must be a list")
+    endpoints = {key: str(raw.get(key, "")).strip() for key in SIGN_IN_ENDPOINTS}
+    if any("*" in value or urlsplit(value).scheme != "https" or not urls.is_plain(value) for value in endpoints.values()):
+        raise ValueError("oauth needs an https authorize_url and token_url, each with a plain host")
     return {
         **endpoints,
         "register_url": urls.link(raw.get("register_url")),
-        "scopes": [str(scope).strip() for scope in raw.get("scopes", []) if str(scope).strip()][:20],
+        "scopes": [str(scope).strip() for scope in raw.get("scopes", []) if str(scope).strip()][:MAX_SCOPES],
         "label": str(raw.get("label", "")).strip()[:80] or urlsplit(endpoints["authorize_url"]).hostname or "",
     }
+
+
+def local_sign_in(sign_in: dict[str, Any]) -> list[str]:
+    """The addresses a sign-in uses on this machine or the network around it.
+
+    Args:
+        sign_in: A manifest's validated ``oauth`` block, empty when it has none.
+
+    Returns:
+        Whichever of the authorise and token addresses need ``net:local``.
+    """
+    return [sign_in[key] for key in SIGN_IN_ENDPOINTS if key in sign_in and urls.is_local_url(sign_in[key])]
 
 
 def sanitise_sources(files: dict[str, str]) -> dict[str, str]:
@@ -692,11 +872,39 @@ def sanitise_sources(files: dict[str, str]) -> dict[str, str]:
     return sources
 
 
+def shallow(value: Any, what: str) -> Any:
+    """Refuses JSON from a plugin that nests too deep to be walked safely.
+
+    The depth is counted a level at a time, since the point is to never recurse
+    into it.
+
+    Args:
+        value: Parsed JSON of any shape.
+        what: What the plugin handed over, for the refusal.
+
+    Returns:
+        The value, unchanged.
+
+    Raises:
+        ValueError: If objects and lists sit more than ``MAX_DEPTH`` inside each other.
+    """
+    level = [value]
+    for _ in range(MAX_DEPTH):
+        level = [item for held in level if isinstance(held, (dict, list)) for item in (held.values() if isinstance(held, dict) else held)]
+        if not any(isinstance(held, (dict, list)) for held in level):
+            return value
+    raise ValueError(f"{what} is nested more than {MAX_DEPTH} deep")
+
+
 def sanitise_config(raw: Any) -> dict[str, Any]:
-    """Accepts a plugin's own stored data, refusing oversized objects."""
+    """Accepts a plugin's own stored data, refusing objects too large or too deeply nested.
+
+    Raises:
+        ValueError: If the data is over 16 KB or nested past ``MAX_DEPTH``.
+    """
     if not isinstance(raw, dict):
         return {}
-    if len(canonical(raw)) > MAX_CONFIG_BYTES:
+    if len(canonical(shallow(raw, "plugin data"))) > MAX_CONFIG_BYTES:
         raise ValueError(f"plugin data is larger than {MAX_CONFIG_BYTES // 1024} KB")
     return raw
 
@@ -741,10 +949,11 @@ def outbound_socket(plugin_id: str, action: str, request: Any) -> dict[str, Any]
 def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes], dict[str, bytes]]:
     """Reads a manifest, sources, declared assets and page files out of a zipped bundle.
 
-    Files may sit at the root or under a single directory, the shape a GitHub
-    archive comes in. Page files are the icon, the media the manifest lists and
-    a README beside the manifest: a zip is the only copy of its plugin, so what
-    presents it travels with it.
+    The files are the ones beside the manifest, at the root or under the one
+    directory that holds it, the shape a GitHub archive comes in. Page files
+    are the icon, the media the manifest lists and a README beside the
+    manifest: a zip is the only copy of its plugin, so what presents it travels
+    with it.
 
     Args:
         data: The zip as uploaded.
@@ -755,39 +964,62 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
         path the manifest uses.
 
     Raises:
-        ValueError: If the zip is unreadable or carries no manifest.
+        ValueError: If the zip is unreadable, carries no manifest, more than
+            one or one that is not an object, lists a file twice, is over
+            12 MB, uses a compression other than stored or deflate, or holds a
+            file that inflates past what a plugin may ship.
     """
+    if len(data) > MAX_ZIP_BYTES:
+        raise ValueError(f"this zip is over {MAX_ZIP_BYTES // 1024 // 1024} MB")
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as exc:
         raise ValueError("not a zip archive") from exc
-    entries: dict[str, str] = {}
-    for entry in archive.namelist():
-        entries.setdefault(entry.rsplit("/", 1)[-1], entry)
-    if MANIFEST_FILE not in entries:
+    if any(info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED) for info in archive.infolist()):
+        raise ValueError("this zip uses a compression PrintGuard does not read")
+    members = archive.namelist()
+    if len(members) != len(set(members)):
+        raise ValueError("this zip lists a file more than once")
+    manifests = [member for member in members if member == MANIFEST_FILE or member.endswith(f"/{MANIFEST_FILE}")]
+    if not manifests:
         raise ValueError(f"bundle has no {MANIFEST_FILE}")
-    prefix = entries[MANIFEST_FILE][: -len(MANIFEST_FILE)]
+    if len(manifests) > 1:
+        raise ValueError(f"this zip holds more than one {MANIFEST_FILE}")
+    prefix = manifests[0][: -len(MANIFEST_FILE)]
+    entries = {member[len(prefix) :] for member in members if member.startswith(prefix)}
+
+    def read_capped(entry: str, cap: int) -> bytes | None:
+        with archive.open(f"{prefix}{entry}") as member:
+            content = member.read(cap + 1)
+        return content if len(content) <= cap else None
 
     def read(name: str, cap: int) -> bytes:
-        entry = entries[name]
-        if archive.getinfo(entry).file_size > cap:
+        content = read_capped(name, cap)
+        if content is None:
             raise ValueError(f"{name} is larger than {cap // 1024} KB")
-        return archive.read(entry)
+        return content
 
-    manifest = json.loads(read(MANIFEST_FILE, MAX_SOURCE_BYTES))
+    manifest = shaped(json.loads(read(MANIFEST_FILE, MAX_SOURCE_BYTES)))
     sources = {name: read(name, MAX_SOURCE_BYTES).decode("utf-8", "replace") for name in SOURCE_FILES if name in entries}
-    declared = {str(name).strip().lower() for name in manifest.get("assets", []) if isinstance(manifest, dict)}
-    assets = {name: read(name, MAX_ASSET_BYTES) for name in sorted(declared) if name in entries}
-    listed = [str(manifest.get("icon", "")).strip().lower(), README_FILE]
-    listed += [str(shot).strip().lower() for shot in manifest.get("media", []) if isinstance(manifest, dict)]
-    named = set(archive.namelist())
+    declared = {str(name).strip().lower() for name in manifest.get("assets", [])}
+    assets: dict[str, bytes] = {}
+    total = 0
+    for name in sorted(declared & entries):
+        cap = min(MAX_ASSET_BYTES, MAX_ASSETS_BYTES - total)
+        content = read_capped(name, cap)
+        total = within_budget(name, cap + 1 if content is None else len(content), total)
+        assets[name] = content
+    listed = [str(manifest.get("icon", "")).strip(), README_FILE]
+    listed += [str(shot).strip() for shot in manifest.get("media", [])]
     page: dict[str, bytes] = {}
+    total = 0
     for path in listed:
-        entry = f"{prefix}{path}"
-        if path and entry in named:
+        if path and path not in page and path in entries:
             cap = MAX_README_BYTES if path == README_FILE else MAX_ASSET_BYTES
-            if archive.getinfo(entry).file_size <= cap:
-                page[path] = archive.read(entry)
+            content = read_capped(path, min(cap, MAX_ASSETS_BYTES - total))
+            if content is not None:
+                page[path] = content
+                total += len(content)
     return manifest, sources, assets, page
 
 
@@ -830,38 +1062,65 @@ async def fetch_github(http: HttpFn, repo: str, path: str, ref: str) -> tuple[di
         resolved commit SHA.
 
     Raises:
-        ValueError: If the reference is unusable or the plugin is not there.
+        ValueError: If the reference is unusable, the plugin is not there, a
+            source file answers with anything but its content or a 404, or its
+            assets pass what a plugin may ship, at the file that does it.
     """
-    if not _REPO_PATTERN.match(repo):
+    if not _REPO_PATTERN.match(repo) or _climbs(repo):
         raise ValueError(f"{repo!r} is not an owner/name repository")
     path = path.strip("/")
-    if not _PATH_PATTERN.match(path):
+    if not _PATH_PATTERN.match(path) or _climbs(path):
         raise ValueError(f"{path!r} is not a usable path")
     sha = ref if _SHA_PATTERN.match(ref) else await _resolve_commit(http, repo, ref)
     prefix = f"{path}/" if path else ""
-    status, manifest = await http("GET", GITHUB_RAW_URL.format(repo=repo, sha=sha, path=f"{prefix}{MANIFEST_FILE}"), timeout=TIMEOUT_S)
+    status, manifest = await http(
+        "GET", GITHUB_RAW_URL.format(repo=repo, sha=sha, path=f"{prefix}{MANIFEST_FILE}"), timeout=TIMEOUT_S, max_bytes=MAX_SOURCE_BYTES
+    )
     if status != 200 or not isinstance(manifest, dict):
         raise ValueError(f"no {MANIFEST_FILE} at {repo}/{prefix} ({status})")
+    shaped(manifest)
     sources: dict[str, str] = {}
     for name in SOURCE_FILES:
-        status, body = await http("GET", GITHUB_RAW_URL.format(repo=repo, sha=sha, path=f"{prefix}{name}"), timeout=TIMEOUT_S)
-        if status == 200 and isinstance(body, str):
-            sources[name] = body
+        status, body = await http(
+            "GET", GITHUB_RAW_URL.format(repo=repo, sha=sha, path=f"{prefix}{name}"), timeout=TIMEOUT_S, max_bytes=MAX_SOURCE_BYTES
+        )
+        if status == 404:
+            continue
+        if status != 200 or not isinstance(body, str):
+            raise ValueError(f"could not read {name} at {repo}/{prefix} ({status})")
+        sources[name] = body
     assets: dict[str, bytes] = {}
+    total = 0
     for name in sorted({str(a).strip().lower() for a in manifest.get("assets", [])}):
         if asset_type(name) is None:
             raise ValueError(f"{name} is not a kind of file a plugin may ship")
         status, body = await http(
-            "GET", GITHUB_RAW_URL.format(repo=repo, sha=sha, path=f"{prefix}{name}"), binary=True, timeout=TIMEOUT_S
+            "GET",
+            GITHUB_RAW_URL.format(repo=repo, sha=sha, path=f"{prefix}{name}"),
+            binary=True,
+            timeout=TIMEOUT_S,
+            max_bytes=MAX_ASSET_BYTES,
         )
         if status != 200 or not isinstance(body, str):
             raise ValueError(f"no {name} at {repo}/{prefix} ({status})")
         assets[name] = base64.b64decode(body)
+        total = within_budget(name, len(assets[name]), total)
     return manifest, sources, assets, sha
 
 
+def _climbs(path: str) -> bool:
+    """Whether a repository or a path inside one has a ``.`` or ``..`` segment.
+
+    An HTTP client collapses those before it sends, so the files would come from
+    another repository than the one recorded and shown.
+    """
+    return any(segment in (".", "..") for segment in path.split("/"))
+
+
 async def _resolve_commit(http: HttpFn, repo: str, ref: str) -> str:
-    status, body = await http("GET", GITHUB_COMMIT_URL.format(repo=repo, ref=ref), headers=GITHUB_HEADERS, timeout=TIMEOUT_S)
+    status, body = await http(
+        "GET", GITHUB_COMMIT_URL.format(repo=repo, ref=ref), headers=GITHUB_HEADERS, timeout=TIMEOUT_S, max_bytes=MAX_LISTING_BYTES
+    )
     if status != 200 or not isinstance(body, dict) or not _SHA_PATTERN.match(str(body.get("sha", ""))):
         raise ValueError(f"GitHub could not resolve {repo}@{ref} ({status})")
     return str(body["sha"])
@@ -873,7 +1132,7 @@ async def fetch_catalogue(http: HttpFn, url: str) -> list[dict[str, Any]]:
     Raises:
         RuntimeError: If the catalogue cannot be read.
     """
-    status, body = await http("GET", url, timeout=TIMEOUT_S)
+    status, body = await http("GET", url, timeout=TIMEOUT_S, max_bytes=MAX_LISTING_BYTES)
     if status != 200:
         raise RuntimeError(f"catalogue at {url} returned {status}")
     if not isinstance(body, dict) or not isinstance(body.get("plugins"), list):
@@ -887,3 +1146,19 @@ def verified_by(catalogue: list[dict[str, Any]], plugin_id: str, hashed: dict[st
         if entry.get("id") == plugin_id and entry.get("digests") == hashed:
             return entry
     return None
+
+
+def pinned_source(entry: dict[str, Any]) -> dict[str, Any]:
+    """Where the catalogue pins a plugin, as an install from its repository records it.
+
+    A zip the catalogue vouches for is recorded this way. The digests cover the
+    manifest and the code but not the README, icon or screenshots, so those are
+    read from the pinned commit like any catalogue install's, never from the zip.
+
+    Args:
+        entry: The catalogue entry vouching for the bundle.
+
+    Returns:
+        The repository, path and commit the entry names.
+    """
+    return {"kind": "github", "repo": str(entry["repo"]), "path": str(entry.get("path", "")), "ref": str(entry["ref"])}

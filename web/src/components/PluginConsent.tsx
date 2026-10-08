@@ -2,8 +2,24 @@ import { useEffect } from "react";
 import type { Finding } from "../lint";
 import { useStore } from "../store";
 import type { Permission, PluginManifest, PluginRecord } from "../types";
-import { phrase, reachesLocal } from "../urls";
+import { phrase, reachesLocal, webUrl } from "../urls";
 import { Dialog } from "./Dialog";
+
+const address = (url: string) => {
+  const parsed = webUrl(url);
+  if (parsed === null) return url;
+  const { host, pathname } = new URL(parsed);
+  return `${host}${pathname}`;
+};
+
+export function SignInAddresses({ oauth }: { oauth: PluginManifest["oauth"] }) {
+  return (
+    <ul className="text-text-2">
+      <li>Sign in at {address(oauth.authorize_url)}</li>
+      <li>Tokens from {address(oauth.token_url)}</li>
+    </ul>
+  );
+}
 
 export function PermissionList({ plugin, permissions }: { plugin: { manifest: PluginManifest }; permissions: Permission[] }) {
   const asked = permissions.filter((p) => plugin.manifest.permissions.includes(p.id));
@@ -31,7 +47,12 @@ export function PermissionList({ plugin, permissions }: { plugin: { manifest: Pl
                     ))}
                 </ul>
               )}
-              {permission.id === "oauth" && <span className="block text-text-2">{plugin.manifest.oauth.label}</span>}
+              {permission.id === "oauth" && plugin.manifest.oauth.authorize_url && (
+                <>
+                  <span className="block text-text-2">{plugin.manifest.oauth.label}</span>
+                  <SignInAddresses oauth={plugin.manifest.oauth} />
+                </>
+              )}
               {permission.id === "link:provide" && (
                 <ul className="text-text-2">
                   {Object.entries(plugin.manifest.provides).map(([channel, what]) => (
@@ -66,10 +87,11 @@ function phraseFinding(finding: Finding): string {
 function Findings({ plugin }: { plugin: PluginRecord }) {
   const findings = useStore((s) => s.pluginFindings[plugin.id]);
   const checkPlugin = useStore((s) => s.checkPlugin);
+  const reconnecting = useStore((s) => s.reconnecting);
 
   useEffect(() => {
-    checkPlugin(plugin.id);
-  }, [plugin.id]);
+    if (!reconnecting) checkPlugin(plugin.id);
+  }, [plugin.id, findings === undefined, reconnecting]);
 
   if (findings === undefined) return <span className="block text-[0.7rem] text-text-2">Reading its code…</span>;
   if (findings.length === 0) {

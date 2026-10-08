@@ -7,12 +7,12 @@ Application keys (how the API key is obtained): https://docs.octoprint.org/en/ma
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urljoin
 
 from ..adapters import multipart_form
-from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, require_reply, webcam_url
 
 _UPLOAD_TIMEOUT_S = 180.0
+_API_PORTS = (5000,)
 _STATUS_MAP = {
     "printing": DeviceStatus.PRINTING,
     "resuming": DeviceStatus.PRINTING,
@@ -58,12 +58,18 @@ class OctoPrintAdapter(IntegrationAdapter):
         The job endpoint answers whatever the printer is doing, while the
         printer endpoint answers 409 until it is connected, so the heaters are
         simply absent from a disconnected printer's state.
+
+        Raises:
+            PermissionError: If OctoPrint rejects the API key.
+            RuntimeError: If it answers with anything but its job.
         """
         base = config["base_url"].rstrip("/")
         headers = self._headers(config)
         status, body = await http("GET", f"{base}/api/job", headers=headers)
+        if status in (401, 403):
+            raise PermissionError(f"OctoPrint rejected the API key: HTTP {status}")
         if status != 200 or not isinstance(body, dict):
-            return DeviceState(DeviceStatus.OFFLINE)
+            raise RuntimeError(f"OctoPrint did not answer like its API: HTTP {status}")
         text = str(body.get("state", "")).lower()
         matched = next((s for key, s in _STATUS_MAP.items() if text.startswith(key)), DeviceStatus.UNKNOWN)
         progress = body.get("progress") or {}
@@ -82,7 +88,11 @@ class OctoPrintAdapter(IntegrationAdapter):
         )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:
-        """Issues pause/resume/cancel through /api/job."""
+        """Issues pause/resume/cancel through /api/job, which answers 204 with no body.
+
+        Raises:
+            RuntimeError: If OctoPrint rejects the command or answers with anything but 204.
+        """
         payload = (
             {"command": "cancel"}
             if action is DeviceAction.CANCEL
@@ -94,11 +104,14 @@ class OctoPrintAdapter(IntegrationAdapter):
             headers=self._headers(config),
             json=payload,
         )
-        if status >= 400:
-            raise RuntimeError(f"OctoPrint rejected {action.value}: HTTP {status}")
+        require_reply("OctoPrint", action.value, status, status == 204)
 
     async def heat(self, http: HttpFn, config: dict[str, Any], heater: str, target: float) -> None:
-        """Sets the first tool's or the bed's target through /api/printer/tool or /api/printer/bed."""
+        """Sets the first tool's or the bed's target through /api/printer/tool or /api/printer/bed, which answer 204.
+
+        Raises:
+            RuntimeError: If OctoPrint rejects the target or answers with anything but 204.
+        """
         path, payload = (
             ("tool", {"command": "target", "targets": {"tool0": target}})
             if heater == "nozzle"
@@ -110,29 +123,39 @@ class OctoPrintAdapter(IntegrationAdapter):
             headers=self._headers(config),
             json=payload,
         )
-        if status >= 400:
-            raise RuntimeError(f"OctoPrint rejected the {heater} target: HTTP {status}")
+        require_reply("OctoPrint", f"the {heater} target", status, status == 204)
 
     async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
-        """Uploads to local storage through /api/files/local, selected and printing."""
+        """Uploads to local storage through /api/files/local, selected and printing.
+
+        OctoPrint answers 201 with ``effectivePrint`` false when it kept the
+        file and did not start it, such as for a key without the print
+        permission. OctoPrint before 1.8.0 answers without it, and is taken
+        to have started the print it was asked for.
+
+        Raises:
+            RuntimeError: If OctoPrint refuses the file, does not answer with
+                its 201 upload reply, or does not start the print.
+        """
         headers, body = multipart_form({"select": "true", "print": "true"}, "file", filename, data, "application/octet-stream")
-        status, _ = await http(
+        status, stored = await http(
             "POST",
             f"{config['base_url'].rstrip('/')}/api/files/local",
             headers={**self._headers(config), **headers},
             data=body,
             timeout=_UPLOAD_TIMEOUT_S,
         )
-        if status >= 400:
-            raise RuntimeError(f"OctoPrint rejected {filename}: HTTP {status}")
+        require_reply("OctoPrint", filename, status, status == 201 and isinstance(stored, dict) and "done" in stored)
+        if stored.get("effectivePrint") is False:
+            raise RuntimeError(f"OctoPrint stored {filename} but did not start printing it")
 
     async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
         """Reads the configured webcam stream from /api/settings.
 
         OctoPrint 1.9 moved the stream URL into the bundled Classic Webcam
         plugin and deprecated ``webcam.streamUrl``, so the plugin location is
-        preferred and the legacy field is the fallback. The URL may be relative
-        to the OctoPrint host and is resolved against it.
+        preferred and the legacy field is the fallback. A relative URL is
+        resolved against the host's web port (see ``webcam_url``).
         """
         status, body = await http("GET", f"{config['base_url'].rstrip('/')}/api/settings", headers=self._headers(config))
         if status != 200 or not isinstance(body, dict):
@@ -140,4 +163,4 @@ class OctoPrintAdapter(IntegrationAdapter):
         stream = ((body.get("plugins") or {}).get("classicwebcam") or {}).get("stream") or (body.get("webcam") or {}).get("streamUrl")
         if not stream:
             return []
-        return [{"key": "webcam", "name": "OctoPrint webcam", "source": {"kind": "url", "url": urljoin(config["base_url"], stream)}}]
+        return [{"key": "webcam", "name": "OctoPrint webcam", "source": {"kind": "url", "url": webcam_url(config["base_url"], stream, _API_PORTS)}}]

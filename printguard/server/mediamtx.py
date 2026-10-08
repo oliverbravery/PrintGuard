@@ -6,21 +6,30 @@ API reference: https://bluenviron.github.io/mediamtx/
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
+import signal
+import socket
 import subprocess
-from typing import Any
+from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
 from ..engine.cameras import webrtc_endpoint, whep_endpoint
+from ..engine.reports import MESSAGE_STANDALONE_BELOW, scrub, scrub_url, url_secrets
 
 logger = logging.getLogger(__name__)
 
 READY_TIMEOUT_S = 10.0
 RESTART_DELAY_S = 2.0
 STOP_TIMEOUT_S = 5.0
+SIGNALLED_GRACE_S = 5.0
+"""How long a server that was ended by SIGINT or SIGTERM is given before it is
+treated as a failure: a Ctrl+C or a stop sent to the hub's process group reaches
+the server first, ahead of the hub saying it is stopping."""
+HUB_USER_ENV = "MTX_AUTHINTERNALUSERS_1"
 
 
 def pull_source(url: str) -> str | None:
@@ -36,21 +45,87 @@ def pull_source(url: str) -> str | None:
     return url
 
 
-class MediaMTX:
-    """Manages stream paths on a MediaMTX instance."""
+async def _on_this_machine(host: str) -> bool:
+    """Whether a host name or address belongs to the machine the hub runs on.
 
-    def __init__(self, api_base: str, rtsp_base: str, client: httpx.AsyncClient) -> None:
+    Args:
+        host: A name or an address from a URL.
+
+    Returns:
+        True when it resolves to an address a socket here can be bound to,
+        which only an address of one of this machine's own interfaces can be.
+    """
+    try:
+        resolved = await asyncio.get_running_loop().getaddrinfo(host, 0, type=socket.SOCK_DGRAM)
+    except OSError:
+        return False
+    for family, kind, protocol, _name, address in resolved:
+        with socket.socket(family, kind, protocol) as probe:
+            try:
+                probe.bind(address)
+            except OSError:
+                continue
+        return True
+    return False
+
+
+class MediaMTX:
+    """Manages stream paths on a MediaMTX instance.
+
+    A path added through the control API lives in the server's memory, so the
+    ones this hub added are remembered here and can be added again to a server
+    that restarted.
+    """
+
+    def __init__(
+        self, api_base: str, rtsp_base: str, client: httpx.AsyncClient, login: tuple[str, str] | None = None
+    ) -> None:
+        """Points the client at a MediaMTX.
+
+        Args:
+            api_base: Where its control API listens.
+            rtsp_base: Where its RTSP listener is.
+            client: The HTTP client the API calls go through.
+            login: The user and password its control API and readers ask for.
+                The bundled server only answers the one this hub started it with.
+        """
         self._api = api_base.rstrip("/")
-        self._rtsp = rtsp_base.rstrip("/")
+        rtsp = urlsplit(rtsp_base)
+        host = rtsp.netloc.rpartition("@")[2]
+        self._rtsp = urlunsplit(rtsp._replace(netloc=f"{':'.join(login)}@{host}" if login else rtsp.netloc)).rstrip("/")
         self._client = client
+        self._login = login
+        self._pulled: dict[str, dict[str, Any]] = {}
 
     def rtsp_url(self, path: str) -> str:
-        """Internal RTSP URL the server reads frames from."""
+        """Internal RTSP URL the server reads frames from, with the login a bundled server asks readers for."""
         return f"{self._rtsp}/{path}"
+
+    async def own_path(self, url: str) -> str | None:
+        """Names the path a URL reads from this server's own RTSP listener.
+
+        A stream pushed to the hub can be added by the address it was pushed
+        to. Pulled as any other address it would be this server asking itself
+        with no login, which a bundled server refuses.
+
+        Args:
+            url: A camera's address.
+
+        Returns:
+            The path, or None when the address is not this server's listener
+            on the machine the hub runs on.
+        """
+        asked, own = urlsplit(url), urlsplit(self._rtsp)
+        path = asked.path.strip("/")
+        if asked.scheme != "rtsp" or not asked.hostname or not path or (asked.port or 554) != (own.port or 554):
+            return None
+        if not (await _on_this_machine(asked.hostname) and await _on_this_machine(own.hostname)):
+            return None
+        return path
 
     async def list_paths(self) -> list[str]:
         """Names of currently active stream paths."""
-        resp = await self._client.get(f"{self._api}/v3/paths/list", timeout=5.0)
+        resp = await self._client.get(f"{self._api}/v3/paths/list", auth=self._login, timeout=5.0)
         resp.raise_for_status()
         return [item["name"] for item in resp.json().get("items", [])]
 
@@ -59,6 +134,9 @@ class MediaMTX:
 
         A fingerprint is the SHA-256 of a self-signed source certificate (hex,
         no colons), letting MediaMTX validate an otherwise-untrusted RTSPS feed.
+
+        Raises:
+            ValueError: If MediaMTX refuses the source.
         """
         payload: dict[str, Any] = {
             "source": source_url,
@@ -68,14 +146,64 @@ class MediaMTX:
         }
         if fingerprint:
             payload["sourceFingerprint"] = fingerprint
-        resp = await self._client.post(f"{self._api}/v3/config/paths/add/{name}", json=payload, timeout=5.0)
+        await self._add_path(name, payload)
+        self._pulled[name] = payload
+
+    async def _add_path(self, name: str, payload: dict[str, Any]) -> None:
+        """Adds a path, or updates it when the server already has one by that name.
+
+        Args:
+            name: The path name.
+            payload: The path's config.
+
+        Raises:
+            ValueError: If the server refuses the config, such as a source it
+                cannot read. The message carries its reason without credentials.
+        """
+        resp = await self._client.post(
+            f"{self._api}/v3/config/paths/add/{name}", json=payload, auth=self._login, timeout=5.0
+        )
         if resp.status_code == 400:
-            resp = await self._client.patch(f"{self._api}/v3/config/paths/patch/{name}", json=payload, timeout=5.0)
+            reason = resp.json().get("error", "")
+            if "already exists" not in reason:
+                source = payload["source"]
+                reason = reason.replace(source, scrub_url(source))
+                reason = scrub(reason, url_secrets(source), standalone_below=MESSAGE_STANDALONE_BELOW)
+                raise ValueError(f"PrintGuard can't use that address: {reason}")
+            resp = await self._client.patch(
+                f"{self._api}/v3/config/paths/patch/{name}", json=payload, auth=self._login, timeout=5.0
+            )
         resp.raise_for_status()
 
     async def remove_path(self, name: str) -> None:
-        """Deletes a managed path, ignoring paths that no longer exist."""
-        await self._client.delete(f"{self._api}/v3/config/paths/delete/{name}", timeout=5.0)
+        """Deletes a path this hub added, and does nothing for any other name.
+
+        The server logs an error for a path it does not have, and a camera it
+        reads directly never had one.
+        """
+        if self._pulled.pop(name, None) is None:
+            return
+        await self._client.delete(f"{self._api}/v3/config/paths/delete/{name}", auth=self._login, timeout=5.0)
+
+    async def restore_paths(self) -> None:
+        """Adds every pull path again, for a server that restarted and forgot them.
+
+        A camera that is being watched finds its way back by reconnecting, but
+        one asleep until its printer starts is only asked for by a viewer, and
+        the server would answer that it has no such path.
+
+        Raises:
+            RuntimeError: If any path could not be added, naming each one and
+                why, after every other path has been tried.
+        """
+        failed: list[str] = []
+        for name, payload in list(self._pulled.items()):
+            try:
+                await self._add_path(name, payload)
+            except Exception as exc:
+                failed.append(f"{name} ({exc})")
+        if failed:
+            raise RuntimeError(", ".join(failed))
 
 
 class EmbeddedMediaMTX:
@@ -88,16 +216,53 @@ class EmbeddedMediaMTX:
     the hub uses that and this never runs. A server that exits is restarted and
     the failure logged, because dropped streams must never pass silently, and
     its lifetime is tied to the hub's so no exit can leave it holding the
-    streaming ports.
+    streaming ports. One that cannot stay up, as when another program holds its
+    ports, is logged on its first failure in a row and then on the second,
+    fourth, eighth and so on, since a line every restart would push everything
+    else out of the log tail a bug report attaches.
+
+    The control API can read every camera's source URL and add a path that runs
+    a command, and on the desktop app it listens on the computer's own loopback,
+    where any web page in a browser can reach it, as can the HLS muxer a page
+    could read a feed from. The shipped config grants the API and reading to
+    nobody, so the one login that can use them is handed to the server in its
+    environment and never written to disk. Publishing stays open, since cameras
+    push to the hub.
     """
 
-    def __init__(self, binary: str, config: str, api_base: str) -> None:
+    def __init__(
+        self,
+        binary: str,
+        config: str,
+        api_base: str,
+        api_login: tuple[str, str],
+        restarted: Callable[[], Awaitable[None]],
+    ) -> None:
+        """Prepares the server without starting it.
+
+        Args:
+            binary: The MediaMTX executable.
+            config: The config file it starts with.
+            api_base: Where its control API will listen.
+            api_login: The user and password to grant the control API and reading to.
+            restarted: Awaited each time a server started in place of one that
+                exited is accepting connections.
+        """
         self._binary = binary
         self._config = config
         self._api = urlsplit(api_base)
+        user, password = api_login
+        self._env = {
+            **os.environ,
+            f"{HUB_USER_ENV}_USER": user,
+            f"{HUB_USER_ENV}_PASS": password,
+            f"{HUB_USER_ENV}_PERMISSIONS_0_ACTION": "api",
+            f"{HUB_USER_ENV}_PERMISSIONS_1_ACTION": "read",
+        }
+        self._restarted = restarted
         self._process: asyncio.subprocess.Process | None = None
         self._supervisor: asyncio.Task[None] | None = None
-        self._stopping = False
+        self._stop_requested = asyncio.Event()
         self._watcher: subprocess.Popen[bytes] | None = None
         self._watch_fd = -1
         self._job: Any = None
@@ -105,29 +270,69 @@ class EmbeddedMediaMTX:
     async def start(self) -> None:
         """Launches the server and waits until its control API accepts connections."""
         self._supervisor = asyncio.ensure_future(self._run())
+        await self._ready()
+
+    async def _ready(self) -> bool:
+        """Waits for the control API to accept connections, reporting whether it did in time."""
         loop = asyncio.get_running_loop()
         deadline = loop.time() + READY_TIMEOUT_S
         while loop.time() < deadline:
             if await self._listening():
-                return
+                return True
             await asyncio.sleep(0.2)
         logger.error("MediaMTX did not accept connections within %ss", READY_TIMEOUT_S)
+        return False
+
+    async def _restore(self) -> None:
+        try:
+            if await self._ready():
+                await self._restarted()
+        except Exception as exc:
+            logger.error("MediaMTX restarted and its camera paths could not be added again: %s", exc)
 
     async def _run(self) -> None:
-        while not self._stopping:
+        replacement = False
+        failures = 0
+        loop = asyncio.get_running_loop()
+        while not self._stop_requested.is_set():
+            launched = loop.time()
             try:
-                self._process = await asyncio.create_subprocess_exec(self._binary, self._config)
+                self._process = await asyncio.create_subprocess_exec(
+                    self._binary,
+                    self._config,
+                    env=self._env,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
             except OSError as exc:
-                logger.error("MediaMTX failed to launch (%s); retrying", exc)
+                failures += 1
+                if failures & (failures - 1) == 0:
+                    logger.error("MediaMTX failed to launch (%s); retrying", exc)
                 await asyncio.sleep(RESTART_DELAY_S)
                 continue
-            self._bind_lifetime(self._process.pid)
-            code = await self._process.wait()
-            self._release_lifetime()
-            if self._stopping:
+            if self._stop_requested.is_set():
+                await self._terminate()
                 return
-            logger.error("MediaMTX exited (code %s); restarting", code)
+            try:
+                self._bind_lifetime(self._process.pid)
+            except Exception as exc:
+                logger.error("MediaMTX could not be tied to the hub's lifetime (%s), so it would outlive a hub that is killed", exc)
+            restoring = asyncio.ensure_future(self._restore()) if replacement else None
+            try:
+                code = await self._process.wait()
+            finally:
+                if restoring is not None:
+                    restoring.cancel()
+            self._release_lifetime()
+            if code in (-signal.SIGINT, -signal.SIGTERM):
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(self._stop_requested.wait(), SIGNALLED_GRACE_S)
+            if self._stop_requested.is_set():
+                return
+            failures = failures + 1 if loop.time() - launched < READY_TIMEOUT_S else 1
+            if failures & (failures - 1) == 0:
+                logger.error("MediaMTX exited (code %s); restarting", code)
             await asyncio.sleep(RESTART_DELAY_S)
+            replacement = True
 
     def _bind_lifetime(self, pid: int) -> None:
         """Makes the server die with this hub, however this hub exits.
@@ -176,12 +381,16 @@ class EmbeddedMediaMTX:
 
     async def stop(self) -> None:
         """Stops supervising and terminates the server."""
-        self._stopping = True
-        if self._process is not None and self._process.returncode is None:
-            self._process.terminate()
-            try:
-                await asyncio.wait_for(self._process.wait(), STOP_TIMEOUT_S)
-            except asyncio.TimeoutError:
-                self._process.kill()
+        self._stop_requested.set()
+        await self._terminate()
         if self._supervisor is not None:
             await self._supervisor
+
+    async def _terminate(self) -> None:
+        if self._process is None or self._process.returncode is not None:
+            return
+        self._process.terminate()
+        try:
+            await asyncio.wait_for(self._process.wait(), STOP_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            self._process.kill()

@@ -16,7 +16,7 @@ export interface PluginTarget {
 export interface HostHandlers {
   onView(id: string, tree: PluginNode | null, targets: Record<string, PluginNode | null>): void;
   onEffects(id: string, effects: PluginEffect[]): void;
-  onStore(id: string, store: Record<string, unknown>): void;
+  onStore(id: string, changes: StoreChanges): void;
   onFailure(id: string, reason: string): void;
 }
 
@@ -43,6 +43,7 @@ export function projectEvent(
   const fields = events[name];
   const needed = eventPermissions[name];
   if (!fields || (needed !== undefined && !granted.includes(needed))) return null;
+  if (name === "error" && event.req_id != null) return null;
   if (name === "state") return { event: name, ...projectState(event as unknown as EngineState, granted, permissions) };
   return { event: name, ...Object.fromEntries(fields.filter((field) => field in event).map((field) => [field, event[field]])) };
 }
@@ -73,6 +74,8 @@ export function outboundSocket(id: string, action: string, request: Record<strin
   };
 }
 
+export const LINK_ACTIONS = ["call", "answer", "publish"];
+
 export function outboundLink(id: string, action: string, request: Record<string, unknown> | undefined): Record<string, unknown> {
   const fields = request ?? {};
   return {
@@ -86,13 +89,16 @@ export function outboundLink(id: string, action: string, request: Record<string,
   };
 }
 
+export const repositoryFiles = (source: { repo: string; ref: string }) =>
+  `https://raw.githubusercontent.com/${source.repo}/${source.ref}/`;
+
 export function pluginFile(
   source: { repo?: string; path?: string; ref?: string },
   file: string | undefined,
 ): string | null {
   if (!source.repo || !source.ref || !file) return null;
   const prefix = source.path ? `${source.path}/` : "";
-  return `https://raw.githubusercontent.com/${source.repo}/${source.ref}/${prefix}${file}`;
+  return `${repositoryFiles({ repo: source.repo, ref: source.ref })}${prefix}${file}`;
 }
 
 export function runsHere(platforms: string[] | undefined, host: string): boolean {
@@ -104,59 +110,80 @@ export function commandAllowed(command: string, granted: string[], permissions: 
   return owner !== undefined && granted.includes(owner.id);
 }
 
+export function sandboxFrame(
+  url: string,
+  title: string,
+  receive: (data: any) => void,
+  fail: (reason: string) => void,
+): { frame: HTMLIFrameElement; port: MessagePort; started: Promise<void> } {
+  const frame = document.createElement("iframe");
+  const { port1, port2 } = new MessageChannel();
+  frame.src = url;
+  frame.sandbox.add("allow-scripts");
+  frame.allow = "";
+  frame.title = title;
+  port1.onmessage = (message) => receive(message.data);
+  const started = new Promise<void>((resolve) => {
+    const timer = window.setTimeout(() => fail("sandbox did not start"), BOOT_TIMEOUT_MS);
+    let loaded = false;
+    frame.addEventListener("load", () => {
+      if (loaded) return fail("sandbox navigated away");
+      loaded = true;
+      clearTimeout(timer);
+      frame.contentWindow?.postMessage({ t: "port" }, "*", [port2]);
+      resolve();
+    });
+  });
+  return { frame, port: port1, started };
+}
+
+export interface StoreChanges {
+  written: Record<string, unknown>;
+  removed: string[];
+}
+
+export function storeChanges(before: Record<string, unknown>, after: Record<string, unknown>): StoreChanges {
+  return {
+    written: Object.fromEntries(Object.entries(after).filter(([key, value]) => JSON.stringify(before[key]) !== JSON.stringify(value))),
+    removed: Object.keys(before).filter((key) => !(key in after)),
+  };
+}
+
 export class PluginHost {
   readonly id: string;
+  private store: Record<string, unknown>;
+  private lastUpdate = "";
   private frame: HTMLIFrameElement;
+  private port: MessagePort;
   private pending = new Map<number, { resolve: (value: any) => void; reject: (reason: Error) => void; timer: number }>();
   private booted: Promise<void>;
   private dead = false;
 
   constructor(
-    private record: PluginRecord,
-    private code: string,
-    private assets: Record<string, string>,
+    record: PluginRecord,
+    code: string,
+    assets: Record<string, string>,
     private handlers: HostHandlers,
   ) {
     this.id = record.id;
-    this.frame = document.createElement("iframe");
-    this.frame.src = SANDBOX_URL;
-    this.frame.sandbox.add("allow-scripts");
-    this.frame.allow = "";
-    this.frame.title = `${record.manifest.name} sandbox`;
+    this.store = record.config;
+    const sandbox = sandboxFrame(SANDBOX_URL, `${record.manifest.name} sandbox`, this.receive, (reason) => this.fail(reason));
+    this.frame = sandbox.frame;
+    this.port = sandbox.port;
     this.frame.hidden = true;
     this.frame.style.display = "none";
-    addEventListener("message", this.receive);
     document.body.appendChild(this.frame);
-    this.booted = this.boot();
+    this.booted = sandbox.started.then(() => this.send({ t: "init", code, store: record.config, assets }));
+    this.booted.catch((err: Error) => this.fail(err.message));
   }
 
-  private boot(): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const timer = window.setTimeout(() => reject(new Error("sandbox did not start")), BOOT_TIMEOUT_MS);
-      const onBooted = (message: MessageEvent) => {
-        if (message.source !== this.frame.contentWindow || message.data?.t !== "booted") return;
-        removeEventListener("message", onBooted);
-        clearTimeout(timer);
-        this.send({ t: "init", code: this.code, store: this.record.config, assets: this.assets })
-          .then(() => resolve())
-          .catch(reject);
-      };
-      addEventListener("message", onBooted);
-    }).catch((err: Error) => {
-      this.fail(err.message);
-      throw err;
-    });
-  }
-
-  private receive = (message: MessageEvent) => {
-    if (message.source !== this.frame.contentWindow) return;
-    const { id, t } = message.data ?? {};
-    const call = this.pending.get(id);
+  private receive = (data: any) => {
+    const call = this.pending.get(data?.id);
     if (!call) return;
-    this.pending.delete(id);
+    this.pending.delete(data.id);
     clearTimeout(call.timer);
-    if (t === "failed") call.reject(new Error(String(message.data.message)));
-    else call.resolve(message.data);
+    if (data.t === "failed") call.reject(new Error(String(data.message)));
+    else call.resolve(data);
   };
 
   private send(payload: Record<string, unknown>): Promise<any> {
@@ -167,7 +194,7 @@ export class PluginHost {
         reject(new Error("plugin stopped answering"));
       }, CALL_TIMEOUT_MS);
       this.pending.set(id, { resolve, reject, timer });
-      this.frame.contentWindow?.postMessage({ ...payload, id }, "*");
+      this.port.postMessage({ ...payload, id });
     });
   }
 
@@ -182,14 +209,20 @@ export class PluginHost {
         );
         this.handlers.onView(this.id, normalise(result.tree), targets);
       }
-      this.handlers.onStore(this.id, result.store ?? {});
+      const held = (payload.store as Record<string, unknown> | undefined) ?? this.store;
+      this.store = result.store ?? {};
+      this.handlers.onStore(this.id, storeChanges(held, this.store));
       this.handlers.onEffects(this.id, (result.effects ?? []).slice(0, MAX_EFFECTS));
     } catch (err) {
       this.fail(err instanceof Error ? err.message : String(err));
     }
   }
 
-  update(state: Record<string, unknown>, targets: PluginTarget[], store?: Record<string, unknown>): Promise<void> {
+  update(state: Record<string, unknown>, targets: PluginTarget[], saved?: Record<string, unknown>): Promise<void> {
+    const store = saved && JSON.stringify(saved) !== JSON.stringify(this.store) ? saved : undefined;
+    const update = JSON.stringify({ state, targets, store });
+    if (update === this.lastUpdate) return Promise.resolve();
+    this.lastUpdate = update;
     return this.call({ t: "state", state, targets, store });
   }
 
@@ -210,7 +243,7 @@ export class PluginHost {
 
   close(): void {
     this.dead = true;
-    removeEventListener("message", this.receive);
+    this.port.close();
     this.frame.remove();
     for (const call of this.pending.values()) clearTimeout(call.timer);
     this.pending.clear();
@@ -221,7 +254,7 @@ const CONTAINERS = ["row", "col"];
 const LEAVES = ["text", "chip", "camera", "image", "float", "button", "select", "input", "toggle"];
 const MAX_NODES = 400;
 
-export function normalise(raw: unknown, budget = { left: MAX_NODES }): PluginNode | null {
+function normalise(raw: unknown, budget = { left: MAX_NODES }): PluginNode | null {
   if (!raw || typeof raw !== "object" || budget.left-- <= 0) return null;
   const node = raw as Record<string, unknown>;
   const type = String(node.type ?? "");

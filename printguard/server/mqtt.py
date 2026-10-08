@@ -22,14 +22,18 @@ Discovery format: https://www.home-assistant.io/integrations/mqtt/#device-discov
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
-import os
+import secrets
 import ssl
+from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Callable
 
 import aiomqtt
 
+from ..engine import logs
+from ..engine.credentials import port_in_effect
 from ..engine.integrations import HEATERS
 from .events import ConflatedEventQueue
 
@@ -39,12 +43,18 @@ if TYPE_CHECKING:
     from ..engine.engine import Engine
 
 RECONNECT_DELAY_S = 5.0
+COMMANDS_IN_FLIGHT = 8
+GOODBYE_TIMEOUT_S = 2.0
 KEEPALIVE_S = 30
 STATE_DEADBAND = 5.0
+BRIDGED_EVENTS = ("state", "result", "alert")
+"""The engine events the bridge acts on. Nothing else is queued, so a plugin
+socket's frames or a run of warnings cannot fill a queue a slow broker is draining."""
 CONTINUOUS_FIELDS = ("score", "progress", "nozzle_temp", "bed_temp")
 MANUFACTURER = "PrintGuard"
 MODEL = "Print monitor"
 SUPPORT_URL = "https://github.com/oliverbravery/PrintGuard"
+ENABLED_PAYLOADS = {"on": True, "true": True, "1": True, "off": False, "false": False, "0": False}
 
 
 def bridge_enabled(config: dict[str, Any]) -> bool:
@@ -260,8 +270,8 @@ def route_command(topic: str, payload: str, monitors: list[dict[str, Any]]) -> d
     if monitor is None:
         return None
     value = payload.strip().lower()
-    if field == "enabled":
-        return {"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": value in ("on", "true", "1")}}
+    if field == "enabled" and value in ENABLED_PAYLOADS:
+        return {"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": ENABLED_PAYLOADS[value]}}
     if field == "printer_action" and value in ("pause", "resume", "cancel") and monitor.get("printer_id"):
         return {"cmd": "printer.action", "id": monitor["printer_id"], "action": value}
     return None
@@ -291,7 +301,24 @@ class MqttBridge:
     The bridge subscribes to engine events as a transport sink, draining them
     through a queue so the synchronous sink never blocks the engine, and keeps
     one ``aiomqtt`` session alive while the bridge is enabled, reconnecting on
-    failure and on a settings change.
+    failure and on a settings change. An outage raises one warning when it
+    starts or its cause changes and one when the broker is back, because a
+    warning per attempt would push every alert out of the engine's recent events.
+
+    The broker only publishes the last will when a connection drops, so a
+    session the bridge ends itself says ``offline`` first. The client id is
+    random per bridge because a broker gives a session to the newest client
+    using an id, and a process id is 1 in every container.
+
+    Everything a monitor is announced by is retained, so the broker keeps it
+    until it is cleared. The monitors announced are remembered from one session
+    to the next for that, since one can be removed while the broker is away.
+
+    Home Assistant keeps a component a newer config merely leaves out, such as
+    the printer's buttons once the printer is unlinked. It drops one only when
+    told to by a config naming it with nothing but its platform, so that goes
+    out once ahead of the config without it. The components announced are
+    remembered between sessions as the monitors are.
     """
 
     def __init__(self, engine: "Engine", get_config: Callable[[], dict[str, Any]]) -> None:
@@ -300,68 +327,86 @@ class MqttBridge:
         self._queue = ConflatedEventQueue()
         self._reported: dict[str, dict[str, Any]] = {}
         self._published: dict[str, str] = {}
-        self._devices: set[str] = set()
+        self._announced: dict[str, dict[str, str]] = {}
         self._state: dict[str, Any] = {}
         self._task: asyncio.Task | None = None
+        self._client_id = f"printguard-{secrets.token_hex(4)}"
+        self._outage: str | None = None
 
     def start(self) -> None:
         """Launches the connection loop, which idles until the bridge is configured."""
         self._task = asyncio.ensure_future(self._run())
 
     async def stop(self) -> None:
-        """Cancels the connection loop and any in-flight session."""
+        """Cancels the connection loop, marking the hub offline on the way out of a live session."""
         if self._task:
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)
 
     def _sink(self, event: dict[str, Any]) -> None:
-        self._queue.put(event)
+        if event.get("event") in BRIDGED_EVENTS:
+            self._queue.put(event)
 
     async def _run(self) -> None:
         while True:
             config = self._get_config()
             if not bridge_enabled(config):
+                self._outage = None
                 await asyncio.sleep(RECONNECT_DELAY_S)
                 continue
             try:
                 await self._session(config)
             except _Reconnect:
                 continue
-            except aiomqtt.MqttError as exc:
-                self._engine.emit({"event": "warning", "message": f"Home Assistant MQTT unavailable: {exc}", "recovered": False})
+            except Exception as exc:
+                outage = f"Home Assistant MQTT unavailable: {exc}"
+                if outage != self._outage:
+                    self._outage = outage
+                    self._engine.emit({"event": "warning", "message": outage, "recovered": False})
                 await asyncio.sleep(RECONNECT_DELAY_S)
 
     async def _session(self, config: dict[str, Any]) -> None:
         base = base_topic(config)
         prefix = discovery_prefix(config)
+        for name, topic in (("base_topic", base), ("discovery_prefix", prefix)):
+            if "+" in topic or "#" in topic:
+                raise ValueError(f"MQTT {name} cannot contain + or #")
         signature = _signature(config)
         tls_context = ssl.create_default_context() if config.get("tls") else None
         async with aiomqtt.Client(
             hostname=str(config["host"]).strip(),
-            port=int(config.get("port") or (8883 if config.get("tls") else 1883)),
+            port=port_in_effect(config),
             username=str(config.get("username") or "") or None,
             password=str(config.get("password") or "") or None,
-            identifier=f"printguard-{os.getpid()}",
+            identifier=self._client_id,
             tls_context=tls_context,
             will=aiomqtt.Will(status_topic(base), "offline", qos=1, retain=True),
             keepalive=KEEPALIVE_S,
         ) as client:
             self._published.clear()
             self._reported.clear()
-            self._devices.clear()
             self._state = {}
+            self._queue = ConflatedEventQueue()
             logger.info("Home Assistant MQTT bridge connected to %s", config["host"])
             await client.publish(status_topic(base), "online", qos=1, retain=True)
             await client.subscribe(f"{base}/monitor/+/+/set", qos=1)
+            if self._outage is not None:
+                self._outage = None
+                self._engine.emit({"event": "warning", "message": "Home Assistant MQTT reconnected", "recovered": True})
             self._engine.add_sink(self._sink)
             tasks = [
                 asyncio.ensure_future(self._publish_loop(client, base, prefix, signature)),
                 asyncio.ensure_future(self._command_loop(client, base)),
+                asyncio.ensure_future(self._queue.overflow()),
             ]
             try:
                 done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
                 for task in done:
                     task.result()
+            except (_Reconnect, asyncio.CancelledError):
+                with contextlib.suppress(aiomqtt.MqttError):
+                    await client.publish(status_topic(base), "offline", qos=1, retain=True, timeout=GOODBYE_TIMEOUT_S)
+                raise
             finally:
                 self._engine.remove_sink(self._sink)
                 for task in tasks:
@@ -376,14 +421,41 @@ class MqttBridge:
             await self._handle(client, event, base, prefix)
 
     async def _command_loop(self, client: aiomqtt.Client, base: str) -> None:
-        async for message in client.messages:
-            command = route_command(str(message.topic), bytes(message.payload).decode("utf-8", "ignore"), self._state.get("monitors", []))
-            if command is None:
-                continue
-            try:
+        """Runs Home Assistant's commands side by side, in order for any one monitor or printer.
+
+        One command waiting on a slow printer must not hold up a button pressed
+        for another, so up to COMMANDS_IN_FLIGHT run at once. A burst for one
+        target still runs in the order it arrived, so pause then resume cannot
+        be reversed. A retained message is dropped: the broker replays it on
+        every connect, so a retained cancel would end a print at each restart.
+
+        Raises:
+            aiomqtt.MqttError: If the broker drops the session, as itself and not
+                in the group the task group wraps it in, so the warning gives the reason.
+        """
+        slots = asyncio.Semaphore(COMMANDS_IN_FLIGHT)
+        targets: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        try:
+            async with asyncio.TaskGroup() as running:
+                async for message in client.messages:
+                    if message.retain:
+                        continue
+                    command = route_command(str(message.topic), bytes(message.payload).decode("utf-8", "ignore"), self._state.get("monitors", []))
+                    if command is None:
+                        continue
+                    await slots.acquire()
+                    running.create_task(self._run_command(command, slots, targets[command["id"]]))
+        except ExceptionGroup as dropped:
+            raise dropped.exceptions[0] from None
+
+    async def _run_command(self, command: dict[str, Any], slots: asyncio.Semaphore, target: asyncio.Lock) -> None:
+        try:
+            async with target:
                 await self._engine.request(command)
-            except Exception as exc:
-                self._engine.emit({"event": "error", "message": f"Home Assistant command failed: {exc}"})
+        except Exception as exc:
+            self._engine.emit({"event": "error", "message": f"Home Assistant command failed: {logs.describe(exc)}"})
+        finally:
+            slots.release()
 
     async def _handle(self, client: aiomqtt.Client, event: dict[str, Any], base: str, prefix: str) -> None:
         kind = event.get("event")
@@ -401,18 +473,25 @@ class MqttBridge:
         self._state = state
         version = state.get("version", "")
         printers = {p["id"]: p for p in state.get("printers", [])}
-        desired = set()
+        desired: dict[str, dict[str, str]] = {}
         for monitor in state.get("monitors", []):
             monitor_id = monitor["id"]
-            desired.add(monitor_id)
             printer = printers.get(monitor.get("printer_id") or "")
-            await self._publish(client, device_config_topic(prefix, monitor_id), json.dumps(discovery_config(monitor, printer, version, base)))
+            config = discovery_config(monitor, printer, version, base)
+            topic = device_config_topic(prefix, monitor_id)
+            desired[monitor_id] = {key: component["p"] for key, component in config["components"].items()}
+            removed = {key: {"p": platform} for key, platform in self._announced.get(monitor_id, {}).items() if key not in desired[monitor_id]}
+            if removed:
+                await client.publish(topic, json.dumps({**config, "components": config["components"] | removed}), qos=1, retain=True)
+            await self._publish(client, topic, json.dumps(config))
+            self._announced[monitor_id] = desired[monitor_id]
             await self._publish_state(client, monitor_id, base)
-        for monitor_id in self._devices - desired:
-            await client.publish(device_config_topic(prefix, monitor_id), "", qos=1, retain=True)
+        for monitor_id in self._announced.keys() - desired.keys():
+            for topic in (device_config_topic(prefix, monitor_id), state_topic(base, monitor_id), snapshot_topic(base, monitor_id)):
+                await client.publish(topic, "", qos=1, retain=True)
             self._published.pop(device_config_topic(prefix, monitor_id), None)
             self._reported.pop(monitor_id, None)
-        self._devices = desired
+        self._announced = desired
 
     async def _publish_state(self, client: aiomqtt.Client, monitor_id: str, base: str) -> None:
         monitor = next((m for m in self._state.get("monitors", []) if m["id"] == monitor_id), None)

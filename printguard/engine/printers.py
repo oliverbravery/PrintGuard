@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from .bounds import HEATER_MAX, clamp
 from .integrations import HEATERS, INTEGRATIONS
 
-HEATER_MAX = {"nozzle": 350.0, "bed": 150.0}
 PRESET_NAME_MAX = 20
 PRESETS_MAX = 12
 PREHEAT_DEFAULTS: list[dict[str, Any]] = [
@@ -30,10 +30,13 @@ def sanitise_printer(printer_id: str, patch: dict[str, Any], base: dict[str, Any
         base: Existing record when updating, else None.
 
     Returns:
-        A complete, validated printer record: id, name, provider and config.
+        A complete, validated printer record: id, name, provider and config,
+        which keeps only the fields the provider's schema declares so a field
+        another service marks secret cannot linger in it unhidden.
 
     Raises:
-        ValueError: If the provider is missing or not a known integration.
+        ValueError: If the provider is missing or not a known integration, or
+            the config is not a set of named settings.
     """
     record = {**(base or {}), **patch, "id": printer_id}
     provider = record.get("provider")
@@ -41,24 +44,44 @@ def sanitise_printer(printer_id: str, patch: dict[str, Any], base: dict[str, Any
         raise ValueError(f"unknown printer provider {provider!r}")
     record["provider"] = provider
     record["name"] = (str(record.get("name") or "").strip()) or INTEGRATIONS[provider].label
-    record["config"] = dict(record.get("config") or {})
+    record["config"] = INTEGRATIONS[provider].declared(connection_settings(record.get("config") or {}))
     return record
 
 
-def _target(heater: str, value: Any) -> float:
-    return max(0.0, min(HEATER_MAX[heater], float(value)))
+def connection_settings(raw: Any) -> dict[str, Any]:
+    """Takes a printer's config as a command sent it.
+
+    Raises:
+        ValueError: If it is not a set of named settings.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("a printer's config holds its connection settings")
+    return raw
 
 
-def sanitise_targets(fields: dict[str, Any]) -> dict[str, float]:
-    """The heater targets a command names, clamped to what a hotend or bed can take.
+def _target(heater: str, value: Any, strict: bool = False) -> float:
+    degrees = clamp(f"{heater} temperature", value, 0.0, HEATER_MAX[heater])
+    if strict and degrees != value:
+        raise ValueError(f"{heater} temperature must be a number from 0 to {HEATER_MAX[heater]:g}")
+    return degrees
+
+
+def sanitise_targets(fields: dict[str, Any], strict: bool = False) -> dict[str, float]:
+    """The heater targets a command names.
 
     Args:
         fields: A mapping that may carry a value under each of ``HEATERS``.
+        strict: Whether to refuse a target outside what a hotend or bed can
+            take, or one that is not a number, instead of clamping it.
 
     Returns:
         Heater name to target in degrees Celsius, for the heaters named.
+
+    Raises:
+        ValueError: If a target is not a finite number, or strict and it is
+            out of range.
     """
-    return {heater: _target(heater, fields[heater]) for heater in HEATERS if fields.get(heater) is not None}
+    return {heater: _target(heater, fields[heater], strict) for heater in HEATERS if fields.get(heater) is not None}
 
 
 def sanitise_presets(raw: Any) -> list[dict[str, Any]]:
@@ -69,9 +92,15 @@ def sanitise_presets(raw: Any) -> list[dict[str, Any]]:
 
     Returns:
         The presets that carry a name, capped at ``PRESETS_MAX``.
+
+    Raises:
+        ValueError: If the presets are not a list of presets, or a target is
+            not a finite number.
     """
+    if not isinstance(raw, list) or not all(isinstance(preset, dict) for preset in raw):
+        raise ValueError("preheat is a list of presets, each with a name and a nozzle and bed target")
     presets = []
-    for preset in raw if isinstance(raw, list) else []:
+    for preset in raw:
         name = " ".join(str(preset.get("name") or "").split())[:PRESET_NAME_MAX]
         if name:
             presets.append({"name": name, **{heater: _target(heater, preset.get(heater) or 0) for heater in HEATERS}})

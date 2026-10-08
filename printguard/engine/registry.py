@@ -9,7 +9,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Generic, Protocol, TypeVar
 
+from . import credentials
 from .cameras import CAMERA_DEFAULTS
+from .integrations import INTEGRATIONS
 from .monitors import monitor_watching
 from .platform import FrameSource
 
@@ -64,22 +66,28 @@ class Camera:
         printer_id: Owning printer when the camera was exposed by a printer
             integration, else None. Such cameras are managed by their printer:
             they cannot be removed on their own and are dropped with it.
-        declared: Whether the deployment declared this device rather than a user
+        declared: Whether the deployment declares this device rather than a user
             registering it, as the Docker image does for every camera passed
-            into the container. Such cameras are managed by the deployment: they
-            cannot be removed on their own and go when it stops declaring them.
+            into the container. Such cameras are managed by the deployment and
+            cannot be removed on their own. One whose device is missing at boot
+            stops being declared until the device is back, so it can be removed.
         max_fps: Native frame rate measured when the camera was registered.
+        detect_fps: Most inferences a second the user wants spent on this
+            camera, to hold down the load on a shared host.
         target_fps: Inference rate currently allocated by the scheduler.
         achieved_fps: Smoothed rate of completed inferences.
         inferring: Whether an inference on this camera is in flight.
         in_use: Whether an enabled monitor is bound to this camera.
         online: Whether the frame source is currently delivering frames.
+        reason: Why the last attempt to open the source failed, or None while
+            it has not or the camera is open. Not persisted.
     """
 
     id: str
     name: str
     source: dict[str, Any]
     max_fps: float
+    detect_fps: float = CAMERA_DEFAULTS["detect_fps"]
     printer_id: str | None = None
     declared: bool = False
     brightness: float = CAMERA_DEFAULTS["brightness"]
@@ -95,7 +103,13 @@ class Camera:
     next_due: float = 0.0
     last_done: float = 0.0
     last_result: dict[str, Any] | None = None
+    reason: str | None = None
     frame_source: FrameSource | None = field(default=None, repr=False)
+
+    @property
+    def effective_fps(self) -> float:
+        """The most inferences a second worth allocating: the native rate, held to the user's cap."""
+        return min(self.max_fps, self.detect_fps)
 
     @property
     def online(self) -> bool:
@@ -117,20 +131,26 @@ class Camera:
         self.last_result = result
 
     def public(self) -> dict[str, Any]:
-        """Serialises the camera with live stats for the state event."""
+        """Serialises the camera with live stats for the state event, its source without credentials.
+
+        The allocated and achieved rates read 0 while the camera is offline,
+        since the last ones measured are not being achieved.
+        """
         return {
             "id": self.id,
             "name": self.name,
-            "source": self.source,
+            "source": credentials.public_config(self.source, credentials.SOURCE_SECRETS),
             "printer_id": self.printer_id,
             "declared": self.declared,
             "max_fps": round(self.max_fps, 2),
-            "target_fps": round(self.target_fps, 2),
-            "achieved_fps": round(self.achieved_fps, 2),
+            "detect_fps": round(self.detect_fps, 2),
+            "target_fps": round(self.target_fps if self.online else 0.0, 2),
+            "achieved_fps": round(self.achieved_fps if self.online else 0.0, 2),
             "inferring": self.inferring,
             "in_use": self.in_use,
             "online": self.online,
             "standby": self.standby,
+            "reason": self.reason,
             "last_result": self.last_result,
             "brightness": round(self.brightness, 2),
             "contrast": round(self.contrast, 2),
@@ -148,6 +168,7 @@ class Camera:
             "printer_id": self.printer_id,
             "declared": self.declared,
             "max_fps": self.max_fps,
+            "detect_fps": self.detect_fps,
             "brightness": self.brightness,
             "contrast": self.contrast,
             "sharpness": self.sharpness,
@@ -167,7 +188,7 @@ class Printer:
         config: Connection values matching the adapter's schema.
         device_state: Last normalised state polled from the service, or None.
         reported_status: The last status the service could actually report,
-            kept through an outage, or None before the first.
+            kept through an outage and a restart, or None before the first.
     """
 
     id: str
@@ -198,19 +219,26 @@ class Printer:
         return changed
 
     def public(self) -> dict[str, Any]:
-        """Serialises the printer with its live state for the state event."""
+        """Serialises the printer with its live state for the state event.
+
+        The config goes without its secret fields, which ``secrets_set`` names
+        where one is stored. A provider this version has no adapter for
+        declares none, so every field of its config is taken as one.
+        """
+        secrets = INTEGRATIONS[self.provider].secret_keys() if self.provider in INTEGRATIONS else set(self.config)
         return {
             "id": self.id,
             "name": self.name,
             "provider": self.provider,
-            "config": self.config,
+            "config": credentials.public_config(self.config, secrets),
+            "secrets_set": credentials.secrets_set(self.config, secrets),
             "device_state": self.device_state,
             "online": self.online,
         }
 
     def persisted(self) -> dict[str, Any]:
         """Serialises only what is needed to restore the printer on boot."""
-        return {"id": self.id, "name": self.name, "provider": self.provider, "config": self.config}
+        return {"id": self.id, "name": self.name, "provider": self.provider, "config": self.config, "reported_status": self.reported_status}
 
 
 @dataclass
@@ -224,7 +252,8 @@ class PrintFile:
         ext: Its format, which decides which services can print it.
         size: Bytes.
         printer_ids: Printers it was sliced for. Empty means any that prints
-            the format.
+            the format. A printer that is removed keeps its place here, so a
+            file tagged only for it starts nowhere until it is tagged again.
         uploaded: Unix timestamp of the upload.
         meta: What the slicer wrote into it: slicer, time_s, filament_g,
             filament_mm and printer_model, each None where it did not say.
@@ -391,6 +420,7 @@ class Plugin:
             "secrets": self.secrets,
             "verified": self.verified,
             "enabled": self.enabled,
+            "failure": self.failure,
             "installed": self.installed,
         }
 
@@ -415,10 +445,16 @@ class CameraRegistry(Registry[Camera]):
         return [c for c in self.values() if c.in_use and c.online]
 
     def sync_in_use(self, monitors: dict[str, dict[str, Any]], printers: "PrinterRegistry") -> None:
-        """Recomputes in_use flags from the monitors currently watching."""
+        """Recomputes in_use flags from the monitors currently watching.
+
+        A camera nothing watches is no longer inferred on, so its achieved rate
+        goes back to zero and is measured afresh when it is watched again.
+        """
         bound = {m["camera_id"] for m in monitors.values() if monitor_watching(m, printers)}
         for camera in self.values():
             camera.in_use = camera.id in bound
+            if not camera.in_use:
+                camera.achieved_fps = camera.last_done = 0.0
             if camera.frame_source:
                 camera.frame_source.set_monitoring(camera.in_use)
 
@@ -429,12 +465,6 @@ class PrinterRegistry(Registry[Printer]):
 
 class PrintRegistry(Registry[PrintFile]):
     """Holds every sliced file in the library keyed by id."""
-
-    def untag(self, printer_id: str) -> None:
-        """Drops a printer from every file it was tagged for."""
-        for record in self.values():
-            if printer_id in record.printer_ids:
-                record.printer_ids.remove(printer_id)
 
 
 class TokenRegistry(Registry[Token]):

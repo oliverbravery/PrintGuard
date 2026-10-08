@@ -27,6 +27,7 @@ export interface Camera {
   printer_id?: string | null;
   declared?: boolean;
   max_fps: number;
+  detect_fps: number;
   brightness: number;
   contrast: number;
   sharpness: number;
@@ -38,6 +39,7 @@ export interface Camera {
   in_use: boolean;
   online: boolean;
   standby: boolean;
+  reason?: string | null;
   last_result: InferenceResult | null;
 }
 
@@ -66,6 +68,7 @@ export interface Printer {
   name: string;
   provider: string;
   config: Record<string, string>;
+  secrets_set?: string[];
   device_state?: DeviceState | null;
   online: boolean;
 }
@@ -121,6 +124,7 @@ export interface HistoryBucket {
   min: number;
   max: number;
   defects: number;
+  watched: number;
 }
 
 export interface Snapshot {
@@ -128,6 +132,30 @@ export interface Snapshot {
   ts: number;
   score: number;
   action: string;
+}
+
+export interface ReviewFrame extends Omit<Snapshot, "action"> {
+  action?: string;
+  kind: "alert" | "near" | "spaced";
+  size: number;
+}
+
+export interface ReviewSummary {
+  id: string;
+  monitor_id: string;
+  started: number;
+  ended: number | null;
+  status: "running" | "ready" | "dismissed" | "queued" | "sent";
+  frames: number;
+  alerts: number;
+  chosen: number;
+  sent: number;
+  code: string | null;
+  retry_at: number | null;
+}
+
+export interface Review extends Omit<ReviewSummary, "frames"> {
+  frames: ReviewFrame[];
 }
 
 export interface HistoryAlert {
@@ -168,6 +196,8 @@ export interface SchemaProperty {
   default?: string;
 }
 
+export type AdapterConfig = Record<string, string | null>;
+
 export interface AdapterMeta {
   id: string;
   label: string;
@@ -189,7 +219,7 @@ export interface MqttConfig {
   host?: string;
   port?: number;
   username?: string;
-  password?: string;
+  password?: string | null;
   tls?: boolean;
   base_topic?: string;
   discovery_prefix?: string;
@@ -272,7 +302,7 @@ export interface PluginRecord {
   manifest: PluginManifest;
   files: string[];
   digests: Record<string, string>;
-  source: { kind: string; repo?: string; path?: string; ref?: string; filename?: string };
+  source: { kind: string; repo?: string; path?: string; ref?: string; branch?: string; filename?: string };
   granted: string[];
   config: Record<string, unknown>;
   secrets_set: string[];
@@ -346,6 +376,7 @@ export interface UpdateRelease {
   name: string;
   notes: string;
   url: string;
+  files_url: string;
   published_at: string | null;
 }
 
@@ -365,6 +396,9 @@ export interface EngineState {
   cameras: Camera[];
   printers: Printer[];
   prints: PrintFile[];
+  reviews: ReviewSummary[];
+  feedback_hub: string | null;
+  startup_warnings?: string[];
   monitors: Monitor[];
   settings: {
     notifiers: Record<string, Record<string, string>>;
@@ -378,7 +412,9 @@ export interface EngineState {
     catalogue_url: string;
     fault_grace_s: number;
     preheat: PreheatPreset[];
+    feedback: "ask" | "off";
   };
+  secrets_set?: { notifiers: Record<string, string[]>; mqtt: string[] };
   tokens: ApiToken[];
   stats: EngineStats;
   integrations: AdapterMeta[];
@@ -398,6 +434,5 @@ export interface ScorePoint {
 }
 
 export interface EngineLink {
-  send(cmd: Record<string, unknown>): void;
-  close(): void;
+  send(cmd: Record<string, unknown>): boolean;
 }

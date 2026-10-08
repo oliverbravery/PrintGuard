@@ -1,15 +1,20 @@
 import { useState } from "react";
 import { useStore } from "../store";
 import type { PluginRecord } from "../types";
+import { NewTab } from "./NewTab";
+import { SignInAddresses } from "./PluginConsent";
 
 export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
   const send = useStore((s) => s.send);
+  const signIn = useStore((s) => s.signIn);
   const callback = useStore((s) => s.engine?.plugin_oauth_callback ?? "");
   const [draft, setDraft] = useState<Record<string, string>>({});
   const names = Object.keys(plugin.manifest.secrets);
   const provider = plugin.manifest.oauth.label;
   const connected = plugin.secrets_set.includes("oauth");
-  const redirect = `${window.location.origin.replace("//localhost", "//127.0.0.1")}${callback}`;
+  const hub = new URL(window.location.origin);
+  if (hub.hostname === "localhost") hub.hostname = "127.0.0.1";
+  const redirect = `${hub.origin}${callback}`;
 
   if (names.length === 0 && !provider) return null;
 
@@ -21,7 +26,7 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
             {provider} needs an app of your own.{" "}
             {plugin.manifest.oauth.register_url && (
               <a className="text-accent hover:underline" href={plugin.manifest.oauth.register_url} target="_blank" rel="noreferrer">
-                Create one ↗
+                Create one <NewTab />
               </a>
             )}{" "}
             with this redirect URI, then paste its client id below.
@@ -29,6 +34,7 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
           <code className="mono block select-all break-all rounded border border-line-0 bg-ink-2 px-2 py-1 text-[0.65rem] text-text-1">
             {redirect}
           </code>
+          <SignInAddresses oauth={plugin.manifest.oauth} />
         </div>
       )}
       {names.map((name) => (
@@ -38,13 +44,13 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
           <input
             className="field"
             type="password"
+            autoComplete="new-password"
             placeholder={plugin.secrets_set.includes(name) ? "Stored, type to replace" : "Not set"}
             value={draft[name] ?? ""}
             onChange={(event) => setDraft({ ...draft, [name]: event.target.value })}
             onBlur={() => {
               if (!draft[name]) return;
-              send({ cmd: "plugin.secrets", id: plugin.id, secrets: { ...draft } });
-              setDraft({});
+              if (send({ cmd: "plugin.secrets", id: plugin.id, secrets: { ...draft } }) !== null) setDraft({});
             }}
           />
         </label>
@@ -62,14 +68,7 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
           <button
             className={connected ? "btn" : "btn btn-primary"}
             disabled={!connected && !plugin.secrets_set.includes("oauth_client_id")}
-            onClick={() =>
-              send({
-                cmd: "plugin.oauth",
-                id: plugin.id,
-                action: connected ? "forget" : "start",
-                origin: window.location.origin,
-              })
-            }
+            onClick={() => (connected ? send({ cmd: "plugin.oauth", id: plugin.id, action: "forget" }) : signIn(plugin.id))}
           >
             {connected ? "Disconnect" : "Connect"}
           </button>

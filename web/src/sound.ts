@@ -3,6 +3,8 @@ import type { PluginTone } from "./types";
 const MAX_TONES = 24;
 const MAX_MS = 4000;
 const SHAPES = ["sine", "square", "sawtooth", "triangle"];
+const LATE_MS = 1000;
+const GESTURES = ["pointerdown", "pointerup", "touchend", "click", "keydown"];
 
 let context: AudioContext | null = null;
 
@@ -13,8 +15,20 @@ export function playFile(url: string): void {
 }
 
 export function play(tones: PluginTone[]): void {
-  const audio = (context ??= new AudioContext());
-  void audio.resume().then(() => schedule(audio, tones));
+  const audio = (context ??= resumedByGesture(new AudioContext()));
+  const asked = performance.now();
+  void audio.resume().then(() => {
+    if (performance.now() - asked < LATE_MS) schedule(audio, tones);
+  });
+}
+
+function resumedByGesture(audio: AudioContext): AudioContext {
+  const resume = () =>
+    void audio.resume().then(() => {
+      if (audio.state === "running") for (const gesture of GESTURES) window.removeEventListener(gesture, resume);
+    });
+  for (const gesture of GESTURES) window.addEventListener(gesture, resume);
+  return audio;
 }
 
 function schedule(context: AudioContext, tones: PluginTone[]): void {

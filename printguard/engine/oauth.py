@@ -17,9 +17,11 @@ import secrets
 import time
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from .adapters import HttpFn
+from .bounds import clamp
+from .platform import PLUGIN_HEADER, plain_failure
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +40,22 @@ which is what providers hand out quota and terms against. Whoever installs it
 registers their own and types it in, and it is held like any other credential.
 """
 
+WITHHELD = (REFRESH, EXPIRES, CLIENT_ID)
+"""What PrintGuard holds for a sign-in that no request may carry. A plugin
+references the access token and nothing else of it, so a second host it declares
+never receives the means to sign in again."""
+
 CALLBACK_PATH = "/oauth/callback"
 PENDING_TTL_S = 600.0
 REFRESH_MARGIN_S = 60.0
+DEFAULT_LIFETIME_S = 3600.0
+MAX_LIFETIME_S = 366 * 86400.0
+MAX_TOKEN_RESPONSE_BYTES = 64 * 1024
+TOKEN_TIMEOUT_S = 10.0
+
+
+class SignInRefused(RuntimeError):
+    """A provider answered a sign-in or a renewal with a 400 or 401, which is it refusing the grant for good."""
 
 
 def _urlsafe(raw: bytes) -> str:
@@ -52,6 +67,11 @@ def without_session(secrets: dict[str, str]) -> dict[str, str]:
     return {name: value for name, value in secrets.items() if name not in SESSION}
 
 
+def expiring(held: dict[str, str]) -> bool:
+    """Whether a plugin's access token is about to expire and there is a refresh token to renew it with."""
+    return bool(held.get(REFRESH)) and time.time() >= float(held.get(EXPIRES) or 0) - REFRESH_MARGIN_S
+
+
 @dataclass
 class Pending:
     """One sign-in waiting for the user to come back from the provider."""
@@ -59,6 +79,7 @@ class Pending:
     plugin_id: str
     verifier: str
     redirect_uri: str
+    token_url: str
     started: float = field(default_factory=time.monotonic)
 
 
@@ -76,18 +97,21 @@ class OAuthFlows:
             plugin_id: Whose sign-in it is.
             provider: The manifest's ``oauth`` block.
             origin: Where the hub is being reached, which is where the provider
-                sends the user back to. A loopback name becomes the address it
+                sends the user back to. ``localhost`` becomes the address it
                 stands for, since RFC 8252 asks for the literal and providers
                 have started refusing anything else over plain HTTP.
 
         Returns:
             The authorize URL to open.
         """
-        self._pending = {key: waiting for key, waiting in self._pending.items() if time.monotonic() - waiting.started < PENDING_TTL_S}
+        self._forget_stale()
         verifier = _urlsafe(secrets.token_bytes(48))
         state = _urlsafe(secrets.token_bytes(24))
-        redirect_uri = f"{origin.rstrip('/').replace('//localhost', '//127.0.0.1')}{CALLBACK_PATH}"
-        self._pending[state] = Pending(plugin_id, verifier, redirect_uri)
+        hub = urlsplit(origin.rstrip("/"))
+        if hub.hostname == "localhost":
+            hub = hub._replace(netloc=hub.netloc.replace("localhost", "127.0.0.1"))
+        redirect_uri = f"{hub.geturl()}{CALLBACK_PATH}"
+        self._pending[state] = Pending(plugin_id, verifier, redirect_uri, provider["token_url"])
         query = {
             "response_type": "code",
             "client_id": provider["client_id"],
@@ -98,10 +122,16 @@ class OAuthFlows:
         }
         if provider["scopes"]:
             query["scope"] = " ".join(provider["scopes"])
-        return f"{provider['authorize_url']}?{urlencode(query)}"
+        joiner = "&" if urlsplit(provider["authorize_url"]).query else "?"
+        return f"{provider['authorize_url']}{joiner}{urlencode(query)}"
+
+    def _forget_stale(self) -> None:
+        now = time.monotonic()
+        self._pending = {key: waiting for key, waiting in self._pending.items() if now - waiting.started < PENDING_TTL_S}
 
     def waiting_for(self, state: str) -> str | None:
         """Which plugin a returning user belongs to, or None for a stale state."""
+        self._forget_stale()
         pending = self._pending.get(state)
         return pending.plugin_id if pending else None
 
@@ -119,12 +149,19 @@ class OAuthFlows:
 
         Raises:
             PermissionError: If the state is unknown or has expired, which is
-                what stands in the way of a callback nobody asked for.
-            RuntimeError: If the provider refused the exchange.
+                what stands in the way of a callback nobody asked for, the
+                manifest now signs in somewhere other than where the user was
+                sent, or the token endpoint resolves to this network and the
+                plugin may not reach it.
+            RuntimeError: If the provider refused the exchange, could not be
+                reached, or answered with a lifetime that is not a number.
         """
+        self._forget_stale()
         pending = self._pending.pop(state, None)
         if pending is None:
             raise PermissionError("no sign-in is waiting for that answer")
+        if pending.token_url != provider["token_url"]:
+            raise PermissionError(f"{provider['label']} signs in somewhere new since you started, so start again")
         return await self._tokens(provider, {
             "grant_type": "authorization_code",
             "code": code,
@@ -133,19 +170,19 @@ class OAuthFlows:
             "code_verifier": pending.verifier,
         })
 
-    async def refreshed(self, provider: dict[str, Any], held: dict[str, str]) -> dict[str, str] | None:
-        """Renews an access token that is about to expire.
+    async def refreshed(self, provider: dict[str, Any], held: dict[str, str]) -> dict[str, str]:
+        """Renews an access token with the refresh token held beside it.
 
         Args:
             provider: The manifest's ``oauth`` block.
-            held: The secrets currently stored for the plugin.
+            held: The secrets currently stored for the plugin, which ``expiring`` says are due.
 
         Returns:
-            The secrets to store, or None when the one held is still good or
-            there is nothing to refresh with.
+            The secrets to store.
+
+        Raises:
+            SignInRefused: If the provider no longer honours the refresh token.
         """
-        if not held.get(REFRESH) or time.time() < float(held.get(EXPIRES) or 0) - REFRESH_MARGIN_S:
-            return None
         renewed = await self._tokens(provider, {
             "grant_type": "refresh_token",
             "refresh_token": held[REFRESH],
@@ -154,15 +191,31 @@ class OAuthFlows:
         return {**held, **renewed}
 
     async def _tokens(self, provider: dict[str, Any], form: dict[str, str]) -> dict[str, str]:
-        status, body = await self._http(
-            "POST",
-            provider["token_url"],
-            headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
-            data=urlencode(form).encode(),
-        )
+        try:
+            status, body = await self._http(
+                "POST",
+                provider["token_url"],
+                headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json", PLUGIN_HEADER: "1"},
+                data=urlencode(form).encode(),
+                timeout=TOKEN_TIMEOUT_S,
+                redirects="answer",
+                max_bytes=MAX_TOKEN_RESPONSE_BYTES,
+                public_only=not provider["local"],
+            )
+        except PermissionError:
+            raise PermissionError(f"{provider['label']} signs in on this network, which needs the net:local permission") from None
+        except Exception as exc:
+            logger.warning("%s sign-in endpoint failed: %s", provider["label"], exc)
+            raise plain_failure(exc, f"{provider['label']} sign-in") from None
+        if status in (400, 401):
+            raise SignInRefused(f"{provider['label']} refused the sign-in ({status})")
         if status >= 400 or not isinstance(body, dict) or not body.get("access_token"):
             raise RuntimeError(f"{provider['label']} refused the sign-in ({status})")
-        held = {ACCESS: str(body["access_token"]), EXPIRES: str(time.time() + float(body.get("expires_in") or 3600))}
+        try:
+            lifetime = clamp("expires_in", float(body.get("expires_in") or DEFAULT_LIFETIME_S), 0.0, MAX_LIFETIME_S)
+        except (TypeError, ValueError):
+            raise RuntimeError(f"{provider['label']} answered with a sign-in that cannot be read") from None
+        held = {ACCESS: str(body["access_token"]), EXPIRES: str(time.time() + lifetime)}
         if body.get("refresh_token"):
             held[REFRESH] = str(body["refresh_token"])
         return held

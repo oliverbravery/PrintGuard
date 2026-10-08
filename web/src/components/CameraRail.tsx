@@ -11,7 +11,13 @@ export function sourceLabel(source: CameraSource): string {
   if (source.kind === "device") return source.label || "device camera";
   if (source.kind === "path") return `path://${source.path}`;
   if (source.kind === "bambu") return `bambu://${source.host ?? ""}`;
-  return source.url ? source.url.replace(/\/\/[^/@]+@/, "//") : source.kind;
+  return source.url ? source.url.replace(/\/\/[^?#]*@/, "//") : source.kind;
+}
+
+export function cameraStatus(camera: Camera): string {
+  if (camera.online) return "online";
+  if (camera.standby) return "standby";
+  return camera.reason ? `offline: ${camera.reason}` : "offline";
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -25,6 +31,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function CameraCard({ camera }: { camera: Camera }) {
   const { openDialog, customising, mutateLayout } = useStore();
+  const streaming = camera.in_use && camera.online;
 
   const content = (handle?: SortableHandle) => (
     <>
@@ -41,12 +48,17 @@ function CameraCard({ camera }: { camera: Camera }) {
         <span
           aria-hidden
           className={`led ${camera.online ? "led-on" : "led-off"}`}
-          title={camera.online ? "online" : camera.standby ? "standby" : "offline"}
+          title={cameraStatus(camera)}
         />
       )}
       <div className="order-1 min-w-0 flex-1 leading-tight sm:flex-none sm:w-36">
         <div className="display text-sm font-semibold truncate">{camera.name}</div>
         <div className="mono text-[0.6rem] text-text-2 truncate">{sourceLabel(camera.source)}</div>
+        {camera.reason && (
+          <div className="text-[0.6rem] text-bad truncate" title={camera.reason}>
+            {camera.reason}
+          </div>
+        )}
       </div>
       {handle ? (
         <button
@@ -63,8 +75,8 @@ function CameraCard({ camera }: { camera: Camera }) {
       )}
       <div className="order-3 flex w-full items-center gap-4 sm:order-2 sm:w-auto">
         <Stat label="max" value={`${camera.max_fps.toFixed(0)}`} />
-        <Stat label="target" value={camera.in_use ? camera.target_fps.toFixed(1) : "—"} />
-        <Stat label="actual" value={camera.in_use ? camera.achieved_fps.toFixed(1) : "—"} />
+        <Stat label="target" value={streaming ? camera.target_fps.toFixed(1) : "none"} />
+        <Stat label="actual" value={streaming ? camera.achieved_fps.toFixed(1) : "none"} />
       </div>
     </>
   );
@@ -72,7 +84,7 @@ function CameraCard({ camera }: { camera: Camera }) {
   if (!customising)
     return (
       <div
-        {...cardButton(() => openDialog("cameras", camera.id), `Edit camera ${camera.name}`)}
+        {...cardButton(() => openDialog("cameras", camera.id), `Edit camera ${camera.name}, ${cameraStatus(camera)}`)}
         className="panel flex w-60 shrink-0 snap-start cursor-pointer flex-wrap items-center gap-x-4 gap-y-2.5 px-3.5 py-2.5 transition-colors hover:border-accent sm:w-auto"
       >
         {content()}
@@ -112,6 +124,7 @@ export function CameraRail() {
       ) : (
         <Sortable
           ids={visible.map((c) => c.id)}
+          pinned={section(engine?.settings.layout, "cameras").pinned}
           strategy={horizontalListSortingStrategy}
           disabled={!customising}
           onReorder={(ids) => mutateLayout("cameras", (s) => withOrder(s, ids))}

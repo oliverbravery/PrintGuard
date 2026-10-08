@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { groupBuckets, PERIODS, type Period } from "../history";
+import { alertOutcome, GROUP_S, groupBuckets, HISTORY_BUCKET_MS, PERIODS, type Period } from "../history";
+import { clock, framesLabel, statusText } from "../review";
+import { useLazySnapshot } from "../snapshot";
 import { useStore } from "../store";
 import type { Monitor, Snapshot } from "../types";
 import { Sheet } from "./Dialog";
 import { DefectBars, RiskBandChart } from "./RiskChart";
 import { riskColor, RiskGauge } from "./RiskGauge";
+import { SnapshotLightbox } from "./SnapshotLightbox";
 
 function ago(ts: number, now: number): string {
   const s = Math.max(0, now - ts);
@@ -19,10 +22,6 @@ function duration(min: number): string {
   return `${Math.floor(min / 60)}h ${min % 60}m`;
 }
 
-function clock(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
 function StatTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="panel px-3 py-2">
@@ -33,13 +32,9 @@ function StatTile({ label, value }: { label: string; value: string }) {
 }
 
 function SnapshotThumb({ monitorId, snap, threshold, now, onOpen }: { monitorId: string; snap: Snapshot; threshold: number; now: number; onOpen: () => void }) {
-  const url = useStore((s) => s.snapshotCache[snap.id]);
-  const fetchSnapshot = useStore((s) => s.fetchSnapshot);
-  useEffect(() => {
-    fetchSnapshot(monitorId, snap.id);
-  }, [monitorId, snap.id]);
+  const { ref, url } = useLazySnapshot<HTMLButtonElement>(monitorId, snap.id);
   return (
-    <button type="button" onClick={onOpen} className="panel group relative block overflow-hidden text-left" aria-label={`Snapshot at ${(snap.score * 100).toFixed(0)}% risk, ${ago(snap.ts, now)}`}>
+    <button ref={ref} type="button" onClick={onOpen} className="panel group relative block overflow-hidden text-left" aria-label={`Snapshot at ${(snap.score * 100).toFixed(0)}% risk, ${ago(snap.ts, now)}`}>
       <div className="aspect-video bg-ink-0">
         {url ? (
           <img src={url} alt="" className="h-full w-full object-cover" />
@@ -54,22 +49,36 @@ function SnapshotThumb({ monitorId, snap, threshold, now, onOpen }: { monitorId:
       </span>
       <span className="label absolute inset-x-0 bottom-0 bg-ink-1/85 px-2 py-1">
         {ago(snap.ts, now)}
-        {snap.action !== "none" && ` · ${snap.action}`}
+        {alertOutcome(snap.action) && ` · ${alertOutcome(snap.action)}`}
       </span>
     </button>
   );
 }
 
 export function StatsPage({ monitor }: { monitor: Monitor }) {
-  const { historyData, openStats } = useStore();
+  const { engine, historyData, history: scores, reconnecting, openStats, openReview, fetchHistory } = useStore();
+  const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
+  const reviews = (engine?.reviews ?? []).filter((review) => review.monitor_id === monitor.id);
+  const prints = reviews.filter((review) => review.status !== "running" && review.frames > 0).reverse();
+  const alertsKept = reviews.reduce((kept, review) => kept + review.alerts, 0);
   const [period, setPeriod] = useState<Period>("1h");
   const [sortByScore, setSortByScore] = useState(false);
   const [enlarged, setEnlarged] = useState<Snapshot | null>(null);
-  const enlargedUrl = useStore((s) => (enlarged ? s.snapshotCache[enlarged.id] : undefined));
   const history = historyData[monitor.id];
   const close = () => openStats(null);
 
+  useEffect(() => {
+    if (reconnecting) return;
+    fetchHistory(monitor.id);
+    const refresh = setInterval(() => fetchHistory(monitor.id), HISTORY_BUCKET_MS);
+    return () => clearInterval(refresh);
+  }, [monitor.id, reconnecting, alertsKept]);
+
   const grouped = useMemo(() => (history ? groupBuckets(history.buckets, period, history.now) : []), [history, period]);
+  const day = (ts: number) => new Date(ts * 1000).toDateString();
+  const withinOneDay = grouped.length > 0 && day(grouped[0].t) === day(grouped[grouped.length - 1].t);
+  const axisTime = (ts: number) =>
+    withinOneDay ? clock(ts) : new Date(ts * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   const stats = history?.stats ?? {};
   const snaps = useMemo(
     () => [...(history?.snaps ?? [])].sort((a, b) => (sortByScore ? b.score - a.score : b.ts - a.ts)),
@@ -82,13 +91,13 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
       <div className="px-5 py-4 border-b border-line-0">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div className="row-span-2 flex items-center justify-center">
-            <RiskGauge score={stats.current ?? 0} threshold={monitor.threshold} size={92} />
+            <RiskGauge score={camera?.online && monitor.watching ? (scores[monitor.id]?.at(-1)?.score ?? stats.current ?? 0) : null} threshold={monitor.threshold} size={92} />
           </div>
           <StatTile label="average" value={pct(stats.avg)} />
           <StatTile label="peak" value={pct(stats.max)} />
           <StatTile label="defect rate" value={`${(stats.defect_pct ?? 0).toFixed(0)}%`} />
           <StatTile label="frames" value={String(stats.inferences ?? 0)} />
-          <StatTile label="alerts" value={String(stats.alerts ?? 0)} />
+          <StatTile label="alerts" value={String(Math.max(stats.alerts ?? 0, snaps.length))} />
           <StatTile label="watch time" value={duration(stats.watch_min ?? 0)} />
         </div>
       </div>
@@ -108,18 +117,43 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
           ))}
         </div>
         {grouped.length === 0 ? (
-          <p className="mono text-[0.7rem] text-text-2 py-8 text-center">awaiting results</p>
+          <p className="mono text-[0.7rem] text-text-2 py-8 text-center">{history ? "awaiting results" : "loading history"}</p>
         ) : (
           <>
-            <RiskBandChart data={grouped} threshold={monitor.threshold} />
-            <DefectBars data={grouped} />
+            <RiskBandChart data={grouped} span={GROUP_S[period]} threshold={monitor.threshold} />
+            <DefectBars data={grouped} span={GROUP_S[period]} />
             <div className="mt-1 flex justify-between">
-              <span className="label">{clock(grouped[0].t)}</span>
-              <span className="label">{clock(grouped[grouped.length - 1].t)}</span>
+              <span className="label">{axisTime(grouped[0].t)}</span>
+              <span className="label">{axisTime(grouped[grouped.length - 1].t)}</span>
             </div>
           </>
         )}
       </div>
+
+      {prints.length > 0 && (
+        <div className="px-5 py-4 border-b border-line-0">
+          <h3 className="display mb-3 text-[0.68rem] font-semibold tracking-[0.24em] text-text-2">PRINTS</h3>
+          <ul className="space-y-1.5">
+            {prints.map((print) => (
+              <li key={print.id} className="flex items-center gap-3">
+                <span className="mono min-w-0 flex-1 truncate text-[0.7rem] text-text-1">
+                  {new Date((print.ended ?? print.started) * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })} · {framesLabel(print.frames)}
+                </span>
+                <span className="label">{statusText(print)}</span>
+                <button
+                  className="btn !py-1 !px-2 !text-[0.6rem]"
+                  onClick={() => {
+                    close();
+                    openReview(print.id);
+                  }}
+                >
+                  {print.status === "ready" || print.status === "dismissed" ? "Review" : "View"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="px-5 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
         <div className="mb-3 flex items-center gap-2">
@@ -131,7 +165,9 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
           )}
         </div>
         {snaps.length === 0 ? (
-          <p className="mono text-[0.7rem] text-text-2">No alerts have fired yet. A snapshot is captured each time a defect alert triggers.</p>
+          <p className="mono text-[0.7rem] text-text-2">
+            {history ? "No alerts have fired yet. A snapshot is captured each time a defect alert triggers." : "loading history"}
+          </p>
         ) : (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {history && snaps.map((snap) => (
@@ -142,18 +178,17 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
       </div>
 
       {enlarged && (
-        <button
-          type="button"
-          className="fixed inset-0 z-20 grid place-items-center bg-ink-0/90 p-6"
-          onClick={() => setEnlarged(null)}
-          aria-label="Close snapshot"
-        >
-          {enlargedUrl && <img src={enlargedUrl} alt="" className="max-h-full max-w-full object-contain" />}
-          <span className="mono absolute left-6 top-6 text-sm" style={{ color: riskColor(enlarged.score, monitor.threshold) }}>
-            {(enlarged.score * 100).toFixed(0)}% · {history && ago(enlarged.ts, history.now)}
-            {enlarged.action !== "none" && ` · ${enlarged.action}`}
-          </span>
-        </button>
+        <SnapshotLightbox
+          snapshotId={enlarged.id}
+          color={riskColor(enlarged.score, monitor.threshold)}
+          onClose={() => setEnlarged(null)}
+          caption={
+            <>
+              {(enlarged.score * 100).toFixed(0)}% · {history && ago(enlarged.ts, history.now)}
+              {alertOutcome(enlarged.action) && ` · ${alertOutcome(enlarged.action)}`}
+            </>
+          }
+        />
       )}
     </Sheet>
   );

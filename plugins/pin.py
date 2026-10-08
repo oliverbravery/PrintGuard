@@ -67,12 +67,19 @@ def findings(manifest: dict, sources: dict[str, str]) -> list[dict]:
     return json.loads(result.stdout)
 
 
+def source_files(directory: Path) -> dict[str, str]:
+    """A plugin's source files as the hub reads them, line endings untouched."""
+    return {
+        name: (directory / name).read_bytes().decode("utf-8", "replace")
+        for name in plugins.SOURCE_FILES
+        if (directory / name).exists()
+    }
+
+
 def entry(directory: Path) -> dict:
     """Builds one catalogue entry for a plugin directory."""
     manifest = plugins.sanitise_manifest(json.loads((directory / plugins.MANIFEST_FILE).read_text()))
-    sources = {
-        name: (directory / name).read_text() for name in plugins.SOURCE_FILES if (directory / name).exists()
-    }
+    sources = source_files(directory)
     assets = plugins.sanitise_assets({name: (directory / name).read_bytes() for name in manifest["assets"]})
     found = findings(manifest, sources)
     disagreements = [f for f in found if f["kind"] != "dynamic"]

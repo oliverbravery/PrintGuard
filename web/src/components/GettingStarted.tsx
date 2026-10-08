@@ -1,4 +1,4 @@
-import { useStore } from "../store";
+import { savedChannels, useStore } from "../store";
 import { Progress } from "./Progress";
 import type { DialogKind } from "../store";
 
@@ -35,6 +35,7 @@ function StepRow({ step, primary }: { step: Step; primary: boolean }) {
       ) : (
         <button
           className={`btn shrink-0 ${primary ? "btn-primary" : ""}`}
+          aria-label={`Open ${step.title}`}
           onClick={() => openDialog(step.dialog, step.focusCameraId)}
         >
           Open
@@ -77,7 +78,7 @@ export function GettingStarted() {
       n: 4,
       title: "Set up alerts",
       why: "Get a snapshot on your phone when a defect holds.",
-      done: Object.keys(engine.settings.notifiers).length > 0,
+      done: Object.keys(savedChannels(engine)).length > 0,
       dialog: "settings",
       optional: true,
     },
@@ -107,17 +108,17 @@ export function GettingStarted() {
           Register a camera and add a monitor to start watching. Connect a printer and alerts for the
           full safety net.
         </p>
-        <Progress value={doneCount} total={steps.length} className="mb-4" />
+        <Progress label="Setup progress" value={doneCount} total={steps.length} className="mb-4" />
         <ol className="space-y-2.5">
           {steps.map((step) => (
             <StepRow key={step.n} step={step} primary={step === primaryStep} />
           ))}
         </ol>
         <button
-          className="mt-5 text-xs text-text-2 underline transition-colors hover:text-accent"
+          className="tap-target mt-5 text-xs text-text-2 underline transition-colors hover:text-accent"
           onClick={() => openDialog("intro")}
         >
-          New here? How PrintGuard works →
+          How PrintGuard works
         </button>
       </div>
     </div>

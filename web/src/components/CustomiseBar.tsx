@@ -1,5 +1,6 @@
 import { applyLayout, section, tiles, toggleHidden } from "../layout";
 import { useStore } from "../store";
+import { ConfirmButton } from "./ConfirmButton";
 import { HiddenTray } from "./Sortable";
 
 export function CustomiseBar() {
@@ -12,9 +13,9 @@ export function CustomiseBar() {
       <div className="panel flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5">
         <span className="label grow basis-48">Customising, drag to reorder, pin or hide</span>
         <div className="ml-auto flex gap-2">
-          <button className="btn btn-danger !py-1.5 !px-3 !text-[0.68rem]" onClick={resetLayout}>
+          <ConfirmButton className="!py-1.5 !px-3 !text-[0.68rem]" onConfirm={resetLayout}>
             Reset layout
-          </button>
+          </ConfirmButton>
           <button className="btn btn-primary !py-1.5 !px-3 !text-[0.68rem]" onClick={() => setCustomising(false)}>
             Done
           </button>

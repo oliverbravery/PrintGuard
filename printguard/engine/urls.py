@@ -16,7 +16,7 @@ import ipaddress
 import re
 import socket
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 SCHEMES = ("http", "https", "ws", "wss", "rtsp", "rtsps")
 WILDCARD_SCHEMES = ("http", "https")
@@ -31,8 +31,19 @@ PATTERN = re.compile(
     r"(?P<path>/[^\s]*)$"
 )
 
+EMBEDDING_IPV4 = tuple(ipaddress.ip_network(network) for network in ("::/96", "::ffff:0:0/96", "::ffff:0:0:0/96", "64:ff9b::/96"))
+"""The IPv6 ranges that carry an IPv4 address in their last 32 bits, which a network may deliver as that address."""
+
+UNROUTED = tuple(ipaddress.ip_network(network) for network in ("224.0.0.0/4", "fec0::/10", "ff00::/8"))
+"""Multicast and the retired site-local range, which the standard library calls global and no public service answers on."""
+
+PLAIN_URL = re.compile(r"^[a-z][a-z0-9+.-]*://(?P<host>[a-z0-9.-]+|\[[0-9a-f:]+\])(?::(?P<port>\d{1,5}))?(?:[/?#]|$)", re.IGNORECASE)
+
+NUMBER = re.compile(r"\d+|0x[0-9a-f]*", re.IGNORECASE)
+"""What a browser reads as a number when it ends a host, which makes the whole host an IPv4 address or nothing."""
+
 LOCAL_HOSTNAMES = ("localhost",)
-LOCAL_SUFFIXES = (".local", ".localhost", ".internal", ".home", ".lan")
+LOCAL_SUFFIXES = (".local", ".localhost", ".internal", ".home", ".lan", ".home.arpa")
 """Names that resolve inside a network by convention rather than by address."""
 
 
@@ -47,6 +58,11 @@ def link(raw: Any) -> str:
     return url if parts.scheme in ("http", "https") and parts.netloc else ""
 
 
+def _fold(raw: str) -> str:
+    """Lowercases a pattern's scheme and host, the parts of an address that ignore case."""
+    return re.sub(r"^[^/]*//[^/]*", lambda origin: origin.group().lower(), raw.strip())
+
+
 def parse(raw: str) -> dict[str, str] | None:
     """Reads one pattern, or None if it is not one.
 
@@ -56,7 +72,7 @@ def parse(raw: str) -> dict[str, str] | None:
     Returns:
         Its scheme, host, port and path, or None when the pattern is malformed.
     """
-    match = PATTERN.match(raw.strip().lower())
+    match = PATTERN.match(_fold(raw))
     if not match:
         return None
     parts = match.groupdict()
@@ -72,7 +88,63 @@ def _matches_host(pattern: str, host: str) -> bool:
 
 
 def _matches_path(pattern: str, path: str) -> bool:
-    return re.fullmatch(".*?".join(re.escape(part) for part in pattern.split("*")), path) is not None
+    """Whether a path fits a pattern whose ``*`` each stand for any run of characters.
+
+    The literal pieces are looked for in order, each as early as it can sit, so
+    the work grows with the path and never with the number of wildcards.
+    """
+    first, *middle = pattern.split("*")
+    if not middle:
+        return path == first
+    last = middle.pop()
+    end = len(path) - len(last)
+    if not path.startswith(first) or end < len(first) or not path.endswith(last):
+        return False
+    at = len(first)
+    for piece in middle:
+        found = path.find(piece, at, end)
+        if found < 0:
+            return False
+        at = found + len(piece)
+    return True
+
+
+def is_plain(url: str) -> bool:
+    """Whether a URL names one host to Python, an HTTP client and a browser alike.
+
+    A backslash is a slash to a browser and part of a login to Python, so
+    ``https://good.example\\@evil.example/`` is two different hosts. The same
+    goes for a percent-encoded host, non-ASCII, a space or a control character
+    in it. A host whose last label is a number is an IPv4 address to a browser,
+    which refuses the whole URL when it is not a valid one, such as
+    ``256.256.256.256`` or ``1.2.3.4.5``.
+
+    Args:
+        url: The address as it would be requested.
+
+    Returns:
+        True when its authority is a plain host and an optional port, with no
+        userinfo.
+    """
+    match = PLAIN_URL.match(url)
+    if match is None or int(match["port"] or 0) > 65535:
+        return False
+    host = match["host"].removesuffix(".")
+    if NUMBER.fullmatch(host.rpartition(".")[2]):
+        try:
+            socket.inet_aton(host)
+        except OSError:
+            return False
+    return True
+
+
+def _climbs(path: str) -> bool:
+    """Whether a path has a ``.`` or ``..`` segment, written out or percent-encoded.
+
+    An HTTP client collapses those before it sends, so the path that was matched
+    would not be the path that was asked for.
+    """
+    return any(unquote(segment) in (".", "..") for segment in path.replace("\\", "/").split("/"))
 
 
 def matches(pattern: str, url: str) -> bool:
@@ -83,21 +155,30 @@ def matches(pattern: str, url: str) -> bool:
         url: The URL a plugin asked for.
 
     Returns:
-        True when scheme, host, port and path all match. The query string is
-        matched as part of the path, as a browser does, so a pattern ending in
-        ``*`` covers a URL's parameters.
+        True when scheme, host, port and path all match. The path is matched
+        on its own, so a ``*`` in it is never satisfied by the query string. A
+        pattern with a ``?`` matches what follows it against the query, and one
+        without covers any query. A path with a ``.`` or ``..`` segment matches
+        nothing.
     """
     rule = parse(pattern)
     if rule is None:
         return False
-    parsed = urlsplit(url.strip())
+    if not is_plain(url):
+        return False
+    parsed = urlsplit(url)
     scheme, host = parsed.scheme.lower(), (parsed.hostname or "").lower()
     if not host or scheme not in (WILDCARD_SCHEMES if rule["scheme"] == "*" else (rule["scheme"],)):
         return False
     if rule["port"] != "*" and int(rule["port"]) != (parsed.port or DEFAULT_PORTS.get(scheme, 0)):
         return False
     path = parsed.path or "/"
-    return _matches_host(rule["host"], host) and _matches_path(rule["path"], f"{path}?{parsed.query}" if parsed.query else path)
+    if _climbs(path):
+        return False
+    path_rule, scoped, query_rule = rule["path"].partition("?")
+    if not _matches_host(rule["host"].strip("[]"), host) or not _matches_path(path_rule, path):
+        return False
+    return not scoped or _matches_path(query_rule, parsed.query)
 
 
 def allowed(url: str, patterns: list[str]) -> bool:
@@ -106,45 +187,53 @@ def allowed(url: str, patterns: list[str]) -> bool:
 
 
 def is_local_address(host: str) -> bool:
-    """Whether a host literal is an address on the machine or its network."""
+    """Whether a host literal is an address on the machine or its network.
+
+    An IPv4 address is read in every spelling a resolver takes, so ``127.1``,
+    ``0x7f.0.0.1`` and ``2130706433`` are all the loopback address. An IPv4
+    address written inside an IPv6 one is judged as the IPv4 address it is,
+    which Python only began doing for itself part way through 3.12. Multicast
+    and site-local addresses count as local, though the standard library calls
+    them global. One dot ending the host is dropped first, since ``localhost.``
+    is the same place as ``localhost``.
+    """
+    host = host.removesuffix(".")
     try:
         address = ipaddress.ip_address(host.strip("[]"))
     except ValueError:
-        return host in LOCAL_HOSTNAMES or host.endswith(LOCAL_SUFFIXES)
-    return not address.is_global or address.is_private or address.is_loopback
+        try:
+            address = ipaddress.ip_address(socket.inet_aton(host))
+        except OSError:
+            return host in LOCAL_HOSTNAMES or host.endswith(LOCAL_SUFFIXES)
+    if address.version == 6 and any(address in network for network in EMBEDDING_IPV4):
+        address = ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
+    return not address.is_global or address.is_private or address.is_loopback or any(address in network for network in UNROUTED)
 
 
 def reaches_local(pattern: str) -> bool:
     """Whether a pattern can land on the machine's own network.
 
     A wildcard host counts, since it covers private addresses too, which makes
-    ``*://*/*`` the widest thing a plugin can ask for.
+    ``*://*/*`` the widest thing a plugin can ask for. So does a wildcard over
+    a host ending in a number, which is the tail of an IPv4 address:
+    ``*.168.1.1`` covers ``192.168.1.1`` and ``*.1`` covers ``127.0.0.1``.
     """
     rule = parse(pattern)
-    return rule is not None and (rule["host"] == "*" or is_local_address(rule["host"].removeprefix("*.")))
-
-
-def resolves_local(url: str) -> bool:
-    """Whether a URL's host resolves to an address on this network.
-
-    A literal address needs no lookup. Otherwise the name is resolved and every
-    answer checked, since a public name can point somewhere private. A name that
-    will not resolve is not local.
-
-    The name could be re-resolved between this check and the connection, which no
-    allowlist closes, so this decides which permission a request needs. It is not
-    the only thing in its way.
-    """
-    host = (urlsplit(url.strip()).hostname or "").lower()
-    if not host:
-        return True
-    if is_local_address(host):
-        return True
-    try:
-        answers = socket.getaddrinfo(host, None)
-    except OSError:
+    if rule is None:
         return False
-    return any(is_local_address(answer[4][0]) for answer in answers)
+    host = rule["host"]
+    numeric_tail = host.startswith("*.") and NUMBER.fullmatch(host.rpartition(".")[2]) is not None
+    return host == "*" or numeric_tail or is_local_address(host.replace("*.", "any.", 1))
+
+
+def is_local_url(url: str) -> bool:
+    """Whether a URL's host is written as an address or a name that is on this network.
+
+    A name that merely resolves to one is for the connection to catch, since the
+    answer can change between a lookup here and the one that connects.
+    """
+    host = (urlsplit(url).hostname or "").lower()
+    return not host or is_local_address(host)
 
 
 def phrase(pattern: str) -> str:
@@ -179,12 +268,12 @@ def sanitise(raw: Any) -> list[str]:
         raw: The manifest's ``urls`` field.
 
     Returns:
-        The patterns, lowercased and deduplicated.
+        The patterns, deduplicated, with scheme and host lowercased.
 
     Raises:
         ValueError: If any of them is not a match pattern.
     """
-    patterns = sorted({str(item).strip().lower() for item in raw or [] if str(item).strip()})
+    patterns = sorted({_fold(str(item)) for item in raw or [] if str(item).strip()})
     unreadable = [pattern for pattern in patterns if parse(pattern) is None]
     if unreadable:
         raise ValueError(f"not a URL match pattern: {', '.join(unreadable)}")

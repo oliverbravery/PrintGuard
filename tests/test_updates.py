@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fakes import FakePlatform
 
+from printguard.engine import engine as engine_module
 from printguard.engine.engine import Engine
 
 
@@ -54,6 +57,7 @@ async def test_reports_stable_releases_newest_first() -> None:
     assert update["latest"] == "2.3.0"
     assert [r["version"] for r in engine.releases] == ["2.3.0", "2.2.0", "2.1.0"]
     assert engine.releases[0]["notes"] == "two-three"
+    assert engine.releases[0]["files_url"] == "https://github.com/o/r/blob/v2.3.0/"
     assert ("GET", "https://api.github.com/repos/o/r/releases") in platform.http_calls
 
 
@@ -67,6 +71,33 @@ async def test_history_is_served_on_demand_not_in_every_snapshot() -> None:
     calls = len(platform.http_calls)
     await engine.request({"cmd": "update.releases"})
     assert len(platform.http_calls) == calls, "a second request must serve what was already fetched"
+
+
+async def test_history_does_not_reach_out_with_the_daily_check_off() -> None:
+    engine, platform = _engine(version="2.3.0", releases=[_release("v2.3.0")])
+    engine.settings["update_check"] = False
+    events = await engine.request({"cmd": "update.releases"})
+    assert next(e for e in events if e["event"] == "releases")["releases"] == []
+    assert platform.http_calls == []
+
+    await engine.request({"cmd": "update.check"})
+    events = await engine.request({"cmd": "update.releases"})
+    assert [r["version"] for r in next(e for e in events if e["event"] == "releases")["releases"]] == ["2.3.0"]
+
+
+async def test_a_check_that_fails_at_boot_is_tried_again_well_inside_a_day(monkeypatch) -> None:
+    monkeypatch.setattr(engine_module, "UPDATE_RETRY_S", 0.05)
+    engine, platform = _engine(version="2.1.0", releases=[_release("v2.3.0")])
+    platform.responses["https://api.github.com/repos/o/r/releases"] = (503, {})
+    await engine.start()
+    try:
+        await asyncio.sleep(0.02)
+        assert engine.update is None
+        del platform.responses["https://api.github.com/repos/o/r/releases"]
+        await asyncio.sleep(0.1)
+        assert engine.update["latest"] == "2.3.0"
+    finally:
+        await engine.stop()
 
 
 async def test_up_to_date_reports_no_update() -> None:

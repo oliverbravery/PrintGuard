@@ -2,7 +2,7 @@ import { parse } from "acorn";
 import { simple } from "acorn-walk";
 import { parseFragment } from "parse5";
 import type { Permission, PluginManifest } from "./types";
-import { matches, reachesLocal } from "./urls.ts";
+import { isLocalAddress, matches, reachesLocal } from "./urls.ts";
 
 export interface Finding {
   kind: "unused" | "undeclared" | "dynamic";
@@ -26,6 +26,11 @@ const CTX_PERMISSIONS: Record<string, string> = { notify: "notify", sound: "soun
 const PLUGIN_PERMISSIONS: Record<string, string> = { route: "routes", gate: "gate", serve: "link:provide" };
 const NETWORK_CALLS = ["http", "socket"];
 const LINK_CALLS: Record<string, string> = { call: "link:consume", publish: "link:provide" };
+const WITHHELD_SECRETS = ["oauth_refresh", "oauth_expires", "oauth_client_id"];
+const CONTEXT_PARAMETER: Record<string, number> = { render: 0, action: 2, on: 1, route: 1, gate: 1, serve: 1 };
+const CONTEXT_FIELDS = ["state", "target", "surface", "assets", "store", "theme", "secrets"];
+const GLOBAL_APIS = ["plugin", "pg"];
+const RENAMED_API = "its API under another name";
 const SECRET_REFERENCE = /\{\{\s*secret\.([a-z0-9_-]{1,40})\s*\}\}/g;
 
 function literalField(node: any, field: string): string | null {
@@ -53,6 +58,11 @@ function scriptsIn(html: string): string {
 function callsIn(code: string, tables: Tables, owners: string[]): { calls: Call[]; secrets: string[]; failed: string | null } {
   const calls: Call[] = [];
   const secrets: string[] = [];
+  const apis = [...owners, "plugin"];
+  const named: any[] = [];
+  const members: any[] = [];
+  const called = new Set<any>();
+  let renamed = false;
   let tree: any;
   try {
     tree = parse(code, { ecmaVersion: "latest", allowReturnOutsideFunction: true });
@@ -69,7 +79,12 @@ function callsIn(code: string, tables: Tables, owners: string[]): { calls: Call[
     TemplateElement(node: any) {
       for (const found of String(node.value.cooked ?? "").matchAll(SECRET_REFERENCE)) secrets.push(found[1]);
     },
+    Identifier(node: any) {
+      if (apis.includes(node.name) || node.name === "arguments") named.push(node);
+    },
     MemberExpression(node: any) {
+      if (!node.computed && apis.includes(node.object?.name)) members.push(node);
+      if (GLOBAL_APIS.includes(node.computed ? node.property?.value : node.property?.name)) renamed = true;
       const inner = node.object;
       if (inner?.type === "MemberExpression" && owners.includes(inner.object?.name) && inner.property?.name === "state") {
         const reads = tables.collections[node.property?.name];
@@ -79,8 +94,15 @@ function callsIn(code: string, tables: Tables, owners: string[]): { calls: Call[
     CallExpression(node: any) {
       const callee = node.callee;
       if (callee?.type !== "MemberExpression") return;
+      called.add(callee);
       const owner = callee.object?.name;
       const method = callee.property?.name;
+      if (owner === "plugin" && method in CONTEXT_PARAMETER) {
+        const handler = node.arguments.at(-1);
+        const inline = handler?.type === "ArrowFunctionExpression" || handler?.type === "FunctionExpression";
+        const context = (parameter: any, at: number) => parameter.type === "Identifier" && (parameter.name === "ctx") === (at === CONTEXT_PARAMETER[method]);
+        if (!inline || !handler.params.every(context)) renamed = true;
+      }
       if (owner === "plugin" && PLUGIN_PERMISSIONS[method]) {
         calls.push({ permission: PLUGIN_PERMISSIONS[method], url: null, link: null, dynamic: null });
       }
@@ -115,6 +137,12 @@ function callsIn(code: string, tables: Tables, owners: string[]): { calls: Call[
       }
     },
   });
+  const understood = new Set(
+    members
+      .filter((member) => called.has(member) || (member.object.name !== "plugin" && CONTEXT_FIELDS.includes(member.property.name)))
+      .map((member) => member.object),
+  );
+  if (renamed || named.some((name) => !understood.has(name))) calls.push({ permission: null, url: null, link: null, dynamic: RENAMED_API });
   return { calls, secrets, failed: null };
 }
 
@@ -150,6 +178,7 @@ export function lint(
   if (manifest.consumes.length) wanted.add("link:consume");
   if (Object.keys(manifest.provides).length) wanted.add("link:provide");
   const local = manifest.urls.some(reachesLocal);
+  const localSignIn = [manifest.oauth.authorize_url, manifest.oauth.token_url].some((url) => url && isLocalAddress(new URL(url).hostname));
   for (const event of manifest.events) {
     if (tables.events[event]) wanted.add(tables.events[event]);
   }
@@ -158,7 +187,7 @@ export function lint(
     if (!declared.has(permission)) findings.push({ kind: "undeclared", what: permission });
   }
   for (const permission of declared) {
-    const implied = permission === "net:local" ? wanted.has("net") && local : permission === "oauth" || permission === "camera:view";
+    const implied = permission === "net:local" ? (wanted.has("net") && local) || localSignIn : permission === "oauth" || permission === "camera:view";
     if (!wanted.has(permission) && !implied) findings.push({ kind: "unused", what: permission });
   }
   for (const call of calls) {
@@ -172,7 +201,7 @@ export function lint(
     if (!declared) findings.push({ kind: "undeclared", what: call.link.name });
   }
   for (const name of new Set(secrets)) {
-    if (!(name in manifest.secrets) && !name.startsWith("oauth")) findings.push({ kind: "undeclared", what: `{{secret.${name}}}` });
+    if ((!(name in manifest.secrets) && name !== "oauth") || WITHHELD_SECRETS.includes(name)) findings.push({ kind: "undeclared", what: `{{secret.${name}}}` });
   }
   for (const what of new Set(calls.map((call) => call.dynamic).filter(Boolean) as string[])) {
     findings.push({ kind: "dynamic", what });

@@ -14,6 +14,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
+from functools import partial
 from pathlib import Path
 from typing import Callable, Literal
 
@@ -37,6 +38,10 @@ WINDOWS_PROVIDERS = {
     "VitisAIExecutionProvider",
 }
 DEFAULT_CPU_PROVIDER = "CPUExecutionProvider"
+CORE_ML_PROVIDERS = [
+    ("CoreMLExecutionProvider", {"ModelFormat": "MLProgram", "MLComputeUnits": "ALL", "RequireStaticInputShapes": "1"}),
+    DEFAULT_CPU_PROVIDER,
+]
 DEVICE_PRIORITY = ("GPU", "NPU", "CPU")
 SOFTWARE_ADAPTER = (0x1414, 0x8C)
 REGISTERED_LIBRARIES: set[str] = set()
@@ -110,7 +115,8 @@ def _device_label(device: ort.OrtEpDevice) -> str:
 
 def _throughput(model: Model, workers: int) -> float:
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        list(pool.map(lambda _: model(BENCHMARK_TENSOR), range(workers)))
+        if not all(np.isfinite(embedding).all() for embedding in pool.map(lambda _: model(BENCHMARK_TENSOR), range(workers))):
+            raise ValueError("it returned a non-finite embedding")
         started = time.perf_counter()
         list(pool.map(lambda _: [model(BENCHMARK_TENSOR) for _ in range(BENCHMARK_RUNS)], range(workers)))
         elapsed = time.perf_counter() - started
@@ -139,7 +145,13 @@ def _measure_concurrency(model: Model) -> tuple[int, float]:
 
 
 class OnnxInference:
-    """Runs the ONNX model through the fastest available execution provider.
+    """Runs the ONNX model through the fastest execution provider that can run it.
+
+    Every device the providers offer is tried, fastest first, and one that cannot
+    build a session or get through the benchmark is skipped with a warning, ending
+    on ONNX Runtime's own CPU provider. ONNX Runtime's own fallback is switched off
+    while that is decided: it retries on the CPU in silence, which would leave the
+    `compute` readout naming hardware the model never ran on.
 
     Core ML compiles the model on every session rather than into a cache directory.
     Its cache lookup builds the model URL with `NSURL URLWithString`, which yields
@@ -147,41 +159,53 @@ class OnnxInference:
     Support` fails every session it is meant to speed up - and the desktop app,
     which is where that path is used, could not start at all. Compiling costs
     about 0.2s per session.
+
+    Attributes:
+        device: Name of the hardware the model runs on.
+        measured: Worker count the device sustains, and its throughput there.
+        skipped: One message for each device that was offered and passed over.
     """
 
     runtime = "onnx"
 
     def __init__(self, model_path: Path) -> None:
+        self.skipped: list[str] = []
         self._resources = ExitStack()
+        self._model_path = str(model_path)
         self._register_plugins()
         if sys.platform == "win32":
             self._register_windows_providers()
 
+        devices = _execution_devices(ort.get_ep_devices())
+        accelerated = [(_device_label(device), partial(self._session_on, [device])) for device in devices]
+        if devices:
+            logger.info("execution providers offer: %s", ", ".join(label for label, _ in accelerated))
+        elif "CoreMLExecutionProvider" in ort.get_available_providers():
+            accelerated = [("Apple Core ML", partial(self._session_on, [], CORE_ML_PROVIDERS))]
+        for label, build in accelerated:
+            self.device = label
+            try:
+                self._benchmark(build())
+                return
+            except Exception as exc:
+                self.skipped.append(f"{label} cannot run the model, so detection is not using it: {exc}")
+        self.device = "ONNX CPU"
+        self._benchmark(self._session_on([], [DEFAULT_CPU_PROVIDER]))
+
+    def _session_on(
+        self, devices: list[ort.OrtEpDevice], providers: list[str | tuple[str, dict[str, str]]] | None = None
+    ) -> ort.InferenceSession:
         options = ort.SessionOptions()
         options.intra_op_num_threads = 1
-        devices = _execution_devices(ort.get_ep_devices())
         if devices:
-            logger.info("execution providers offer: %s", ", ".join(_device_label(device) for device in devices))
-            options.add_provider_for_devices(devices[:1], {})
-            self._session = ort.InferenceSession(str(model_path), sess_options=options)
-            self.device = _device_label(devices[0])
-        elif "CoreMLExecutionProvider" in ort.get_available_providers():
-            providers = [
-                (
-                    "CoreMLExecutionProvider",
-                    {"ModelFormat": "MLProgram", "MLComputeUnits": "ALL", "RequireStaticInputShapes": "1"},
-                ),
-                DEFAULT_CPU_PROVIDER,
-            ]
-            self._session = ort.InferenceSession(str(model_path), sess_options=options, providers=providers)
-            self.device = "Apple Core ML"
-        else:
-            self._session = ort.InferenceSession(
-                str(model_path), sess_options=options, providers=[DEFAULT_CPU_PROVIDER]
-            )
-            self.device = "ONNX CPU"
+            options.add_provider_for_devices(devices, {})
+        return ort.InferenceSession(self._model_path, sess_options=options, providers=providers, enable_fallback=0)
 
-        self._input_name = self._session.get_inputs()[0].name
+    def _benchmark(self, session: ort.InferenceSession) -> None:
+        self._session = session
+        self._input_name = session.get_inputs()[0].name
+        self.measured = _measure_concurrency(self.run)
+        session.enable_fallback()
 
     def _register_plugins(self) -> None:
         _preload_cuda_runtime()
@@ -202,17 +226,26 @@ class OnnxInference:
         except OSError as error:
             logger.warning("Windows ML is unavailable without the Windows App Runtime 2.x: %s", error)
             return
-        providers = [
-            provider
-            for provider in winml.ExecutionProviderCatalog.get_default().find_all_providers()
-            if provider.name in WINDOWS_PROVIDERS
-        ]
+        try:
+            providers = [
+                provider
+                for provider in winml.ExecutionProviderCatalog.get_default().find_all_providers()
+                if provider.name in WINDOWS_PROVIDERS
+            ]
+        except Exception as error:
+            logger.warning("Windows ML could not list its providers: %s", error)
+            return
         for provider in providers:
-            if provider.ready_state != winml.ExecutionProviderReadyState.READY:
-                result = provider.ensure_ready_async().get()
-                if result.status != winml.ExecutionProviderReadyResultState.SUCCESS:
-                    continue
-            _register_library(provider.name, provider.library_path)
+            try:
+                if provider.ready_state != winml.ExecutionProviderReadyState.READY:
+                    result = provider.ensure_ready_async().get()
+                    if result.status != winml.ExecutionProviderReadyResultState.SUCCESS:
+                        continue
+                library = provider.library_path
+            except Exception as error:
+                logger.warning("execution provider %s could not be installed: %s", provider.name, error)
+                continue
+            _register_library(provider.name, library)
 
     def run(self, tensor: np.ndarray) -> np.ndarray:
         """Returns the model embedding for one preprocessed frame."""
@@ -230,23 +263,32 @@ class LiteRtInference:
     `Interpreter.invoke` releases the GIL, so interpreters held per thread run
     genuinely in parallel; the `CompiledModel` API does not, and serialises every
     caller onto one core no matter how many workers are given to it.
+
+    The model is handed over as bytes: given a path, LiteRT opens it through
+    the ANSI code page on Windows and can fail under a user folder whose name
+    is outside it.
+
+    Attributes:
+        measured: Worker count the processor sustains, and its throughput there.
     """
 
     runtime = "litert"
     device = "LiteRT CPU"
+    skipped: list[str] = []
 
     def __init__(self, model_path: Path) -> None:
-        self._model_path = str(model_path)
+        self._model = model_path.read_bytes()
         self._interpreters = threading.local()
-        probe = Interpreter(model_path=self._model_path, num_threads=1)
+        probe = Interpreter(model_content=self._model, num_threads=1)
         self._input_index = probe.get_input_details()[0]["index"]
         self._output_index = probe.get_output_details()[0]["index"]
+        self.measured = _measure_concurrency(self.run)
 
     def run(self, tensor: np.ndarray) -> np.ndarray:
         """Returns the model embedding for one preprocessed frame."""
         interpreter = getattr(self._interpreters, "interpreter", None)
         if interpreter is None:
-            interpreter = Interpreter(model_path=self._model_path, num_threads=1)
+            interpreter = Interpreter(model_content=self._model, num_threads=1)
             interpreter.allocate_tensors()
             self._interpreters.interpreter = interpreter
         interpreter.set_tensor(self._input_index, tensor)
@@ -259,7 +301,12 @@ class LiteRtInference:
 
 
 class Inference:
-    """Runs the requested model runtime at the concurrency it measurably sustains."""
+    """Runs the requested model runtime at the concurrency it measurably sustains.
+
+    Attributes:
+        skipped: One message for each accelerator that was offered and passed
+            over, whichever runtime was chosen in the end.
+    """
 
     def __init__(self, model_dir: Path, runtime: InferenceRuntime) -> None:
         candidates: list[OnnxInference | LiteRtInference] = []
@@ -267,15 +314,16 @@ class Inference:
             candidates.append(OnnxInference(model_dir / "encoder_float32.onnx"))
         if runtime in ("auto", "litert"):
             candidates.append(LiteRtInference(model_dir / "encoder_float32.tflite"))
-        measured = [_measure_concurrency(candidate.run) for candidate in candidates]
         logger.info(
             "inference benchmark: %s",
             ", ".join(
-                f"{candidate.device} {fps:.1f} fps across {workers} workers"
-                for candidate, (workers, fps) in zip(candidates, measured)
+                f"{candidate.device} {candidate.measured[1]:.1f} fps across {candidate.measured[0]} workers"
+                for candidate in candidates
             ),
         )
-        selected, (self.workers, self.capacity_fps) = max(zip(candidates, measured), key=lambda pair: pair[1][1])
+        self.skipped = [message for candidate in candidates for message in candidate.skipped]
+        selected = max(candidates, key=lambda candidate: candidate.measured[1])
+        self.workers, self.capacity_fps = selected.measured
         for candidate in candidates:
             if candidate is not selected:
                 candidate.close()
@@ -283,10 +331,24 @@ class Inference:
         self.runtime = selected.runtime
         self.device = selected.device
         self._pool = ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="inference")
+        self._running = 0
+        self._idle = asyncio.Event()
+        self._idle.set()
 
     async def run(self, tensor: np.ndarray) -> np.ndarray:
         """Returns the model embedding for one preprocessed frame."""
-        return await asyncio.get_running_loop().run_in_executor(self._pool, self._selected.run, tensor)
+        self._running += 1
+        self._idle.clear()
+        try:
+            return await asyncio.get_running_loop().run_in_executor(self._pool, self._selected.run, tensor)
+        finally:
+            self._running -= 1
+            if not self._running:
+                self._idle.set()
+
+    async def drained(self) -> None:
+        """Waits until every frame sent to ``run`` has come back, so closing cannot cut one short."""
+        await self._idle.wait()
 
     def close(self) -> None:
         """Releases the selected model runtime and its worker threads."""

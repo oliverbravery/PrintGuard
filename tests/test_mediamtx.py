@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
+import socket
+import sys
+from pathlib import Path
 
 import httpx
 import pytest
 
-from printguard.server.mediamtx import MediaMTX, pull_source
+from printguard.server.mediamtx import EmbeddedMediaMTX, MediaMTX, pull_source
+
+SHIPPED_CONFIG = Path(__file__).parent.parent / "mediamtx.yml"
 
 
 @pytest.mark.parametrize(
@@ -51,3 +58,343 @@ async def test_managed_pull_sources_start_on_demand() -> None:
         "sourceOnDemandStartTimeout": "30s",
         "sourceOnDemandCloseAfter": "10s",
     }
+
+
+async def test_control_api_calls_carry_the_login() -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"items": []})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        mediamtx = MediaMTX("http://mediamtx", "rtsp://mediamtx", client, ("printguard", "secret"))
+        await mediamtx.list_paths()
+        await mediamtx.ensure_path("camera", "rtsp://camera/live")
+        await mediamtx.remove_path("camera")
+
+    expected = f"Basic {base64.b64encode(b'printguard:secret').decode()}"
+    assert [request.headers["authorization"] for request in requests] == [expected] * 3
+
+
+@pytest.mark.parametrize(
+    ("base", "login", "url"),
+    [
+        ("rtsp://localhost:8554", None, "rtsp://localhost:8554/cam"),
+        ("rtsp://localhost:8554/", ("printguard", "s3-cr_et"), "rtsp://printguard:s3-cr_et@localhost:8554/cam"),
+        ("rtsp://old:login@mediamtx:8554", ("printguard", "s3-cr_et"), "rtsp://printguard:s3-cr_et@mediamtx:8554/cam"),
+    ],
+)
+def test_the_stream_the_hub_reads_frames_from_carries_the_login_the_server_asks_readers_for(
+    base: str, login: tuple[str, str] | None, url: str
+) -> None:
+    assert MediaMTX("http://mediamtx", base, httpx.AsyncClient(), login).rtsp_url("cam") == url
+
+
+async def test_a_path_the_hub_never_added_is_not_asked_for_again_on_removal() -> None:
+    """MediaMTX logs an error for each path it is told to delete and does not have, as on every direct camera at shutdown."""
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        mediamtx = MediaMTX("http://mediamtx", "rtsp://mediamtx", client)
+        await mediamtx.remove_path("direct")
+        await mediamtx.ensure_path("pulled", "rtsp://camera/live")
+        requests.clear()
+        await mediamtx.remove_path("pulled")
+        await mediamtx.remove_path("pulled")
+
+    assert [(request.method, request.url.path) for request in requests] == [("DELETE", "/v3/config/paths/delete/pulled")]
+
+
+async def test_an_existing_path_is_patched() -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.startswith("/v3/config/paths/add/"):
+            return httpx.Response(400, json={"error": "path already exists"})
+        return httpx.Response(200)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        await MediaMTX("http://mediamtx", "rtsp://mediamtx", client).ensure_path("camera", "rtsp://camera/live")
+
+    assert [(request.method, request.url.path) for request in requests] == [
+        ("POST", "/v3/config/paths/add/camera"),
+        ("PATCH", "/v3/config/paths/patch/camera"),
+    ]
+
+
+async def test_an_address_mediamtx_refuses_is_reported_without_its_credentials() -> None:
+    requests: list[httpx.Request] = []
+    source = "rtsp://admin:hunter22@camera/live"
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(400, json={"error": f"invalid source {source}: only rtsp is supported"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        with pytest.raises(ValueError, match="PrintGuard can't use that address") as refused:
+            await MediaMTX("http://mediamtx", "rtsp://mediamtx", client).ensure_path("camera", source)
+
+    assert "only rtsp is supported" in str(refused.value)
+    assert "hunter22" not in str(refused.value)
+    assert [request.method for request in requests] == ["POST"]
+
+
+async def test_pull_paths_are_added_again_to_a_server_that_restarted() -> None:
+    """A path added through the API is gone when MediaMTX restarts, and a sleeping camera never asks for it again."""
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        mediamtx = MediaMTX("http://mediamtx", "rtsp://mediamtx", client)
+        await mediamtx.ensure_path("idle", "rtsps://printer:322/live", "ab12")
+        await mediamtx.ensure_path("removed", "rtsp://camera/live")
+        await mediamtx.remove_path("removed")
+        requests.clear()
+        await mediamtx.restore_paths()
+
+    assert [(request.method, request.url.path) for request in requests] == [("POST", "/v3/config/paths/add/idle")]
+    assert json.loads(requests[0].content)["source"] == "rtsps://printer:322/live"
+    assert json.loads(requests[0].content)["sourceFingerprint"] == "ab12"
+
+
+async def test_a_path_that_cannot_be_added_again_does_not_stop_the_rest() -> None:
+    """The first failure ended the loop, so every camera after it stayed without a path."""
+    added: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        name = request.url.path.rsplit("/", 1)[1]
+        if request.method == "POST" and name == "first" and added:
+            return httpx.Response(400, json={"error": "invalid source"})
+        added.append(name)
+        return httpx.Response(200)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        mediamtx = MediaMTX("http://mediamtx", "rtsp://mediamtx", client)
+        for name in ("first", "second", "third"):
+            await mediamtx.ensure_path(name, f"rtsp://user:hunter22@camera/{name}")
+        added[:] = ["restarted"]
+        with pytest.raises(RuntimeError, match=r"^first \(PrintGuard can't use that address: invalid source\)$"):
+            await mediamtx.restore_paths()
+
+    assert added == ["restarted", "second", "third"]
+
+
+@pytest.mark.parametrize(
+    ("url", "path"),
+    [
+        ("rtsp://localhost:8554/garage", "garage"),
+        ("rtsp://127.0.0.1:8554/garage", "garage"),
+        ("rtsp://viewer:pass@127.0.0.1:8554/garage/", "garage"),
+        ("rtsp://127.0.0.1:8555/garage", None),
+        ("rtsp://127.0.0.1/garage", None),
+        ("rtsp://127.0.0.1:8554/", None),
+        ("rtsp://192.0.2.7:8554/garage", None),
+        ("rtsp://camera.invalid:8554/garage", None),
+        ("rtmp://127.0.0.1:8554/garage", None),
+    ],
+)
+async def test_only_an_address_on_the_hubs_own_rtsp_listener_names_one_of_its_paths(url: str, path: str | None) -> None:
+    """A stream pushed to the hub and added by address was pulled with no login, which the bundled server refuses from 2.6.0."""
+    mediamtx = MediaMTX("http://localhost:9997", "rtsp://localhost:8554", None, ("printguard", "LOGIN"))
+
+    assert await mediamtx.own_path(url) == path
+
+
+async def test_a_server_on_another_machine_has_no_path_at_this_machines_address() -> None:
+    mediamtx = MediaMTX("http://192.0.2.9:9997", "rtsp://192.0.2.9:8554", None)
+
+    assert await mediamtx.own_path("rtsp://127.0.0.1:8554/garage") is None
+
+
+async def _nothing() -> None:
+    """Stands in for restoring paths where a test never restarts the server."""
+
+
+async def test_the_supervisor_restores_paths_once_a_restarted_server_answers(tmp_path, monkeypatch) -> None:
+    """Only the server started in place of one that exited has anything to be given back."""
+    monkeypatch.setattr("printguard.server.mediamtx.RESTART_DELAY_S", 0.05)
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    started = tmp_path / "started"
+    stand_in = tmp_path / "mediamtx.py"
+    stand_in.write_text(
+        "import pathlib, socket, sys, time\n"
+        f"started = pathlib.Path({str(started)!r})\n"
+        f"listener = socket.create_server(('127.0.0.1', {port}))\n"
+        "first = not started.exists()\n"
+        "started.write_text(started.read_text() + 'x' if started.exists() else 'x')\n"
+        "time.sleep(0.5 if first else 60)\n"
+    )
+    restored = asyncio.Event()
+    launches_at_restore: list[str] = []
+
+    async def restore() -> None:
+        launches_at_restore.append(started.read_text())
+        restored.set()
+
+    server = EmbeddedMediaMTX(sys.executable, str(stand_in), f"http://127.0.0.1:{port}", ("printguard", "secret"), restore)
+
+    await server.start()
+    assert not restored.is_set(), "the first start has no paths to give back"
+    await asyncio.wait_for(restored.wait(), 15)
+    await server.stop()
+
+    assert launches_at_restore == ["xx"]
+
+
+async def test_a_server_that_cannot_stay_up_is_logged_less_and_less_often(tmp_path, monkeypatch) -> None:
+    """A line every restart filled the log tail a bug report attaches within minutes."""
+    monkeypatch.setattr("printguard.server.mediamtx.RESTART_DELAY_S", 0)
+    monkeypatch.setattr("printguard.server.mediamtx.READY_TIMEOUT_S", 1.0)
+    launches = tmp_path / "launches"
+    launches.write_text("")
+    stand_in = tmp_path / "mediamtx.py"
+    stand_in.write_text(f"open({str(launches)!r}, 'a').write('x')\nraise SystemExit(1)\n")
+    logged: list[str] = []
+    monkeypatch.setattr("printguard.server.mediamtx.logger.error", lambda message, *args: logged.append(message % args))
+    server = EmbeddedMediaMTX(sys.executable, str(stand_in), "http://127.0.0.1:9", ("printguard", "secret"), _nothing)
+
+    await server.start()
+    async with asyncio.timeout(30):
+        while len(launches.read_text()) < 9:
+            await asyncio.sleep(0.01)
+    await server.stop()
+
+    exits = len(launches.read_text())
+    restarts = [line for line in logged if line == "MediaMTX exited (code 1); restarting"]
+    assert len(restarts) in ((exits - 1).bit_length(), exits.bit_length()), "one line for the first, second, fourth and eighth exit in a row"
+
+
+async def test_a_server_ended_by_the_signal_that_stops_the_hub_is_not_reported_or_restarted(tmp_path, monkeypatch) -> None:
+    """A Ctrl+C reaches the server with the hub, ahead of the hub saying it is stopping."""
+    monkeypatch.setattr("printguard.server.mediamtx.RESTART_DELAY_S", 0)
+    monkeypatch.setattr("printguard.server.mediamtx.READY_TIMEOUT_S", 0.5)
+    launches = tmp_path / "launches"
+    launches.write_text("")
+    stand_in = tmp_path / "mediamtx.py"
+    stand_in.write_text(f"import os, signal\nopen({str(launches)!r}, 'a').write('x')\nos.kill(os.getpid(), signal.SIGTERM)\n")
+    logged: list[str] = []
+    monkeypatch.setattr("printguard.server.mediamtx.logger.error", lambda message, *args: logged.append(message % args))
+    server = EmbeddedMediaMTX(sys.executable, str(stand_in), "http://127.0.0.1:9", ("printguard", "secret"), _nothing)
+
+    await server.start()
+    await server.stop()
+
+    assert launches.read_text() == "x", "the server was started again while the hub was stopping"
+    assert not [line for line in logged if "exited" in line]
+
+
+async def test_a_server_ended_by_a_signal_while_the_hub_runs_on_is_still_restarted(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("printguard.server.mediamtx.RESTART_DELAY_S", 0)
+    monkeypatch.setattr("printguard.server.mediamtx.READY_TIMEOUT_S", 0.5)
+    monkeypatch.setattr("printguard.server.mediamtx.SIGNALLED_GRACE_S", 0.1)
+    launches = tmp_path / "launches"
+    launches.write_text("")
+    stand_in = tmp_path / "mediamtx.py"
+    stand_in.write_text(f"import os, signal\nopen({str(launches)!r}, 'a').write('x')\nos.kill(os.getpid(), signal.SIGTERM)\n")
+    logged: list[str] = []
+    monkeypatch.setattr("printguard.server.mediamtx.logger.error", lambda message, *args: logged.append(message % args))
+    server = EmbeddedMediaMTX(sys.executable, str(stand_in), "http://127.0.0.1:9", ("printguard", "secret"), _nothing)
+
+    await server.start()
+    async with asyncio.timeout(10):
+        while len(launches.read_text()) < 2:
+            await asyncio.sleep(0.01)
+    await server.stop()
+
+    assert "MediaMTX exited (code -15); restarting" in logged
+
+
+async def test_a_server_that_cannot_be_tied_to_the_hubs_lifetime_is_still_supervised(tmp_path, monkeypatch) -> None:
+    """The error ended the supervisor with nothing logged, so the server was never started again."""
+    monkeypatch.setattr("printguard.server.mediamtx.RESTART_DELAY_S", 0)
+    monkeypatch.setattr("printguard.server.mediamtx.READY_TIMEOUT_S", 0.5)
+    launches = tmp_path / "launches"
+    launches.write_text("")
+    stand_in = tmp_path / "mediamtx.py"
+    stand_in.write_text(f"open({str(launches)!r}, 'a').write('x')\nraise SystemExit(1)\n")
+    logged: list[str] = []
+    monkeypatch.setattr("printguard.server.mediamtx.logger.error", lambda message, *args: logged.append(message % args))
+
+    def no_more_files(self, pid: int) -> None:
+        raise OSError(24, "Too many open files")
+
+    monkeypatch.setattr(EmbeddedMediaMTX, "_bind_lifetime", no_more_files)
+    server = EmbeddedMediaMTX(sys.executable, str(stand_in), "http://127.0.0.1:9", ("printguard", "secret"), _nothing)
+
+    await server.start()
+    async with asyncio.timeout(10):
+        while len(launches.read_text()) < 2:
+            await asyncio.sleep(0.01)
+    await server.stop()
+
+    assert "MediaMTX could not be tied to the hub's lifetime ([Errno 24] Too many open files), so it would outlive a hub that is killed" in logged
+
+
+def test_the_shipped_config_grants_the_control_api_and_reading_to_nobody() -> None:
+    """A web page in a browser on the same computer can reach the loopback listeners.
+
+    The control API reads camera URLs with their passwords and can add a path
+    that runs a command, and a rebinding page could read a feed from the HLS
+    muxer, so nobody may hold either until the hub adds its own login, and
+    neither listener may answer a page from another origin.
+    """
+    config = SHIPPED_CONFIG.read_text()
+    users = config.split("authInternalUsers:\n")[1].split("\n\n")[0]
+
+    assert users == (
+        "  - user: any\n"
+        "    permissions:\n"
+        "      - action: publish"
+    )
+    assert "action: api" not in config and "action: read" not in config
+    assert "\napiAllowOrigins: []\n" in config
+    assert "\nhlsAllowOrigins: []\n" in config
+
+
+async def test_the_bundled_server_is_handed_the_api_login_in_its_environment(tmp_path) -> None:
+    """The login is appended after the one user the shipped config declares."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    seen = tmp_path / "environment.json"
+    stand_in = tmp_path / "mediamtx.py"
+    stand_in.write_text(
+        "import json, os, socket, time\n"
+        f"json.dump({{k: v for k, v in os.environ.items() if k.startswith('MTX_')}}, open({str(seen)!r}, 'w'))\n"
+        f"listener = socket.create_server(('127.0.0.1', {port}))\n"
+        "time.sleep(60)\n"
+    )
+    server = EmbeddedMediaMTX(sys.executable, str(stand_in), f"http://127.0.0.1:{port}", ("printguard", "secret"), _nothing)
+
+    await server.start()
+    await server.stop()
+
+    assert json.loads(seen.read_text()) == {
+        "MTX_AUTHINTERNALUSERS_1_USER": "printguard",
+        "MTX_AUTHINTERNALUSERS_1_PASS": "secret",
+        "MTX_AUTHINTERNALUSERS_1_PERMISSIONS_0_ACTION": "api",
+        "MTX_AUTHINTERNALUSERS_1_PERMISSIONS_1_ACTION": "read",
+    }
+
+
+async def test_stop_wins_against_a_server_that_is_still_launching(tmp_path) -> None:
+    stand_in = tmp_path / "mediamtx.py"
+    stand_in.write_text("import time\ntime.sleep(600)\n")
+    server = EmbeddedMediaMTX(sys.executable, str(stand_in), "http://127.0.0.1:9", ("printguard", "secret"), _nothing)
+    server._supervisor = asyncio.ensure_future(server._run())
+    await asyncio.sleep(0)
+
+    await asyncio.wait_for(server.stop(), 8)
+
+    assert server._process is None or server._process.returncode is not None

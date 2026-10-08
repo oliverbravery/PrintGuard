@@ -3,18 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import time
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
+from urllib.parse import urlsplit
 
 import httpx
 import numpy as np
 import pytest
 
 from fakes import FakePlatform
+from printguard.engine import reports
 from printguard.engine.engine import Engine
-from printguard.engine.registry import Camera
+from printguard.engine.registry import Camera, Plugin
+from printguard.server import api as api_module
 from printguard.server.api import ApiAuth, build_api_app
+from printguard.server.platform import OPEN_WAIT_S
 
 OCTOPRINT = {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}
 
@@ -92,6 +98,43 @@ async def test_classify_endpoint_reads_a_supplied_frame() -> None:
         assert bad.status_code == 400
 
 
+async def test_classify_stops_reading_a_frame_at_its_size_limit(monkeypatch) -> None:
+    monkeypatch.setattr(api_module, "MAX_FRAME_BYTES", 16)
+    read = 0
+
+    async def endless():
+        nonlocal read
+        while True:
+            read += 8
+            yield b"\xff" * 8
+
+    async with api() as (client, *_):
+        refused = await client.post("/classify", content=endless(), headers={"Content-Type": "image/jpeg"})
+        assert refused.status_code == 413 and read <= 32
+        body = (await client.get("/openapi.json")).json()["paths"]["/classify"]["post"]["requestBody"]
+        assert list(body["content"]) == ["image/jpeg"]
+
+
+async def test_supplied_frames_are_classified_a_few_at_a_time(monkeypatch) -> None:
+    """Each one decodes to as much as 150 MB, and 48 sent at once took the hub to 8 GB."""
+    async with api() as (client, engine, *_):
+        running = most = 0
+
+        async def classify(data: bytes) -> dict:
+            nonlocal running, most
+            running += 1
+            most = max(most, running)
+            await asyncio.sleep(0.02)
+            running -= 1
+            return {"prediction": "success"}
+
+        monkeypatch.setattr(engine, "classify", classify)
+        answers = await asyncio.gather(*(client.post("/classify", content=b"\xff\xd8jpeg") for _ in range(8)))
+
+    assert [answer.status_code for answer in answers] == [200] * 8
+    assert most == api_module.CLASSIFY_IN_FLIGHT
+
+
 async def test_baseline_is_read_only_without_tokens() -> None:
     async with api() as (client, _engine, _platform, _monitor_id, printer_id, camera_id, _tokens):
         assert (await client.get("/state")).status_code == 200
@@ -116,7 +159,7 @@ async def test_scoped_tokens_gate_control_and_management() -> None:
         acted = await client.post(f"/printers/{printer_id}/action", json={"action": "pause"}, headers=manage)
         assert acted.status_code == 200
         assert any("/api/job" in url for _, url in platform.http_calls)
-        added = await client.post("/printers", json={"name": "x", "provider": "octoprint", "config": {}}, headers=manage)
+        added = await client.post("/printers", json={"name": "x", **OCTOPRINT}, headers=manage)
         assert added.status_code == 200
         made = await client.post("/monitors", json={"name": "m2", "camera_id": camera_id}, headers=manage)
         assert made.status_code == 200
@@ -137,9 +180,35 @@ async def test_read_surface_strips_linked_service_secrets() -> None:
         assert "api_key" not in listed[0]["config"]
         assert "api_key" not in one["config"]
 
-        full = engine.state_event()
-        assert full["printers"][0]["config"]["api_key"] == "k"
-        assert full["settings"]["notifiers"]["telegram"]["bot_token"] == "T"
+        assert engine.printers.get(printer_id).config["api_key"] == "k"
+        assert engine.settings["notifiers"]["telegram"]["bot_token"] == "T"
+
+
+async def test_a_notifier_nobody_knows_is_neither_stored_nor_read_back() -> None:
+    """Nothing declares which of its fields are secret, so there is nothing to redact it by."""
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        refused = await client.patch("/settings", json={"notifiers": {"slack": {"token": "xoxb-secret"}}}, headers=manage)
+        assert refused.status_code == 400 and "unknown notifier 'slack'" in refused.text
+        assert engine.settings["notifiers"] == {}
+
+        engine.settings["notifiers"] = {"slack": {"token": "xoxb-secret"}, "pushover": {"api_token": "a", "user_key": "u", "priority": "1"}}
+        state = await client.get("/state", headers=manage)
+        assert "xoxb-secret" not in state.text
+        assert state.json()["settings"]["notifiers"] == {"pushover": {"priority": "1"}}
+
+
+async def test_read_surface_leaves_out_what_a_plugin_stored() -> None:
+    """A gate plugin keeps its session in its store, and a read token is not the dashboard."""
+    async with api(("read", "manage")) as (client, engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        manifest = {"id": "gate", "name": "Gate", "version": "1.0.0"}
+        engine.plugins.add(Plugin(id="gate", manifest=manifest, sources={}, digests={}, source={"kind": "file"}, config={"session": "S3SSION"}))
+
+        for scope in ("read", "manage"):
+            answer = await client.get("/state", headers={"Authorization": f"Bearer {tokens[scope]}"})
+            assert "S3SSION" not in answer.text
+            assert [plugin["id"] for plugin in answer.json()["plugins"]] == ["gate"]
+        assert engine.state_event()["plugins"][0]["config"] == {"session": "S3SSION"}, "the dashboard lost the store"
 
 
 async def test_refresh_printer_cameras_registers_exposed_cameras(monkeypatch) -> None:
@@ -158,6 +227,16 @@ async def test_refresh_printer_cameras_registers_exposed_cameras(monkeypatch) ->
         registered = {c["id"]: c for c in cameras}
         assert f"{printer_id}-webcam" in registered
         assert registered[f"{printer_id}-webcam"]["printer_id"] == printer_id
+
+
+async def test_refreshing_printer_cameras_waits_as_long_as_a_camera_takes_to_open(monkeypatch) -> None:
+    """A timeout cancels every printer's reconcile, so it must outlast the camera open inside one."""
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        request = AsyncMock(return_value=[])
+        monkeypatch.setattr(engine, "request", request)
+        await client.post("/cameras/refresh-printers", headers={"Authorization": f"Bearer {tokens['manage']}"})
+        assert "timeout" not in request.await_args.kwargs
+        assert engine._time_allowed({"cmd": "printer.cameras.refresh"}) > OPEN_WAIT_S
 
 
 async def test_read_surface_strips_camera_source_credentials() -> None:
@@ -202,6 +281,44 @@ def test_bambu_jpeg_stream_strips_frame_headers() -> None:
     while chunk := stream.read(4096):
         out += chunk
     assert out == b"".join(jpegs), "the 16-byte frame headers are stripped, leaving concatenated JPEGs"
+
+
+def test_bambu_jpeg_stream_refuses_a_frame_that_is_not_plausible(monkeypatch) -> None:
+    import struct
+
+    from printguard.server import bambu_camera
+    from printguard.server.bambu_camera import BambuJpegStream
+
+    class HostileSock:
+        def __init__(self) -> None:
+            self.handed_over = 0
+            self.sent_header = False
+
+        def recv(self, count: int) -> bytes:
+            if not self.sent_header:
+                self.sent_header = True
+                return struct.pack("<IIII", 0x7FFFFFFF, 0, 0, 0)[:count]
+            self.handed_over += count
+            return b"\xff" * count
+
+        def close(self) -> None:
+            pass
+
+    sock = HostileSock()
+    with pytest.raises(ValueError, match="announced a 2147483647 byte frame"):
+        BambuJpegStream(sock).read(4096)
+    assert sock.handed_over == 0, "the frame was read before it was refused"
+
+    class SlowSock(HostileSock):
+        def recv(self, count: int) -> bytes:
+            if not self.sent_header:
+                self.sent_header = True
+                return struct.pack("<IIII", 1_000_000, 0, 0, 0)[:count]
+            return b"\xff"
+
+    monkeypatch.setattr(bambu_camera, "FRAME_DEADLINE_S", 0.05)
+    with pytest.raises(TimeoutError, match="took too long"):
+        BambuJpegStream(SlowSock()).read(4096)
 
 
 def test_callable_mjpeg_sources_cap_pyav_probe(monkeypatch) -> None:
@@ -264,6 +381,7 @@ async def test_view_camera_renews_demand_after_cold_start() -> None:
     source = SimpleNamespace(online=True, view=Mock(return_value=True))
     server = object.__new__(platform.ServerPlatform)
     server._sources = {"camera": source}
+    server._closing = {}
 
     await server.view_camera("camera")
 
@@ -278,6 +396,7 @@ async def test_cancelled_camera_open_closes_platform_source(monkeypatch) -> None
     server = object.__new__(platform.ServerPlatform)
     server.mediamtx = SimpleNamespace(rtsp_url=Mock(return_value="rtsp://mediamtx/camera"))
     server._sources = {}
+    server._closing = {}
     task = asyncio.create_task(server.open_camera("camera", {"kind": "url", "url": "http://camera/stream"}))
     await asyncio.sleep(0)
 
@@ -296,6 +415,7 @@ async def test_releasing_pull_camera_removes_managed_path() -> None:
     server = object.__new__(platform.ServerPlatform)
     server.mediamtx = SimpleNamespace(remove_path=AsyncMock())
     server._sources = {"camera": source}
+    server._closing = {}
 
     await server.release_camera("camera", {"kind": "url", "url": "rtsp://camera/live"})
 
@@ -334,6 +454,7 @@ async def test_camera_source_converts_only_grabbed_frames(monkeypatch, scalers) 
     monkeypatch.setattr(platform.AVSource, "_run", lambda self: None)
 
     source = platform.AVSource("rtsp://mediamtx/camera")
+    source.online = True
     source._latest = (object(), 1.0, 2.0)
     first = await source.grab()
     second = await source.grab()
@@ -362,10 +483,13 @@ def test_published_frames_share_one_single_threaded_scaler(monkeypatch, scalers)
     monkeypatch.setattr(
         publish.av, "open", Mock(return_value=SimpleNamespace(add_stream=Mock(return_value=stream), mux=Mock()))
     )
-    push = publish.H264Push("rtsp://mediamtx/camera", 30)
+    push = publish.H264Push("rtsp://mediamtx/camera", 30, 3.0)
 
-    for _ in range(3):
+    for sent in range(3):
         push.send(SimpleNamespace(width=64, height=48))
+        while stream.encode.call_count <= sent:
+            time.sleep(0.01)
+    push.close()
 
     assert [scaler.calls for scaler in scalers] == [[("yuv420p", 1)] * 3]
 
@@ -391,6 +515,237 @@ async def test_heat_route_needs_control_and_returns_the_printer() -> None:
         ]
         assert (await client.post(f"/printers/{printer_id}/heat", json={}, headers=control)).status_code == 400
         assert (await client.post("/printers/nope/heat", json={"bed": 60}, headers=control)).status_code == 404
+
+
+async def test_a_number_sent_as_a_boolean_or_text_is_refused_not_converted() -> None:
+    async with api(("manage",)) as (client, engine, platform, monitor_id, printer_id, camera_id, tokens):
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        refused = [
+            (client.post, f"/printers/{printer_id}/heat", {"nozzle": True}),
+            (client.post, f"/printers/{printer_id}/heat", {"bed": "60"}),
+            (client.patch, f"/monitors/{monitor_id}", {"threshold": True}),
+            (client.patch, f"/monitors/{monitor_id}", {"consecutive": "3"}),
+            (client.patch, f"/cameras/{camera_id}", {"brightness": "1.5"}),
+        ]
+        for send, path, body in refused:
+            assert (await send(path, json=body, headers=manage)).status_code == 422, (path, body)
+        assert not [r for r in platform.http_requests if r["method"] == "POST"], "a heater was sent a target that is not a number"
+        assert engine.monitors[monitor_id]["threshold"] == 0.75
+        assert (await client.post(f"/printers/{printer_id}/heat", json={"nozzle": 200}, headers=manage)).status_code == 200
+
+
+async def test_a_camera_cannot_be_added_on_the_stream_the_hub_publishes_for_another() -> None:
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, _printer_id, camera_id, tokens):
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        refused = await client.post("/cameras", json={"source": {"kind": "path", "path": camera_id}}, headers=manage)
+        assert refused.status_code >= 400 and "already registered" in refused.text
+        assert len(engine.cameras.items) == 1
+
+
+@pytest.mark.parametrize("literal", [b"NaN", b"Infinity", b"-Infinity"])
+async def test_a_number_that_is_not_finite_is_refused_at_the_boundary(literal: bytes) -> None:
+    """Python's json writes these literals for a float that is not finite, and reads them back."""
+    async with api(("manage",)) as (client, engine, platform, monitor_id, printer_id, camera_id, tokens):
+        raw = {"Content-Type": "application/json", "Authorization": f"Bearer {tokens['manage']}"}
+        bodies = {
+            f"/printers/{printer_id}/heat": (client.post, b'{"nozzle": %s}'),
+            f"/monitors/{monitor_id}": (client.patch, b'{"threshold": %s}'),
+            f"/cameras/{camera_id}": (client.patch, b'{"crop": {"x": %s, "y": 0, "w": 0.5, "h": 0.5}}'),
+        }
+        for path, (send, body) in bodies.items():
+            refused = await send(path, content=body % literal, headers=raw)
+            assert refused.status_code == 422 and refused.json()["detail"][0]["type"] == "finite_number", (path, refused.text)
+        assert not [r for r in platform.http_requests if r["method"] == "POST"], "a heater was sent a target that is not a number"
+        assert engine.monitors[monitor_id]["threshold"] == 0.75 and engine.cameras.get(camera_id).crop is None
+        preset = await client.patch("/settings", content=b'{"preheat": [{"name": "x", "nozzle": %s, "bed": 60}]}' % literal, headers=raw)
+        assert preset.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("patch", "wrong"),
+    [
+        ({"fault_grace_s": "soon"}, True),
+        ({"fault_grace_s": True}, True),
+        ({"update_check": "yes"}, True),
+        ({"feedback": "sometimes"}, True),
+        ({"inference_runtime": "cuda"}, True),
+        ({"fault_grace_s": 300, "update_check": False, "feedback": "off"}, False),
+    ],
+)
+async def test_every_setting_a_token_may_change_is_typed_and_a_wrong_type_is_a_422(patch: dict, wrong: bool) -> None:
+    """A key the body model lacked was dropped with a 200, whatever it held."""
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        answer = await client.patch("/settings", json=patch, headers={"Authorization": f"Bearer {tokens['manage']}"})
+
+    if wrong:
+        assert answer.status_code == 422, answer.text
+        assert engine.settings["fault_grace_s"] == 120.0
+    else:
+        assert answer.status_code == 200 and (engine.settings["fault_grace_s"], engine.settings["update_check"], engine.settings["feedback"]) == (300.0, False, "off")
+
+
+QUERY_CAMERA = "http://192.168.1.50/videostream.cgi?user=admin&pwd=QUERYPASS"
+BASIC_PRINTER = {"base_url": "http://opuser:BASICPASS@octopi.local", "api_key": "octo-secret"}
+BASIC_NTFY = {"url": "https://ntfyuser:NTFYPASS@ntfy.example/topic", "token": "tk_secret"}
+LEAKS = ("QUERYPASS", "BASICPASS", "NTFYPASS", "octo-secret", "tk_secret", "opuser", "ntfyuser")
+
+
+async def test_credentials_inside_urls_reach_neither_the_read_surface_nor_a_bug_report(monkeypatch) -> None:
+    async with api(("read",)) as (client, engine, _platform, _monitor_id, printer_id, _camera_id, tokens):
+        engine.cameras.add(Camera(id="ip", name="IP cam", source={"kind": "url", "url": QUERY_CAMERA}, max_fps=5.0))
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"config": BASIC_PRINTER}})
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": BASIC_NTFY}}})
+
+        state = (await client.get("/state", headers={"Authorization": f"Bearer {tokens['read']}"})).text
+        assert not [leak for leak in LEAKS if leak in state]
+        assert "http://192.168.1.50/videostream.cgi?user=[redacted]&pwd=[redacted]" in state
+        redacted = json.loads(state)
+        assert redacted["printers"][0]["config"]["base_url"] == "http://octopi.local"
+        assert redacted["settings"]["notifiers"]["ntfy"] == {}, "an open topic's URL is all it takes to read and publish to it"
+
+        failure = "GET http://192.168.1.50/videostream.cgi?user=admin&pwd=QUERYPASS refused, as was https://ntfyuser:NTFYPASS@ntfy.example/topic"
+        monkeypatch.setattr(reports.logs, "recent", lambda: [failure])
+        files = reports.report_files(diag=reports.diagnostics(engine), ui_logs=[failure], secrets=reports.collect_secrets(engine))
+        for name, _content_type, payload in files:
+            assert not [leak for leak in (*LEAKS, "ntfy.example/topic") if leak in payload.decode()], name
+
+
+PROTECT_CAMERA = "rtsps://192.168.1.1:7441/zX9aBcD1eFgH2iJk?enableSrtp"
+
+
+async def test_a_key_in_a_camera_address_path_reaches_neither_the_read_surface_nor_a_bug_report(monkeypatch) -> None:
+    async with api(("read",)) as (client, engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        engine.cameras.add(Camera(id="protect", name="Protect", source={"kind": "url", "url": PROTECT_CAMERA}, max_fps=5.0))
+        engine.cameras.add(Camera(id="reolink", name="Reolink", source={"kind": "url", "url": "rtsp://192.168.1.9/h264Preview_01_main"}, max_fps=5.0))
+
+        state = (await client.get("/state", headers={"Authorization": f"Bearer {tokens['read']}"})).text
+        assert "zX9aBcD1eFgH2iJk" not in state
+        assert "rtsps://192.168.1.1:7441/[redacted]?enableSrtp" in state
+        assert "rtsp://192.168.1.9/h264Preview_01_main" in state, "an ordinary stream name is left to read"
+
+        failure = f"could not open {PROTECT_CAMERA}"
+        monkeypatch.setattr(reports.logs, "recent", lambda: [failure])
+        files = reports.report_files(diag=reports.diagnostics(engine), ui_logs=[failure], secrets=reports.collect_secrets(engine))
+        for name, _content_type, payload in files:
+            assert "zX9aBcD1eFgH2iJk" not in payload.decode(), name
+
+
+@pytest.mark.parametrize("password", ["pässwörd", 'pa"ss-word', "pa\\ss-word"])
+async def test_a_credential_json_writes_differently_is_still_scrubbed_from_the_diagnostics(password: str) -> None:
+    """Events are scrubbed as they are raised, so the value is put where only the report's own pass reaches it."""
+    async with api() as (_client, engine, _platform, monitor_id, *_):
+        await engine.handle({"cmd": "settings.update", "patch": {"mqtt": {"host": "broker", "password": password}}})
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"name": f"bench {password}"}})
+        files = reports.report_files(diag=reports.diagnostics(engine), ui_logs=[], secrets=reports.collect_secrets(engine))
+        diagnostics = json.loads(next(payload for name, _content_type, payload in files if name == "diagnostics.json"))
+        assert diagnostics["monitors"][0]["name"] == "bench [redacted]"
+
+
+BRACKET_CAMERA = "rtsp://admin:pa[ss@192.168.1.60/stream"
+BRACKET_HOST = "http://[192.168.1.5]:5000"
+
+
+async def test_an_address_that_cannot_be_split_is_refused_and_one_already_stored_is_redacted_whole() -> None:
+    async with api(("read", "manage")) as (client, engine, platform, _monitor_id, printer_id, _camera_id, tokens):
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        refusals = [
+            await client.post("/cameras", json={"name": "c", "source": {"kind": "url", "url": BRACKET_CAMERA}}, headers=manage),
+            await client.post("/printers", json={"name": "p", "provider": "octoprint", "config": {"base_url": BRACKET_HOST, "api_key": "k"}}, headers=manage),
+            await client.patch(f"/printers/{printer_id}", json={"config": {"base_url": BRACKET_HOST, "api_key": "k"}}, headers=manage),
+            await client.patch("/settings", json={"notifiers": {"ntfy": {"url": BRACKET_HOST}}}, headers=manage),
+        ]
+        assert [refused.status_code for refused in refusals] == [400, 400, 400, 400]
+        assert all("not a valid URL" in refused.text and "pa[ss" not in refused.text for refused in refusals)
+
+        engine.cameras.add(Camera(id="old", name="Stored before", source={"kind": "url", "url": BRACKET_CAMERA}, max_fps=5.0))
+        engine.printers.get(printer_id).config = {"base_url": BRACKET_HOST, "api_key": "k"}
+        engine.settings["notifiers"] = {"ntfy": {"url": BRACKET_HOST}}
+
+        for path in ("/state", "/printers", "/monitors", "/cameras", "/prints"):
+            answer = await client.get(path, headers={"Authorization": f"Bearer {tokens['read']}"})
+            assert answer.status_code == 200 and "pa[ss" not in answer.text, path
+        state = (await client.get("/state", headers=manage)).json()
+        assert next(camera for camera in state["cameras"] if camera["id"] == "old")["source"]["url"] == reports.REDACTED
+        assert state["printers"][0]["config"] == {"base_url": reports.REDACTED}
+        assert (await client.patch("/settings", json={"theme": "dark"}, headers=manage)).status_code == 200
+
+        await engine.handle({"cmd": "report.send", "message": "it broke"})
+        envelope = next(r for r in platform.http_requests if urlsplit(r["url"]).hostname.endswith(".sentry.io"))["data"]
+        assert b"pa[ss" not in envelope and BRACKET_CAMERA.encode() not in envelope
+
+
+def test_a_query_value_is_scrubbed_from_a_log_only_beside_its_key() -> None:
+    """A value such as ``stream`` or ``5`` is an ordinary word, so blanking it everywhere would leave nothing to read."""
+    found = reports.url_secrets("http://cam/?action=stream&fps=5&pwd=abc")
+    assert found == {"action=stream", "fps=5", "pwd=abc"}
+    assert reports.scrub("5 frames, stream stalled at http://cam/?fps=5&pwd=abc", found) == "5 frames, stream stalled at http://cam/?[redacted]&[redacted]"
+
+
+async def test_a_bearer_that_is_not_ascii_is_refused_rather_than_crashing() -> None:
+    async with api(("read",)) as (client, _engine, _platform, _monitor_id, _printer_id, _camera_id, _tokens):
+        refused = await client.get("/state", headers={"Authorization": "Bearer pässwörd".encode()})
+        assert refused.status_code == 401
+
+
+async def test_the_schema_is_served_without_a_token() -> None:
+    """It describes the API and holds nothing of the hub's, so a client can read it before it has a token."""
+    async with api(("read",)) as (client, _engine, _platform, _monitor_id, _printer_id, _camera_id, _tokens):
+        assert (await client.get("/openapi.json")).status_code == 200
+        assert (await client.get("/docs")).status_code == 404
+        assert (await client.get("/redoc")).status_code == 404
+        assert (await client.get("/state")).status_code == 401
+
+
+async def test_sending_back_what_was_read_keeps_the_secrets_a_read_leaves_out() -> None:
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, printer_id, _camera_id, tokens):
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"config": BASIC_PRINTER}})
+        await engine.handle(
+            {"cmd": "settings.update", "patch": {"notifiers": {"ntfy": BASIC_NTFY}, "mqtt": {"host": "broker", "password": "mq-secret"}}}
+        )
+
+        settings = (await client.get("/state", headers=manage)).json()["settings"]
+        settings["mqtt"]["tls"] = True
+        patched = await client.patch("/settings", json={"notifiers": settings["notifiers"], "mqtt": settings["mqtt"]}, headers=manage)
+        assert patched.status_code == 200, patched.text
+        assert engine.settings["notifiers"]["ntfy"] == BASIC_NTFY
+        assert engine.settings["mqtt"] == {"host": "broker", "tls": True, "password": "mq-secret"}
+
+        printer = (await client.get(f"/printers/{printer_id}", headers=manage)).json()
+        renamed = await client.patch(f"/printers/{printer_id}", json={"name": "Renamed", "config": printer["config"]}, headers=manage)
+        assert renamed.status_code == 200, renamed.text
+        assert engine.printers.get(printer_id).config == BASIC_PRINTER
+
+        replaced = {"url": "https://ntfy.example/other", "token": "tk_new"}
+        await client.patch("/settings", json={"notifiers": {"ntfy": replaced}}, headers=manage)
+        assert engine.settings["notifiers"]["ntfy"] == replaced
+
+
+async def test_a_secret_sent_as_null_is_cleared() -> None:
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        await engine.handle(
+            {"cmd": "settings.update", "patch": {"notifiers": {"ntfy": BASIC_NTFY}, "mqtt": {"host": "broker", "username": "u", "password": "mq-secret"}}}
+        )
+
+        blank = await client.patch("/settings", json={"mqtt": {"host": "broker", "password": ""}}, headers=manage)
+        assert blank.status_code == 200 and engine.settings["mqtt"]["password"] == "mq-secret"
+        cleared = await client.patch(
+            "/settings", json={"mqtt": {"host": "broker", "password": None}, "notifiers": {"ntfy": {**BASIC_NTFY, "token": None}}}, headers=manage
+        )
+        assert cleared.status_code == 200, cleared.text
+        assert engine.settings["mqtt"] == {"host": "broker", "password": ""}
+        assert engine.settings["notifiers"]["ntfy"]["token"] == ""
+
+
+async def test_adding_a_camera_waits_as_long_as_a_camera_takes_to_open(monkeypatch) -> None:
+    """A healthy camera can take most of OPEN_WAIT_S to give a first frame."""
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        request = AsyncMock(return_value=[])
+        monkeypatch.setattr(engine, "request", request)
+        await client.post("/cameras", json={"source": {"kind": "fake"}}, headers={"Authorization": f"Bearer {tokens['manage']}"})
+        assert "timeout" not in request.await_args.kwargs
+        assert engine._time_allowed({"cmd": "camera.add"}) > OPEN_WAIT_S
 
 
 async def test_rejected_command_is_400() -> None:
@@ -457,3 +812,177 @@ async def test_print_upload_is_capped(tmp_path, monkeypatch) -> None:
         too_big = await client.post("/prints?filename=big.gcode", content=b"G1 X1\n" * 10, headers=manage)
         assert too_big.status_code == 413
         assert not list(tmp_path.iterdir()), "nothing of an oversized upload is kept"
+
+
+async def test_a_body_is_not_read_for_a_caller_the_route_refuses() -> None:
+    async with api(("read",)) as (client, _engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        chunks_read = 0
+
+        async def body():
+            nonlocal chunks_read
+            for _ in range(8):
+                chunks_read += 1
+                yield b" " * 1024 * 1024
+
+        json_body = {"Content-Type": "application/json"}
+        assert (await client.patch("/settings", content=body(), headers=json_body)).status_code == 401
+        under_scoped = {**json_body, "Authorization": f"Bearer {tokens['read']}"}
+        assert (await client.patch("/settings", content=body(), headers=under_scoped)).status_code == 403
+        assert chunks_read == 0
+
+
+async def test_a_stored_secret_is_not_kept_for_an_address_that_changed() -> None:
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, printer_id, _camera_id, tokens):
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        mqtt = {"host": "broker", "password": "mq-secret"}
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": BASIC_NTFY}, "mqtt": mqtt}})
+
+        moved = await client.patch(f"/printers/{printer_id}", json={"config": {"base_url": "http://elsewhere.example"}}, headers=manage)
+        assert moved.status_code == 400 and "API key" in moved.json()["detail"]
+        assert engine.printers.get(printer_id).config == OCTOPRINT["config"]
+
+        for moved_broker in ({"host": "elsewhere.example"}, {"host": "broker", "port": 8883}, {"host": "broker", "port": 8883, "password": ""}):
+            assert (await client.patch("/settings", json={"mqtt": moved_broker}, headers=manage)).status_code == 400
+        moved_topic = {"notifiers": {"ntfy": {"url": "https://elsewhere.example/topic"}}}
+        assert (await client.patch("/settings", json=moved_topic, headers=manage)).status_code == 400
+        assert engine.settings["mqtt"] == mqtt and engine.settings["notifiers"]["ntfy"] == BASIC_NTFY
+
+        resent = {"base_url": "http://elsewhere.example", "api_key": "another"}
+        assert (await client.patch(f"/printers/{printer_id}", json={"config": resent}, headers=manage)).status_code == 200
+        assert engine.printers.get(printer_id).config == resent
+        assert (await client.patch("/settings", json={"mqtt": {"host": "elsewhere.example", "password": None}}, headers=manage)).status_code == 200
+        assert engine.settings["mqtt"] == {"host": "elsewhere.example", "password": ""}
+
+
+async def test_a_provider_switch_over_rest_keeps_none_of_the_old_config() -> None:
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, printer_id, _camera_id, tokens):
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        bare = await client.patch(f"/printers/{printer_id}", json={"provider": "klipper"}, headers=manage)
+        assert bare.status_code == 400 and engine.printers.get(printer_id).config == OCTOPRINT["config"]
+
+        switched = await client.patch(f"/printers/{printer_id}", json={"provider": "klipper", "config": {"base_url": "http://op"}}, headers=manage)
+        assert switched.status_code == 200 and engine.printers.get(printer_id).config == {"base_url": "http://op"}
+        back = await client.patch(f"/printers/{printer_id}", json={"provider": "octoprint"}, headers=manage)
+        assert back.status_code == 400 and "api_key" not in engine.printers.get(printer_id).config
+
+
+async def test_an_address_with_a_hidden_part_is_a_400_over_rest() -> None:
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, printer_id, _camera_id, tokens):
+        hidden = await client.patch(
+            f"/printers/{printer_id}",
+            json={"config": {"base_url": "http://op/api/[redacted]", "api_key": "k"}},
+            headers={"Authorization": f"Bearer {tokens['manage']}"},
+        )
+
+        assert hidden.status_code == 400 and hidden.json()["detail"] == "the address has a hidden part, type it in full"
+        assert engine.printers.get(printer_id).config == OCTOPRINT["config"]
+
+
+async def test_the_read_surface_does_not_list_the_api_tokens() -> None:
+    async with api(("read", "manage")) as (client, engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        assert len(engine.state_event()["tokens"]) == 2
+        for scope in ("read", "manage"):
+            state = (await client.get("/state", headers={"Authorization": f"Bearer {tokens[scope]}"})).json()
+            assert "tokens" not in state
+
+
+async def test_removing_an_id_nothing_matches_is_a_400() -> None:
+    async with api(("manage",)) as (client, _engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        for collection in ("monitors", "cameras", "printers", "prints"):
+            answer = await client.delete(f"/{collection}/nope", headers=manage)
+            assert (answer.status_code, answer.json()) == (400, {"detail": f"no {collection[:-1]} nope"})
+        unbound = await client.post("/monitors", json={"camera_id": "nope"}, headers=manage)
+        assert (unbound.status_code, unbound.json()) == (400, {"detail": "no camera nope"})
+
+
+async def test_a_private_catalogues_credentials_stay_out_of_the_state() -> None:
+    async with api(("read",)) as (client, engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        private = "https://reader:hunter2pass@raw.example.com/catalogue.json?token=s3cr3tvalue"
+        await engine.handle({"cmd": "settings.update", "patch": {"catalogue_url": private}})
+        state = (await client.get("/state", headers={"Authorization": f"Bearer {tokens['read']}"})).json()
+        assert state["settings"]["catalogue_url"] == "https://raw.example.com/[redacted]?token=[redacted]"
+        assert engine.settings["catalogue_url"] == private, "the dashboard still reads the address it saved"
+
+
+async def test_recent_events_leave_out_a_printers_progress() -> None:
+    async with api(("read",)) as (client, engine, _platform, _monitor_id, printer_id, _camera_id, tokens):
+        engine.emit({"event": "device", "printer_id": printer_id, "status": "printing", "progress": 41.0})
+        engine.emit({"event": "warning", "message": "camera 'cam' is offline"})
+        events = (await client.get("/events", headers={"Authorization": f"Bearer {tokens['read']}"})).json()
+        assert [event["event"] for event in events] == ["warning"]
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("PATCH", "/settings", b'{"mqtt": {"host": "broker", "keepalive": NaN}}'),
+        ("PATCH", "/settings", b'{"mqtt": {"nested": {"deeper": [1, Infinity]}}}'),
+        ("PATCH", "/settings", b'{"notifiers": {"telegram": {"bot_token": "t", "chat_id": -Infinity}}}'),
+        ("PATCH", "/settings", b'{"preheat": [{"name": "PLA", "nozzle": NaN}]}'),
+        ("POST", "/printers", b'{"name": "P", "provider": "octoprint", "config": {"note": NaN}}'),
+        ("POST", "/printers/test", b'{"provider": "octoprint", "config": {"note": NaN}}'),
+        ("POST", "/notifiers/test", b'{"provider": "ntfy", "config": {"note": Infinity}}'),
+    ],
+)
+async def test_a_body_carrying_nan_or_infinity_is_refused_wherever_it_sits(method: str, path: str, body: bytes) -> None:
+    async with api(("manage",)) as (client, engine, platform, _monitor, _printer, _camera, tokens):
+        response = await client.request(method, path, content=body, headers={"Content-Type": "application/json", "Authorization": f"Bearer {tokens['manage']}"})
+
+        assert response.status_code == 422
+        json.dumps(engine.state_event(), allow_nan=False)
+        assert "NaN" not in json.dumps(platform.state)
+
+
+async def test_a_printer_config_patched_with_nan_leaves_the_stored_one_alone() -> None:
+    async with api(("manage",)) as (client, engine, _platform, _monitor, printer_id, _camera, tokens):
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {tokens['manage']}"}
+        response = await client.patch(
+            f"/printers/{printer_id}", content=b'{"config": {"base_url": "http://op", "api_key": "k", "note": NaN}}', headers=headers
+        )
+
+        assert response.status_code == 422
+        assert "note" not in engine.printers.get(printer_id).config
+
+
+async def test_a_snapshot_whose_file_is_gone_is_a_404_that_names_no_path(tmp_path) -> None:
+    from printguard.server.platform import DiskFileStore
+
+    async with api(("read",)) as (client, engine, platform, monitor_id, _printer, _camera, tokens):
+        platform.files = DiskFileStore(tmp_path)
+        engine.reviews.restore(
+            [{"id": "r1", "monitor_id": monitor_id, "started": 0.0, "spacing_s": 60.0, "frames": [{"id": "f1", "ts": 1.0, "score": 0.9, "kind": "alert", "action": "none", "size": 3}]}]
+        )
+        gone = await client.get(f"/monitors/{monitor_id}/snapshots/f1", headers={"Authorization": f"Bearer {tokens['read']}"})
+        await engine.handle({"cmd": "snapshot.get", "monitor_id": monitor_id, "id": "f1"}, lambda event: None)
+
+        assert gone.status_code == 404 and str(tmp_path) not in gone.text
+        assert not any(str(tmp_path) in event.get("message", "") for event in engine.recent_events())
+
+
+async def test_starting_a_print_whose_file_is_gone_is_a_400_that_names_no_path(tmp_path) -> None:
+    from printguard.server.platform import DiskFileStore
+
+    async with api(("manage",)) as (client, engine, platform, _monitor_id, printer_id, _camera_id, tokens):
+        platform.files = DiskFileStore(tmp_path)
+        platform.device_status = "Operational"
+
+        async def body():
+            yield b"G1 X1\n"
+
+        await platform.files.store("abcd1234.gcode", body())
+        await engine.handle({"cmd": "print.add", "id": "abcd1234", "filename": "a.gcode"})
+        (tmp_path / "abcd1234.gcode").unlink()
+        gone = await client.post("/prints/abcd1234/start", json={"printer_id": printer_id}, headers={"Authorization": f"Bearer {tokens['manage']}"})
+
+        assert gone.status_code == 400 and gone.json()["detail"] == "print 'abcd1234' has lost its file"
+        assert not any(str(tmp_path) in event.get("message", "") for event in engine.recent_events())
+
+
+async def test_moving_a_printer_without_its_key_is_a_400_that_keeps_both() -> None:
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, printer_id, _camera_id, tokens):
+        headers = {"Authorization": f"Bearer {tokens['manage']}"}
+        moved = await client.patch(f"/printers/{printer_id}", json={"config": {"base_url": "http://elsewhere"}}, headers=headers)
+
+        assert moved.status_code == 400 and "send API key again" in moved.text and "k" not in moved.json()["detail"].split()
+        assert engine.printers.get(printer_id).config == OCTOPRINT["config"]

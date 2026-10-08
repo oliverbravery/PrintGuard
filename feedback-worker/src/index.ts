@@ -1,0 +1,162 @@
+import { z } from "zod";
+import { Gate, type Refusal } from "./gate";
+import { DAY_MS, EXPIRY_DAYS, EXPIRY_WARN_DAYS, FRAME_BYTES_MAX, RATE_PERIOD_S, RECOUNT_GAP_MS, RECOUNT_PAGES_PER_RUN, STORED_BYTES_MAX, STORED_BYTES_WARN } from "./limits";
+import { isJpeg } from "./jpeg";
+import { hubOf, issueToken, keyed } from "./token";
+
+export { Gate };
+
+const frameId = z.string().regex(/^[0-9a-f]{12}$/);
+const label = (maxLength: number) =>
+  z.string().max(maxLength).regex(/^\P{Cc}*$/u).refine((value) => !/=\?.*\?=/s.test(value));
+
+const FrameDetails = z.object({
+  print: frameId,
+  frame: frameId,
+  label: z.enum(["good", "failure"]),
+  kind: z.enum(["alert", "near", "spaced"]),
+  score: z.number().min(0).max(1),
+  threshold: z.number().min(0).max(1),
+  ts: z.number(),
+  version: label(20),
+  provider: label(40),
+  printer: label(80),
+});
+
+const refuse = ({ status, code, retryAt }: Refusal) =>
+  Response.json(
+    { code, retry_at: retryAt },
+    { status, headers: retryAt ? { "Retry-After": String(Math.max(1, Math.ceil(retryAt - Date.now() / 1000))) } : {} },
+  );
+
+export function networkOf(address: string): string {
+  if (!address.includes(":")) return address;
+  const [head, tail = ""] = address.split("::");
+  const leading = head.split(":").filter(Boolean);
+  const trailing = tail.split(":").filter(Boolean);
+  const groups = [...leading, ...Array<string>(8 - leading.length - trailing.length).fill("0"), ...trailing];
+  return groups.slice(0, 3).map((group) => parseInt(group, 16).toString(16)).join(":");
+}
+
+const callerNetwork = (request: Request, env: Env) =>
+  keyed(networkOf(request.headers.get("CF-Connecting-IP") ?? "unknown"), env.TOKEN_SECRET);
+
+const parseDetails = (header: string | null) => {
+  try {
+    return FrameDetails.safeParse(JSON.parse(header ?? ""));
+  } catch {
+    return FrameDetails.safeParse(null);
+  }
+};
+
+const sentByABrowser = (request: Request) =>
+  request.headers.has("Origin") || request.headers.get("Content-Type") !== "application/json";
+
+const tooFast = (): Refusal => ({ status: 429, code: "rate_limited", retryAt: Math.ceil(Date.now() / 1000) + RATE_PERIOD_S });
+
+async function register(request: Request, env: Env): Promise<Response> {
+  if (sentByABrowser(request)) return refuse({ status: 403, code: "browser" });
+  const network = await callerNetwork(request, env);
+  if (!(await env.REGISTER_RATE.limit({ key: network })).success) return refuse(tooFast());
+  const refusal = await env.GATE.getByName("gate").register(network);
+  if (refusal) return refuse(refusal);
+  return Response.json({ token: await issueToken(env.TOKEN_SECRET) }, { status: 201 });
+}
+
+async function storeFrame(request: Request, env: Env, context: ExecutionContext): Promise<Response> {
+  const hub = await hubOf((request.headers.get("Authorization") ?? "").replace(/^Bearer /, ""), env.TOKEN_SECRET);
+  if (!hub) return refuse({ status: 401, code: "token" });
+  if (!(await env.FRAME_RATE.limit({ key: hub })).success) return refuse(tooFast());
+  const declaredBytes = Number(request.headers.get("Content-Length"));
+  if (!(declaredBytes > 0)) return refuse({ status: 411, code: "length" });
+  if (declaredBytes > FRAME_BYTES_MAX) return refuse({ status: 413, code: "too_large" });
+  const details = parseDetails(request.headers.get("X-Frame"));
+  if (!details.success) return refuse({ status: 400, code: "details" });
+  const jpeg = new Uint8Array(await request.arrayBuffer());
+  if (jpeg.byteLength > FRAME_BYTES_MAX) return refuse({ status: 413, code: "too_large" });
+  if (!isJpeg(jpeg)) return refuse({ status: 415, code: "not_jpeg" });
+
+  const { print, frame, ...labels } = details.data;
+  const stored = reserveAndWrite(env, hub, await callerNetwork(request, env), `${hub}/${print}/${frame}.jpg`, jpeg, labels);
+  context.waitUntil(stored);
+  return stored;
+}
+
+async function reserveAndWrite(env: Env, hub: string, network: string, key: string, jpeg: Uint8Array, labels: Record<string, unknown>): Promise<Response> {
+  const gate = env.GATE.getByName("gate");
+  let reserved = await gate.reserve(hub, network, key, jpeg.byteLength);
+  if ("code" in reserved && reserved.code === "storage_full" && (await recountBucket(env, RECOUNT_GAP_MS))) {
+    reserved = await gate.reserve(hub, network, key, jpeg.byteLength);
+  }
+  if ("code" in reserved) return refuse(reserved);
+  if (reserved.uploads === 0) return (await env.FRAMES.head(key)) ? Response.json({}, { status: 201 }) : refuse(tooFast());
+  let written: R2Object | null = null;
+  try {
+    written = await env.FRAMES.put(key, jpeg, {
+      onlyIf: { etagDoesNotMatch: "*" },
+      httpMetadata: { contentType: "image/jpeg" },
+      customMetadata: Object.fromEntries(Object.entries(labels).map(([name, value]) => [name, String(value)])),
+    });
+  } finally {
+    if (!written) await gate.release(hub, network, key, reserved);
+  }
+  return Response.json({}, { status: 201 });
+}
+
+export function reminders(inbox: { bytes: number; expiring: number }): string[] {
+  const lines: string[] = [];
+  if (inbox.expiring > 0) lines.push(`${inbox.expiring} frames expire within ${EXPIRY_WARN_DAYS} days.`);
+  if (inbox.bytes >= STORED_BYTES_WARN) lines.push(`The inbox is ${Math.round((100 * inbox.bytes) / STORED_BYTES_MAX)}% full.`);
+  return lines;
+}
+
+export const expiresSoon = (uploaded: Date, now: number) =>
+  uploaded.getTime() <= now - (EXPIRY_DAYS - EXPIRY_WARN_DAYS) * DAY_MS;
+
+async function recountBucket(env: Env, minimumGapMs: number): Promise<{ bytes: number; expiring: number } | null> {
+  const gate = env.GATE.getByName("gate");
+  const listing = await gate.resumeRecount(minimumGapMs);
+  if (!listing) return null;
+  const now = Date.now();
+  for (let pages = 0; pages < RECOUNT_PAGES_PER_RUN; pages += 1) {
+    const page = await env.FRAMES.list({ cursor: listing.cursor });
+    for (const object of page.objects) {
+      listing.bytes += object.size;
+      if (expiresSoon(object.uploaded, now)) listing.expiring += 1;
+    }
+    listing.cursor = page.truncated ? page.cursor : undefined;
+    if (!listing.cursor) {
+      await gate.recount(listing.bytes);
+      return listing;
+    }
+    await gate.checkpointRecount(listing);
+  }
+  return null;
+}
+
+async function recountAndRemind(env: Env, scheduledTime: number): Promise<void> {
+  const onTheHour = new Date(scheduledTime).getUTCMinutes() === 0;
+  const inbox = await recountBucket(env, onTheHour ? 0 : Infinity);
+  if (!inbox) return;
+  const lines = reminders(inbox);
+  if (lines.length === 0) return;
+  await env.EMAIL.send({
+    to: env.REMINDER_TO,
+    from: env.REMINDER_FROM,
+    subject: "PrintGuard feedback inbox needs pulling",
+    text: [...lines, "Run the pull script."].join("\n"),
+  });
+}
+
+export default {
+  async fetch(request, env, context) {
+    const { pathname } = new URL(request.url);
+    if (env.ACCEPTING !== "true") return refuse({ status: 503, code: "closed" });
+    if (request.method === "POST" && pathname === "/register") return register(request, env);
+    if (request.method === "PUT" && pathname === "/frame") return storeFrame(request, env, context);
+    return new Response(null, { status: 404 });
+  },
+  async scheduled(controller, env) {
+    await recountAndRemind(env, controller.scheduledTime);
+  },
+} satisfies ExportedHandler<Env>;

@@ -104,11 +104,13 @@
   // Whether the transport buttons do anything. Spotify answers 403 on a free
   // account whatever scopes were granted, so the panel says so once it knows
   // rather than leaving three buttons that quietly fail.
+  const signedIn = () => pg.secrets.includes("oauth");
+
   const setControls = () => {
     el("toggle").textContent = state.playing ? "❚❚" : "▶";
     el("toggle").title = state.playing ? "Pause" : "Play";
     el("note").textContent = state.premium ? "" : PREMIUM_NOTE;
-    for (const id of ["prev", "toggle", "next"]) el(id).disabled = !state.premium;
+    for (const id of ["prev", "toggle", "next"]) el(id).disabled = !state.premium || !signedIn() || rejected;
   };
 
   const poll = () => pg.http({ url: PLAYER, headers: { Authorization: "Bearer {{secret.oauth}}" }, tag: "player" });
@@ -144,10 +146,10 @@
     setControls();
   };
 
-  const idle = (message) => {
+  const idle = (message, title = "Nothing playing") => {
     state.cover = "";
     el("cover").removeAttribute("src");
-    el("title").textContent = "Nothing playing";
+    el("title").textContent = title;
     el("artist").textContent = message;
     setControls();
     pg.background("");
@@ -162,15 +164,46 @@
       el("cover").src = image;
       pg.background(image);
     } else if (event.tag === "player") {
-      if (event.status === 204 || !event.body || !event.body.item) idle("Start something on any of your devices.");
-      else if (event.status === 401) idle("Reconnect Spotify in the Plugins tab in Settings.");
+      if (event.status === 401) reject();
+      else if (event.status === 204 || !event.body || !event.body.item) idle("Start something on any of your devices.");
       else shown(event.body.item, event.body.is_playing === true);
     }
   });
 
-  pg.on("ready", () => {
+  // Until a client id is saved and Connect is finished every request would be
+  // refused, so the panel only polls while PrintGuard holds a token for it.
+  let polling = null;
+  let rejected = false;
+
+  const stopPolling = () => {
+    clearInterval(polling);
+    polling = null;
+  };
+
+  // A token Spotify turns down stays turned down, so the panel stops asking
+  // until the sign-in is disconnected and made again.
+  const reject = () => {
+    rejected = true;
+    stopPolling();
+    idle("Disconnect, then Connect again in Settings.", "Sign-in rejected");
+  };
+
+  const sync = () => {
     setControls();
-    poll();
-    setInterval(poll, POLL_MS);
+    if (signedIn() && !rejected && polling === null) {
+      poll();
+      polling = setInterval(poll, POLL_MS);
+    } else if (!signedIn() && (polling !== null || rejected)) {
+      rejected = false;
+      stopPolling();
+      idle("Connect Spotify in the Plugins tab in Settings.", "Not connected");
+    }
+  };
+
+  // Watching the sign-in on a timer, since pg.on("state") would need the
+  // state:read permission that nothing else here has a use for.
+  pg.on("ready", () => {
+    sync();
+    setInterval(sync, 1000);
   });
 </script>

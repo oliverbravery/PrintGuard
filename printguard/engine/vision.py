@@ -1,4 +1,4 @@
-"""Pure-numpy preprocessing, prototype classification and defect scoring.
+"""Preprocessing, prototype classification and defect scoring.
 
 The model invocation itself is the platform's responsibility.
 """
@@ -10,10 +10,11 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from PIL import Image
 
 INPUT_SIZE = 224
 RESIZE_SHORTEST = 256
-GREYSCALE_WEIGHTS = np.asarray([0.2989, 0.5870, 0.1140], dtype=np.float32)
+LONGEST_RATIO = 4
 
 
 @dataclass(frozen=True)
@@ -43,35 +44,34 @@ def assets_from_dicts(meta: dict[str, Any], protos: dict[str, list[float]]) -> A
     )
 
 
-def _resize(arr: np.ndarray, nw: int, nh: int) -> np.ndarray:
-    h, w = arr.shape[:2]
-    y_idx = np.linspace(0, h - 1, nh).astype(np.int64)
-    x_idx = np.linspace(0, w - 1, nw).astype(np.int64)
-    return arr[y_idx[:, None], x_idx[None, :]]
-
-
 def preprocess(rgb: np.ndarray, assets: Assets) -> np.ndarray:
     """Converts an RGB frame into the model's normalised NCHW input tensor.
 
-    Resizes the shortest edge to 256, centre-crops to 224, collapses to
-    luminance and replicates across three normalised channels.
+    Follows the torchvision transforms the model was trained with, resizing the
+    shortest edge to 256 through Pillow's bilinear filter, collapsing to luminance
+    and centre-cropping to 224. Sampling single pixels instead hands each frame's
+    sensor noise to the model, so a still scene's score jitters. Only the middle
+    of the long side survives the crop, so no more than ``LONGEST_RATIO`` times
+    the short side is resized, or a frame a few pixels tall and thousands wide
+    would be scaled up to hundreds of megabytes first.
 
     Args:
-        rgb: HxWx3 uint8 or float frame in RGB channel order.
+        rgb: HxWx3 uint8 frame in RGB channel order.
         assets: Normalisation constants to apply.
 
     Returns:
         Float32 tensor of shape (1, 3, 224, 224).
     """
-    if rgb.ndim != 3 or rgb.shape[2] != 3:
-        raise ValueError(f"expected HxWx3 RGB frame, got {rgb.shape}")
-    arr = rgb.astype(np.float32) / 255.0
-    h, w = arr.shape[:2]
-    scale = RESIZE_SHORTEST / min(w, h)
-    arr = _resize(arr, max(INPUT_SIZE, round(w * scale)), max(INPUT_SIZE, round(h * scale)))
-    h, w = arr.shape[:2]
-    top, left = (h - INPUT_SIZE) // 2, (w - INPUT_SIZE) // 2
-    grey = arr[top : top + INPUT_SIZE, left : left + INPUT_SIZE] @ GREYSCALE_WEIGHTS
+    image = Image.fromarray(rgb)
+    scale = RESIZE_SHORTEST / min(image.size)
+    width, height = (min(side, min(image.size) * LONGEST_RATIO) for side in image.size)
+    left, top = (image.width - width) // 2, (image.height - height) // 2
+    image = image.resize(
+        (round(width * scale), round(height * scale)), Image.Resampling.BILINEAR, box=(left, top, left + width, top + height)
+    )
+    left, top = (image.width - INPUT_SIZE) // 2, (image.height - INPUT_SIZE) // 2
+    image = image.convert("L").crop((left, top, left + INPUT_SIZE, top + INPUT_SIZE))
+    grey = np.asarray(image, dtype=np.float32) / 255.0
     chans = np.stack([(grey - m) / s for m, s in zip(assets.mean, assets.std)], axis=0)
     return chans[np.newaxis, ...].astype(np.float32)
 
@@ -85,15 +85,34 @@ def classify(embedding: np.ndarray, assets: Assets) -> dict[str, Any]:
 
     Returns:
         Dict with prediction, per-class distances and the distance margin.
+
+    Raises:
+        ValueError: If the embedding is not finite, which means the runtime
+            failed rather than that the frame is unclear.
     """
-    if not np.isfinite(embedding).all():
-        return {"prediction": "unknown", "distances": {}, "margin": 0.0}
     distances = {cls: float(np.linalg.norm(embedding - proto)) for cls, proto in assets.prototypes.items()}
-    if any(math.isnan(d) or math.isinf(d) for d in distances.values()):
-        return {"prediction": "unknown", "distances": {}, "margin": 0.0}
+    if not all(math.isfinite(distance) for distance in distances.values()):
+        raise ValueError("the model returned a non-finite embedding")
     ordered = sorted(distances.items(), key=lambda kv: kv[1])
     margin = ordered[1][1] - ordered[0][1] if len(ordered) > 1 else 0.0
     return {"prediction": ordered[0][0], "distances": distances, "margin": margin}
+
+
+def shrink(rgb: np.ndarray, shortest: int) -> np.ndarray:
+    """Scales a frame down so its shorter side is ``shortest`` pixels.
+
+    Args:
+        rgb: HxWx3 uint8 frame.
+        shortest: The shorter side's length after scaling.
+
+    Returns:
+        The scaled frame, or the original if it is already that small.
+    """
+    height, width = rgb.shape[:2]
+    scale = shortest / min(height, width)
+    if scale >= 1:
+        return rgb
+    return np.asarray(Image.fromarray(rgb).resize((round(width * scale), round(height * scale)), Image.Resampling.BILINEAR))
 
 
 def rotate_frame(rgb: np.ndarray, rotation: int) -> np.ndarray:
@@ -181,8 +200,10 @@ def transform(
 ) -> np.ndarray:
     """Applies a camera's full image pipeline, rotating, then cropping, then adjusting.
 
-    The crop is interpreted in the rotated frame's coordinates, so the result
-    matches exactly what the live view shows and what the model infers on.
+    The crop is interpreted in the rotated frame's coordinates, so the framing
+    matches the live view. The dashboard redraws the adjustments itself at the
+    size the feed is shown, so its sharpness looks stronger than the full-size
+    frame the model infers on.
 
     Args:
         rgb: HxWx3 uint8 frame in RGB channel order.
@@ -211,9 +232,12 @@ def defect_score(result: dict[str, Any]) -> float:
         result: Output of classify().
 
     Returns:
-        Failure probability in [0, 1], or 0.5 when the frame could not be classified.
+        Failure probability in [0, 1], or 0.5 when the frame could not be
+        classified or its distances are too large to compare.
     """
     distances = result.get("distances") or {}
     if "success" not in distances or "failure" not in distances:
         return 0.5
-    return 0.5 * (1.0 + math.tanh((distances["success"] ** 2 - distances["failure"] ** 2) / 2))
+    success, failure = distances["success"], distances["failure"]
+    score = 0.5 * (1.0 + math.tanh((success * success - failure * failure) / 2))
+    return score if math.isfinite(score) else 0.5

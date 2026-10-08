@@ -1,8 +1,8 @@
 import { log } from "./log";
+import { sandboxFrame, storeChanges, type StoreChanges } from "./plugins";
 import type { PluginEffect, PluginRecord } from "./types";
 
-export const PANEL_SANDBOX_URL = "plugin-panel.html";
-const BOOT_TIMEOUT_MS = 8000;
+const PANEL_SANDBOX_URL = "plugin-panel.html";
 const MAX_EFFECTS = 32;
 const MAX_HEIGHT_PX = 900;
 const THEME_TOKENS = [
@@ -15,11 +15,11 @@ const THEME_TOKENS = [
 
 export interface PanelHandlers {
   onEffects(id: string, effects: PluginEffect[]): void;
-  onStore(id: string, store: Record<string, unknown>): void;
+  onStore(id: string, changes: StoreChanges): void;
   onFailure(id: string, reason: string): void;
 }
 
-export function themeTokens(): Record<string, string> {
+function themeTokens(): Record<string, string> {
   const computed = getComputedStyle(document.body);
   return {
     ...Object.fromEntries(THEME_TOKENS.map((token) => [token, computed.getPropertyValue(token).trim()])),
@@ -29,56 +29,49 @@ export function themeTokens(): Record<string, string> {
 
 export class PluginPanelHost {
   readonly id: string;
-  private booted = false;
+  private frame: HTMLIFrameElement;
+  private port: MessagePort;
   private dead = false;
-  private queued: Record<string, unknown>[] = [];
+  private store: Record<string, unknown>;
 
   constructor(
-    private record: PluginRecord,
-    private frame: HTMLIFrameElement,
-    private html: string,
-    private assets: Record<string, Blob>,
-    private state: Record<string, unknown>,
+    record: PluginRecord,
+    container: HTMLElement,
+    html: string,
+    assets: Record<string, Blob>,
+    state: Record<string, unknown>,
     private handlers: PanelHandlers,
   ) {
     this.id = record.id;
-    addEventListener("message", this.receive);
-    frame.contentWindow?.postMessage({ t: "hello" }, "*");
-    window.setTimeout(() => {
-      if (!this.booted) this.fail("panel did not start");
-    }, BOOT_TIMEOUT_MS);
+    this.store = record.config;
+    const sandbox = sandboxFrame(PANEL_SANDBOX_URL, `${record.manifest.name} panel`, this.receive, (reason) => this.fail(reason));
+    this.frame = sandbox.frame;
+    this.port = sandbox.port;
+    this.frame.className = "block h-24 w-full border-0 bg-transparent transition-[height] duration-150";
+    container.appendChild(this.frame);
+    this.port.postMessage({ t: "init", html, assets, state, theme: themeTokens(), store: record.config, secrets: record.secrets_set, sound: record.granted.includes("sound") });
   }
 
-  private receive = (message: MessageEvent) => {
-    if (message.source !== this.frame.contentWindow || this.dead) return;
-    const data = message.data ?? {};
-    if (data.t === "booted") {
-      this.booted = true;
-      this.post({ t: "init", html: this.html, assets: this.assets, state: this.state, theme: themeTokens(), store: this.record.config });
-      for (const message of this.queued.splice(0)) this.post(message);
-    } else if (data.t === "effects") {
+  private receive = (data: any) => {
+    if (data?.t === "effects") {
       this.handlers.onEffects(this.id, (data.effects ?? []).slice(0, MAX_EFFECTS));
-    } else if (data.t === "size") {
+    } else if (data?.t === "size") {
       this.frame.style.height = `${Math.min(Number(data.height) || 0, MAX_HEIGHT_PX)}px`;
-    } else if (data.t === "store") {
-      this.handlers.onStore(this.id, data.store ?? {});
-    } else if (data.t === "failed") {
+    } else if (data?.t === "store") {
+      const held = this.store;
+      this.store = data.store ?? {};
+      this.handlers.onStore(this.id, storeChanges(held, this.store));
+    } else if (data?.t === "failed") {
       this.fail(String(data.message));
     }
   };
 
-  private post(message: Record<string, unknown>): void {
-    if (this.booted) this.frame.contentWindow?.postMessage(message, "*");
-    else this.queued.push(message);
-  }
-
-  update(state: Record<string, unknown>, store?: Record<string, unknown>): void {
-    this.state = state;
-    this.post({ t: "state", state, store, theme: themeTokens() });
+  update(state: Record<string, unknown>, secrets: string[]): void {
+    this.port.postMessage({ t: "state", state, secrets, theme: themeTokens() });
   }
 
   event(event: Record<string, unknown>): void {
-    this.post({ t: "event", event });
+    this.port.postMessage({ t: "event", event });
   }
 
   private fail(reason: string): void {
@@ -90,6 +83,7 @@ export class PluginPanelHost {
 
   close(): void {
     this.dead = true;
-    removeEventListener("message", this.receive);
+    this.port.close();
+    this.frame.remove();
   }
 }

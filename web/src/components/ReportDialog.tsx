@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useFocusKept } from "../a11y";
 import { recentLogs } from "../log";
 import { useStore } from "../store";
 import { Dialog } from "./Dialog";
 
-const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
 
 interface Attachment {
   name: string;
@@ -32,6 +33,8 @@ export function ReportDialog() {
   const [message, setMessage] = useState("");
   const [email, setEmail] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const filePicker = useRef<HTMLInputElement>(null);
+  const attached = useFocusKept<HTMLDivElement>();
   const sending = isPending("report.send");
   const bundling = isPending("report.bundle");
   const close = () => openDialog(null);
@@ -88,33 +91,44 @@ export function ReportDialog() {
     <Dialog title="Report a bug" onClose={close}>
       <div className="space-y-3">
         <p className="text-sm text-text-1">
-          Something broken? Describe it and it goes straight to me, anonymously and with no account needed.
+          Describe what went wrong and it goes straight to me, anonymously and with no account needed.
         </p>
         <textarea
           className="field min-h-28"
+          aria-label="What happened"
           placeholder="What happened, and what did you expect instead?"
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          autoFocus
         />
         <input
           className="field"
           type="email"
+          aria-label="Email for follow-up (optional)"
           placeholder="Email for follow-up (optional)"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="btn cursor-pointer">
+        <div ref={attached} className="flex flex-wrap items-center gap-2">
+          <button type="button" className="btn" onClick={() => filePicker.current?.click()}>
             Attach screenshots
-            <input type="file" hidden multiple accept="image/*,video/*" onChange={(e) => void addFiles(e.target.files)} />
-          </label>
+          </button>
+          <input
+            ref={filePicker}
+            type="file"
+            hidden
+            multiple
+            accept="image/*,video/*"
+            onChange={(e) => {
+              void addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
           {attachments.map((attachment, index) => (
             <span key={`${attachment.name}-${index}`} className="chip inline-flex items-center gap-1.5">
               {attachment.name}
               <button
                 type="button"
-                className="cursor-pointer hover:text-bad"
+                className="tap-target cursor-pointer hover:text-bad"
                 aria-label={`Remove ${attachment.name}`}
                 onClick={() => setAttachments((current) => current.filter((_, i) => i !== index))}
               >
@@ -124,13 +138,15 @@ export function ReportDialog() {
           ))}
         </div>
         <details className="text-[0.7rem] text-text-2">
-          <summary className="cursor-pointer hover:text-text-1">What's sent with your report</summary>
+          <summary className="cursor-pointer pointer-coarse:py-3.5 hover:text-text-1">What's sent with your report</summary>
           <p className="mt-1.5 leading-relaxed">
-            Your description, any files you attach, and a diagnostics bundle: the app version and platform, your
-            camera, printer, monitor and notification configuration with every credential removed, performance
-            stats, recent errors and warnings, and the app's recent logs, also scrubbed of credentials. No
-            camera frames are included unless you attach them yourself. Download the same bundle to read it
-            first, or to send it somewhere else yourself.
+            Your description, any files you attach, the address this dashboard is open at, your browser's
+            user agent and window size, and a diagnostics bundle: the app version and platform, your
+            camera, printer and monitor configuration with every credential removed, the names of your alert
+            channels, performance stats, recent alerts, errors and warnings, and the app's recent logs, also
+            scrubbed of credentials. Camera and printer names and addresses are included. No camera frames
+            are included unless you attach them yourself. Download the same bundle to read it first, or to
+            send it somewhere else yourself.
           </p>
         </details>
         {reportResult && !reportResult.ok && (

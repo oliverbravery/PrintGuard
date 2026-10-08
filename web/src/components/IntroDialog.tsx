@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useFocusKept } from "../a11y";
 import { INTRO } from "../guide";
 import { useStore } from "../store";
 import { Dialog } from "./Dialog";
@@ -10,14 +11,15 @@ export function IntroDialog() {
   const openDialog = useStore((s) => s.openDialog);
   const close = () => openDialog(null);
   const last = page === INTRO.length - 1;
+  const footer = useFocusKept<HTMLElement>();
   return (
     <Dialog title="How PrintGuard works" onClose={close} fixed>
       <div className="flex h-full flex-col gap-4">
-        <div aria-live="polite" className="grid min-h-0 flex-1">
+        <div aria-live="polite" className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]">
           {INTRO.map((entry, i) => (
             <div
               key={entry.id}
-              className={`col-start-1 row-start-1 min-h-0 ${i === page ? "page-swap" : ""}`}
+              className={`col-start-1 row-start-1 min-h-0 overflow-y-auto overscroll-contain ${i === page ? "page-swap" : ""}`}
               style={{ visibility: i === page ? undefined : "hidden" }}
               aria-hidden={i !== page}
               inert={i !== page}
@@ -26,8 +28,8 @@ export function IntroDialog() {
             </div>
           ))}
         </div>
-        <footer className="hairline flex shrink-0 items-center gap-2 pt-4">
-          <Progress value={page + 1} total={INTRO.length} className="flex-1" />
+        <footer ref={footer} className="hairline flex shrink-0 items-center gap-2 pt-4">
+          <Progress label="Introduction progress" value={page + 1} total={INTRO.length} className="flex-1" />
           {page > 0 && (
             <button className="btn" onClick={() => setPage(page - 1)}>
               Back
@@ -38,7 +40,7 @@ export function IntroDialog() {
           </button>
           {!last && (
             <button className="btn btn-primary" onClick={() => setPage(page + 1)}>
-              Next →
+              Next
             </button>
           )}
         </footer>

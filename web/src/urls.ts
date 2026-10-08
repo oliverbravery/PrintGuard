@@ -2,8 +2,17 @@ const SCHEMES = ["http", "https", "ws", "wss", "rtsp", "rtsps"];
 const WILDCARD_SCHEMES = ["http", "https"];
 const DEFAULT_PORTS: Record<string, number> = { http: 80, https: 443, ws: 80, wss: 443, rtsp: 554, rtsps: 322 };
 const LOCAL_HOSTNAMES = ["localhost"];
-const LOCAL_SUFFIXES = [".local", ".localhost", ".internal", ".home", ".lan"];
-const PRIVATE_V4 = /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|0\.)/;
+const LOCAL_SUFFIXES = [".local", ".localhost", ".internal", ".home", ".lan", ".home.arpa"];
+const LOCAL_V4 = [
+  "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24",
+  "192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
+].map(prefix);
+const GLOBAL_V4 = ["192.0.0.9/32", "192.0.0.10/32"].map(prefix);
+const LOCAL_V6 = [
+  "::1/128", "::/128", "64:ff9b:1::/48", "100::/64", "2001::/23", "2001:db8::/32", "2002::/16", "3fff::/20", "fc00::/7", "fe80::/10", "fec0::/10", "ff00::/8",
+].map(prefix);
+const GLOBAL_V6 = ["2001:1::1/128", "2001:1::2/128", "2001:3::/32", "2001:4:112::/48", "2001:20::/28", "2001:30::/28"].map(prefix);
+const EMBEDDING_V4 = ["::/96", "::ffff:0:0/96", "::ffff:0:0:0/96", "64:ff9b::/96"].map(prefix);
 
 const PATTERN = new RegExp(
   `^(\\*|${SCHEMES.join("|")})://` +
@@ -11,6 +20,12 @@ const PATTERN = new RegExp(
     `(?::(\\*|\\d{1,5}))?` +
     `(/[^\\s]*)$`,
 );
+const PLAIN_URL = /^([a-z][a-z0-9+.-]*):\/\/([a-z0-9.-]+|\[[0-9a-f:]+\])(?::(\d{1,5}))?(?=[/?#]|\n?$)([^?#]*)(?:\?([^#]*))?/i;
+const DROPPED_BY_CLIENTS = /[\t\r\n]/g;
+const BRACKETS = /^\[|\]$/g;
+const NUMBER = /^(?:\d+|0x[0-9a-f]*)$/i;
+const ROOT_DOT = /\.$/;
+const UNREAD_BY_RESOLVERS = /\.$|(?:^|\.)0x$/i;
 
 export interface UrlPattern {
   scheme: string;
@@ -20,7 +35,7 @@ export interface UrlPattern {
 }
 
 export function parse(raw: string): UrlPattern | null {
-  const match = PATTERN.exec(raw.trim().toLowerCase());
+  const match = PATTERN.exec(raw.trim().replace(/^[^/]*\/\/[^/]*/, (origin) => origin.toLowerCase()));
   return match ? { scheme: match[1], host: match[2], port: match[3] ?? "*", path: match[4] } : null;
 }
 
@@ -31,42 +46,85 @@ function matchesHost(pattern: string, host: string): boolean {
 }
 
 function matchesPath(pattern: string, path: string): boolean {
-  const escaped = pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  return new RegExp(`^${escaped.join(".*?")}$`).test(path);
+  const [first, ...middle] = pattern.split("*");
+  const last = middle.pop();
+  if (last === undefined) return path === first;
+  const end = path.length - last.length;
+  if (!path.startsWith(first) || end < first.length || !path.endsWith(last)) return false;
+  let at = first.length;
+  for (const piece of middle) {
+    const found = path.indexOf(piece, at);
+    if (found < 0 || found + piece.length > end) return false;
+    at = found + piece.length;
+  }
+  return true;
+}
+
+function climbs(path: string): boolean {
+  return path
+    .replace(/\\/g, "/")
+    .split("/")
+    .some((segment) => [".", ".."].includes(segment.replace(/%2e/gi, ".")));
 }
 
 export function matches(pattern: string, url: string): boolean {
   const rule = parse(pattern);
-  if (!rule) return false;
-  let parsed: URL;
-  try {
-    parsed = new URL(url.trim());
-  } catch {
-    return false;
-  }
-  const scheme = parsed.protocol.replace(":", "");
+  const plain = PLAIN_URL.exec(url);
+  if (!rule || !plain || Number(plain[3] ?? 0) > 65535) return false;
+  const unrooted = plain[2].replace(ROOT_DOT, "");
+  const numbered = unrooted.startsWith("[") || NUMBER.test(unrooted.split(".").at(-1)!);
+  if (numbered && literalAddress(unrooted) === null) return false;
+  const scheme = plain[1].toLowerCase();
+  const host = plain[2].toLowerCase().replace(BRACKETS, "");
   const allowed = rule.scheme === "*" ? WILDCARD_SCHEMES : [rule.scheme];
-  if (!parsed.hostname || !allowed.includes(scheme)) return false;
-  const port = parsed.port ? Number(parsed.port) : (DEFAULT_PORTS[scheme] ?? 0);
+  if (!allowed.includes(scheme)) return false;
+  const port = Number(plain[3] ?? 0) || (DEFAULT_PORTS[scheme] ?? 0);
   if (rule.port !== "*" && Number(rule.port) !== port) return false;
-  const path = (parsed.pathname || "/") + parsed.search;
-  return matchesHost(rule.host, parsed.hostname.toLowerCase()) && matchesPath(rule.path, path);
+  const path = plain[4].replace(DROPPED_BY_CLIENTS, "") || "/";
+  if (climbs(path)) return false;
+  const scopedAt = rule.path.indexOf("?");
+  const pathRule = scopedAt < 0 ? rule.path : rule.path.slice(0, scopedAt);
+  if (!matchesHost(rule.host.replace(BRACKETS, ""), host) || !matchesPath(pathRule, path)) return false;
+  return scopedAt < 0 || matchesPath(rule.path.slice(scopedAt + 1), (plain[5] ?? "").replace(DROPPED_BY_CLIENTS, ""));
 }
 
-export function allowed(url: string, patterns: string[]): boolean {
-  return patterns.some((pattern) => matches(pattern, url));
+function bits(address: string): string {
+  if (!address.includes(":")) return address.split(".").map((octet) => Number(octet).toString(2).padStart(8, "0")).join("");
+  const [before, after] = address.split("::").map((run) => (run ? run.split(":") : []));
+  const groups = [...before, ...Array(8 - before.length - (after ?? []).length).fill("0"), ...(after ?? [])];
+  return groups.map((group) => parseInt(group, 16).toString(2).padStart(16, "0")).join("");
 }
 
-export function isLocalAddress(host: string): boolean {
-  const bare = host.replace(/^\[|\]$/g, "");
-  if (bare.includes(":")) return bare === "::1" || /^f[cd]/.test(bare);
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(bare)) return PRIVATE_V4.test(bare);
-  return LOCAL_HOSTNAMES.includes(bare) || LOCAL_SUFFIXES.some((suffix) => bare.endsWith(suffix));
+function prefix(network: string): string {
+  const [address, length] = network.split("/");
+  return bits(address).slice(0, Number(length));
+}
+
+function within(address: string, networks: string[]): boolean {
+  return networks.some((network) => address.startsWith(network));
+}
+
+function literalAddress(host: string): string | null {
+  if (UNREAD_BY_RESOLVERS.test(host)) return null;
+  try {
+    const written = new URL(`http://${host}`).hostname.replace(BRACKETS, "");
+    return written.includes(":") || /^\d+\.\d+\.\d+\.\d+$/.test(written) ? bits(written) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isLocalAddress(rooted: string): boolean {
+  const host = rooted.replace(ROOT_DOT, "");
+  const address = literalAddress(host);
+  if (address === null) return LOCAL_HOSTNAMES.includes(host) || LOCAL_SUFFIXES.some((suffix) => host.endsWith(suffix));
+  if (address.length === 128 && !within(address, EMBEDDING_V4)) return within(address, LOCAL_V6) && !within(address, GLOBAL_V6);
+  return within(address.slice(-32), LOCAL_V4) && !within(address.slice(-32), GLOBAL_V4);
 }
 
 export function reachesLocal(pattern: string): boolean {
   const rule = parse(pattern);
-  return rule !== null && (rule.host === "*" || isLocalAddress(rule.host.replace(/^\*\./, "")));
+  return rule !== null && (rule.host === "*" || (rule.host.startsWith("*.") && NUMBER.test(rule.host.split(".").at(-1)!)) || isLocalAddress(rule.host.replace(/^\*\./, "any.")));
 }
 
 export function webUrl(raw: string): string | null {
@@ -92,7 +150,18 @@ export function phrase(pattern: string): string {
   return `${what} ${where}${port}`;
 }
 
-export function openExternally(raw: string): void {
+export function openIn(tab: Window | null, raw: string): void {
+  const url = webUrl(raw);
+  if (!tab || !url) {
+    tab?.close();
+    openExternally(raw);
+    return;
+  }
+  tab.opener = null;
+  tab.location.replace(url);
+}
+
+function openExternally(raw: string): void {
   const url = webUrl(raw);
   if (!url) return;
   const link = document.createElement("a");

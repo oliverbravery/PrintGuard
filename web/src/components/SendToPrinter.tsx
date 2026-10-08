@@ -9,7 +9,7 @@ export function SendToPrinter({ print }: { print: PrintFile }) {
   const [printerId, setPrinterId] = useState(printers[0]?.id ?? "");
   const chosen = printers.find((p) => p.id === printerId) ?? printers[0];
   const status = chosen?.device_state?.status;
-  const busy = isPending("print.start");
+  const busy = isPending("print.start", print.id);
 
   useEffect(() => {
     if (!printers.some((p) => p.id === printerId)) setPrinterId(printers[0]?.id ?? "");

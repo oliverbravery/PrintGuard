@@ -75,6 +75,18 @@ def test_a_permission_asked_for_but_never_used_is_caught() -> None:
     assert "sound" in found(findings, "unused")
 
 
+def test_a_sign_in_on_this_network_is_a_use_of_reaching_it() -> None:
+    manifest = plugins.sanitise_manifest({
+        "id": "home",
+        "version": "1.0.0",
+        "permissions": ["oauth", "net:local"],
+        "reasons": {"oauth": "a", "net:local": "b"},
+        "oauth": {"authorize_url": "https://192.168.1.2/auth", "token_url": "https://192.168.1.2/token"},
+    })
+
+    assert "net:local" not in found(pin.findings(manifest, {"plugin.js": "plugin.render(() => ({ type: 'text', value: '' }));"}), "unused")
+
+
 def test_an_address_outside_the_declared_patterns_is_caught() -> None:
     findings = pin.findings(plugins.sanitise_manifest(LIAR_MANIFEST), LIAR)
 
@@ -93,6 +105,45 @@ def test_an_address_built_at_runtime_is_reported_as_unknowable() -> None:
     findings = pin.findings(plugins.sanitise_manifest(LIAR_MANIFEST), LIAR)
 
     assert found(findings, "dynamic") == ["an address it builds as it runs"]
+
+
+DISGUISED = {
+    "worker.js": [
+        "plugin.on('tick', (event, ctx) => { const c = ctx; c.http({ url: 'https://other.example/x' }); });",
+        "plugin.on('tick', (event, ctx) => { ctx['http']({ url: 'https://other.example/x' }); });",
+        "plugin.on('tick', (event, ctx) => { const { http } = ctx; http({ url: 'https://other.example/x' }); });",
+        "plugin.on('tick', (event, ctx) => { const send = ctx.http; send({ url: 'https://other.example/x' }); });",
+        "plugin.on('tick', (event, ctx) => { send(ctx); });",
+        "plugin.on('tick', (event, c) => { c.http({ url: 'https://other.example/x' }); });",
+        "plugin.on('tick', function () { arguments[1].http({ url: 'https://other.example/x' }); });",
+        "function later(event, c) { c.http({ url: 'https://other.example/x' }); } plugin.on('tick', later);",
+        "const p = plugin; p.route((request, ctx) => ({}));",
+        "globalThis.plugin.route((request, ctx) => ({}));",
+    ],
+    "panel.html": [
+        "<script>const p = pg; p.http({ url: 'https://other.example/x' });</script>",
+        "<script>window.pg.http({ url: 'https://other.example/x' });</script>",
+        "<script>self['pg'].http({ url: 'https://other.example/x' });</script>",
+    ],
+}
+
+
+@pytest.mark.parametrize("name,code", [(name, code) for name, written in DISGUISED.items() for code in written])
+def test_the_api_reached_under_another_name_is_reported_as_unknowable(name: str, code: str) -> None:
+    """A call the check cannot see is a call it cannot vouch for, so the dialog must not say the code matches."""
+    findings = pin.findings(plugins.sanitise_manifest({"id": "disguised", "version": "1.0.0"}), {name: code})
+
+    assert found(findings, "dynamic") == ["its API under another name"]
+
+
+def test_the_api_used_by_its_own_name_is_read_without_a_caveat() -> None:
+    """Every plugin that ships calls it directly, as does the handler that takes no context at all."""
+    direct = "plugin.render((ctx) => ({ type: 'text', value: ctx.target || '' })); plugin.on('tick', (event) => {}); plugin.action((name, arg, ctx) => { ctx.log(name); });"
+    assert pin.findings(plugins.sanitise_manifest({"id": "direct", "version": "1.0.0"}), {"plugin.js": direct}) == []
+    for directory in sorted(pin.HERE.iterdir()):
+        if (directory / plugins.MANIFEST_FILE).exists():
+            manifest = plugins.sanitise_manifest(json.loads((directory / plugins.MANIFEST_FILE).read_text()))
+            assert "its API under another name" not in found(pin.findings(manifest, pin.source_files(directory)), "dynamic")
 
 
 PANEL = {
@@ -161,3 +212,25 @@ def test_code_that_will_not_parse_is_reported_rather_than_passed() -> None:
     findings = pin.findings(plugins.sanitise_manifest(LIAR_MANIFEST), {"plugin.js": "this is not javascript {{{"})
 
     assert any("could not be read" in what for what in found(findings, "dynamic"))
+
+
+def test_only_the_access_token_of_a_sign_in_can_be_referenced() -> None:
+    manifest = plugins.sanitise_manifest({
+        "id": "signer",
+        "version": "1.0.0",
+        "permissions": ["net", "oauth"],
+        "reasons": {"net": "a", "oauth": "b"},
+        "urls": ["https://api.example.com/*"],
+        "oauth": {"authorize_url": "https://auth.example.com/authorize", "token_url": "https://auth.example.com/token"},
+    })
+    code = "plugin.on('alert', (e, ctx) => ctx.http({ url: 'https://api.example.com/x', headers: { A: '{{secret.oauth}}', B: '{{secret.oauth_refresh}}', C: '{{secret.oauth_client_id}}' } }));"
+
+    findings = pin.findings(manifest, {"worker.js": code})
+
+    assert [what for what in found(findings, "undeclared") if what.startswith("{{")] == ["{{secret.oauth_refresh}}", "{{secret.oauth_client_id}}"]
+
+
+def test_a_source_is_hashed_with_its_line_endings_as_the_hub_reads_it(tmp_path: Path) -> None:
+    (tmp_path / "plugin.js").write_bytes(b"plugin.render(() => null);\r\n")
+
+    assert pin.source_files(tmp_path) == {"plugin.js": "plugin.render(() => null);\r\n"}

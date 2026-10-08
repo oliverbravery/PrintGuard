@@ -15,7 +15,7 @@ jobs:
   triage:
     name: triage
     if: github.event_name == 'issues'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       issues: write
     steps:
@@ -27,20 +27,28 @@ jobs:
 
   resolved:
     name: resolved
-    if: github.event_name == 'pull_request_target' && github.event.pull_request.merged
-    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request_target' && github.event.pull_request.merged && github.event.pull_request.base.ref == github.event.repository.default_branch
+    runs-on: ubuntu-24.04
     permissions:
       issues: write
       pull-requests: read
     steps:
-      - name: Reopen the issues the merge closed and mark them completed
+      - name: Wait up to a minute for the merge to close each issue, reopen those, leave the ones their reporter closed, and mark them all completed
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          MERGED_AT: ${{ github.event.pull_request.merged_at }}
         run: |
           issue_numbers=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json closingIssuesReferences --jq '.closingIssuesReferences[].number')
           for issue_number in $issue_numbers; do
-            gh issue reopen "$issue_number" --repo "$GITHUB_REPOSITORY"
+            for attempt in $(seq 12); do
+              closed_by_merge=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json closedAt --jq "if .closedAt then .closedAt >= \"$MERGED_AT\" else \"open\" end")
+              [ "$closed_by_merge" != "open" ] && break
+              sleep 5
+            done
+            if [ "$closed_by_merge" = "true" ]; then
+              gh issue reopen "$issue_number" --repo "$GITHUB_REPOSITORY"
+            fi
             gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json labels \
               --jq '{labels: ([.labels[].name | select(startswith("status: ") | not)] + ["status: completed"])}' \
               | gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/labels" -X PUT --input -
@@ -49,17 +57,22 @@ jobs:
   expire:
     name: expire
     if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       issues: write
     steps:
-      - name: Close completed issues the reporter has not come back on
+      - name: Close completed issues whose release follow-up has had no reply for 30 days
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cutoff=$(date -u -d '30 days ago' +%F)
-          issue_numbers=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "label:\"status: completed\" updated:<$cutoff" --json number --jq '.[].number')
+          cutoff=$(date -u -d '30 days ago' +%FT%TZ)
+          issue_numbers=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "status: completed" --limit 1000 --json number --jq '.[].number')
           for issue_number in $issue_numbers; do
+            unanswered=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments" --jq '.[]' \
+              | jq -s --arg cutoff "$cutoff" '(last // {}) | ((.body // "") | contains("<!-- release-follow-up:")) and ((.created_at // "") < $cutoff)')
+            if [ "$unanswered" != "true" ]; then
+              continue
+            fi
             gh issue close "$issue_number" --repo "$GITHUB_REPOSITORY" --reason completed \
               --comment "Closing automatically after 30 days with no follow-up. Reopen it if the problem is still there."
           done

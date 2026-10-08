@@ -9,12 +9,16 @@ printguard.engine.integrations.INTEGRATIONS.
 
 from __future__ import annotations
 
+import ipaddress
+import math
 from abc import abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Container
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
-from ..adapters import Adapter, HttpFn
+from ..adapters import Adapter, HttpFn, require_reply
+from ..bounds import clamp
 
 HEATERS = ("nozzle", "bed")
 """The heaters every service is read and controlled through, by PrintGuard's names."""
@@ -51,6 +55,10 @@ class Heater:
     actual: float
     target: float
 
+    def __post_init__(self) -> None:
+        if not (math.isfinite(self.actual) and math.isfinite(self.target)):
+            raise ValueError("a heater's temperatures must be finite numbers")
+
     @classmethod
     def reported(cls, actual: Any, target: Any) -> Heater | None:
         """Builds a heater from a service's reading and target.
@@ -62,6 +70,9 @@ class Heater:
 
         Returns:
             The heater, or None when there is no reading.
+
+        Raises:
+            ValueError: If a temperature is NaN or infinite.
         """
         if actual is None:
             return None
@@ -93,6 +104,9 @@ class DeviceState:
     nozzle: Heater | None = None
     bed: Heater | None = None
 
+    def __post_init__(self) -> None:
+        self.progress = clamp("progress", self.progress, 0.0, 100.0)
+
     def public(self) -> dict[str, Any]:
         """Serialises the state for the event protocol."""
         return {
@@ -114,10 +128,14 @@ class IntegrationAdapter(Adapter):
         heater_control: Whether the service takes heater targets through
             ``heat()``. Every service reports the temperatures it has; this is
             about setting them, which is off by default.
+        slow_action_s: Seconds the service can hold an action or a heater
+            target before answering, on top of an ordinary request. A caller
+            waiting on a command gives it that much longer.
     """
 
     formats: tuple[str, ...] = ()
     heater_control: bool = False
+    slow_action_s: float = 0.0
 
     def meta(self) -> dict[str, Any]:
         """Serialises adapter metadata, with the formats it prints and whether it heats."""
@@ -194,5 +212,55 @@ class IntegrationAdapter(Adapter):
         """
         raise RuntimeError(f"{self.label} cannot receive print files")
 
+    def connection_key(self, config: dict[str, Any]) -> Any:
+        """Identifies the persistent connection a configuration is served by.
+
+        Args:
+            config: User-supplied values matching the adapter schema.
+
+        Returns:
+            A value equal for two configurations that share one connection,
+            so closing either closes it for both. The default is the whole
+            configuration.
+        """
+        return config
+
     async def close(self, config: dict[str, Any] | None = None) -> None:
         """Releases persistent connections for one configuration or all configurations."""
+
+
+def webcam_url(base_url: str, stream: str, api_ports: Container[int]) -> str:
+    """Resolves the webcam URL a service reports against the address its web interface is served on.
+
+    Moonraker and OctoPrint report a relative path (``/webcam/?action=stream``)
+    for their web interface to resolve against its own origin. A base URL on
+    one of the service's own API ports routes no webcam path, so it is joined
+    on the scheme's default port, where that web interface is. Any other port
+    is the web server or a proxy in front of it and is kept. A URL on loopback
+    (``http://127.0.0.1:8080/?action=stream``) is the printer's own, which the
+    hub would read as itself, so it takes the base URL's host and keeps its port.
+
+    Args:
+        base_url: The service's configured API address.
+        stream: The stream URL the service reports.
+        api_ports: The ports the service's own API listens on.
+
+    Returns:
+        The stream URL, an absolute one that is not on loopback unchanged.
+    """
+    host, reported = urlsplit(base_url), urlsplit(stream)
+    if reported.scheme:
+        if not _is_loopback(reported.hostname or ""):
+            return stream
+        name = host.netloc.rpartition("@")[2].removesuffix(f":{host.port}")
+        return urlunsplit(reported._replace(netloc=f"{name}:{reported.port}" if reported.port else name))
+    netloc = host.netloc.rpartition(":")[0] if host.port in api_ports else host.netloc
+    return urljoin(urlunsplit((host.scheme, netloc, "", "", "")), stream)
+
+
+def _is_loopback(hostname: str) -> bool:
+    """Whether a URL's host is the machine it is read on."""
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return hostname == "localhost"

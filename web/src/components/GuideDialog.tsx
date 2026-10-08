@@ -1,13 +1,16 @@
-import { GUIDE, type GuideSection } from "../guide";
+import { GUIDE, SHOT_SIZES, type GuideSection } from "../guide";
 import { useStore } from "../store";
 import { Dialog } from "./Dialog";
+import { NewTab } from "./NewTab";
 
 const REPO = "https://github.com/oliverbravery/PrintGuard";
 const MODEL = "https://github.com/oliverbravery/Edge-FDM-Fault-Detection";
 
 export function GuideEntry({ section, lead, fill }: { section: GuideSection; lead?: boolean; fill?: boolean }) {
   const openDialog = useStore((s) => s.openDialog);
+  const openSettings = useStore((s) => s.openSettings);
   const { action } = section;
+  const [shotWidth, shotHeight] = section.shot ? SHOT_SIZES[section.shot] : [];
   return (
     <section className={`reveal ${fill ? "flex h-full min-h-0 flex-col" : ""}`}>
       <div className="mb-1.5 flex shrink-0 items-center gap-2.5">
@@ -19,14 +22,14 @@ export function GuideEntry({ section, lead, fill }: { section: GuideSection; lea
       <p className={`shrink-0 leading-relaxed text-text-1 ${lead ? "text-sm" : "text-[0.84rem]"}`}>{section.body}</p>
       {section.shot && (
         <figure className={`shot ${fill ? "shot-fill" : ""}`}>
-          <img className="shot-dark" src={`guide/${section.shot}-dark.jpg`} alt="" loading="lazy" />
-          <img className="shot-light" src={`guide/${section.shot}-light.jpg`} alt="" loading="lazy" />
+          <img className="shot-dark" src={`guide/${section.shot}-dark.jpg`} alt="" loading="lazy" width={shotWidth} height={shotHeight} />
+          <img className="shot-light" src={`guide/${section.shot}-light.jpg`} alt="" loading="lazy" width={shotWidth} height={shotHeight} />
         </figure>
       )}
       {section.visual && <div className="mt-3">{section.visual}</div>}
       {action && (
-        <button className="btn mt-2.5" onClick={() => openDialog(action.dialog)}>
-          {action.label} →
+        <button className="btn mt-2.5" onClick={() => (action.tab ? openSettings(action.tab) : openDialog(action.dialog))}>
+          {action.label}
         </button>
       )}
     </section>
@@ -52,7 +55,7 @@ export function GuideDialog() {
             target="_blank"
             rel="noreferrer"
           >
-            Documentation ↗
+            Documentation <NewTab />
           </a>
           <a
             className="mono text-[0.66rem] text-text-2 transition-colors hover:text-accent"
@@ -60,7 +63,7 @@ export function GuideDialog() {
             target="_blank"
             rel="noreferrer"
           >
-            The vision model ↗
+            The vision model <NewTab />
           </a>
         </footer>
       </div>

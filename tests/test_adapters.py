@@ -3,17 +3,28 @@ multipart encoding, printer sanitisation and the vision score maths."""
 
 from __future__ import annotations
 
+import asyncio
 import json as jsonlib
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from email.header import decode_header, make_header
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Container
 
+import httpx
 import numpy as np
 import pytest
+from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.reasoncodes import ReasonCode
 
 from printguard.engine import vision
 from printguard.engine.cameras import webrtc_endpoint, whep_endpoint
 from printguard.engine.integrations import INTEGRATIONS, DeviceAction, DeviceState, DeviceStatus, IntegrationAdapter
+from printguard.engine.integrations import bambu, klipper, octoprint
+from printguard.engine.integrations.bambu import BambuAdapter
+from printguard.engine.integrations.base import webcam_url
 from printguard.engine.integrations.elegoo import ElegooAdapter
 from printguard.engine.monitors import MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor
 from printguard.engine.notifiers import NOTIFIERS
@@ -33,6 +44,8 @@ class RecordingHttp:
         self.calls: list[dict[str, Any]] = []
 
     async def __call__(self, method, url, *, headers=None, json=None, data=None, timeout=10.0):
+        if hasattr(data, "__aiter__"):
+            data = b"".join([chunk async for chunk in data])
         self.calls.append({"method": method, "url": url, "headers": headers or {}, "json": json, "data": data})
         return self.status, self.body
 
@@ -53,11 +66,17 @@ class RoutedHttp(RecordingHttp):
         return next((answer for key, answer in self.routes.items() if key in url), (404, {}))
 
 
+SIGN_IN_PAGE = (200, "<html>Sign in</html>")
+NTFY_PUBLISHED = {"id": "sPs71M8A2T", "time": 1735941767, "expires": 1735985967, "event": "message", "topic": "t", "message": "Body"}
+MOONRAKER_OK = {"result": "ok"}
+OCTOPRINT_UPLOADED = {"files": {"local": {"name": "benchy.gcode"}}, "done": True, "effectiveSelect": True, "effectivePrint": True}
 OCTOPRINT_HEATERS = {"temperature": {"tool0": {"actual": 209.6, "target": 210.0, "offset": 0}, "bed": {"actual": 60.2, "target": 60.0, "offset": 0}}}
 
 
-def test_multipart_form_builds_a_well_formed_body() -> None:
-    headers, body = multipart_form({"chat_id": "7", "caption": "T\nB"}, "photo", "snap.jpg", JPEG)
+async def test_multipart_form_builds_a_well_formed_body() -> None:
+    headers, chunks = multipart_form({"chat_id": "7", "caption": "T\nB"}, "photo", "snap.jpg", JPEG)
+    body = b"".join([chunk async for chunk in chunks])
+    assert headers["Content-Length"] == str(len(body))
     content_type = headers["Content-Type"]
     assert content_type.startswith("multipart/form-data; boundary=")
     boundary = content_type.split("boundary=")[1].encode()
@@ -70,8 +89,46 @@ def test_multipart_form_builds_a_well_formed_body() -> None:
     assert JPEG in body
 
 
+async def test_a_multipart_upload_holds_no_more_than_the_file_while_it_is_sent() -> None:
+    """A 64 MB upload held 137 MB beside the file when the body was built as one buffer."""
+    import tracemalloc
+
+    size, announced = 64 * 1024 * 1024, []
+
+    async def receive(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        head = (await reader.readuntil(b"\r\n\r\n")).decode().lower()
+        length = int(head.split("content-length: ")[1].split("\r\n")[0])
+        announced.append("transfer-encoding" in head)
+        while length > 0:
+            length -= len(await reader.read(min(length, 65536)))
+        writer.write(b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(receive, "127.0.0.1", 0)
+    file = bytes(size)
+    headers, body = multipart_form({"print": "true"}, "file", "big.gcode", file, "application/octet-stream")
+    tracemalloc.start()
+    try:
+        async with httpx.AsyncClient() as client:
+            sent = await client.post(f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}/", headers=headers, content=body, timeout=60)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+        server.close()
+    assert sent.status_code == 201 and announced == [False]
+    assert peak < size // 4, f"{peak // 1024 // 1024} MB was held beside a {size // 1024 // 1024} MB file"
+
+
+async def test_multipart_form_sends_the_file_itself_and_never_a_copy_of_it() -> None:
+    file = bytes(8 * 1024 * 1024)
+    _, chunks = multipart_form({"print": "true"}, "file", "big.gcode", file, "application/octet-stream")
+    sent = [chunk async for chunk in chunks]
+    assert any(chunk is file for chunk in sent), "joining the parts into one body would hold the file twice more"
+
+
 async def test_ntfy_attaches_snapshot_with_token() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(body=NTFY_PUBLISHED)
     await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t", "token": "tk"}, "Title", "Body", JPEG)
     call = http.last
     assert (call["method"], call["url"]) == ("PUT", "https://ntfy.sh/t")
@@ -83,7 +140,7 @@ async def test_ntfy_attaches_snapshot_with_token() -> None:
 
 
 async def test_ntfy_posts_text_without_snapshot() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(body=NTFY_PUBLISHED)
     await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, "Title", "Body", None)
     call = http.last
     assert call["method"] == "POST"
@@ -91,9 +148,46 @@ async def test_ntfy_posts_text_without_snapshot() -> None:
     assert "Authorization" not in call["headers"]
 
 
+@pytest.mark.parametrize("image", [JPEG, None])
+async def test_ntfy_headers_carry_names_outside_ascii(image: bytes | None) -> None:
+    http = RecordingHttp(body=NTFY_PUBLISHED)
+    title, body = "PrintGuard: Küche № 2 defect (87%)", "Camera 'Küche' is offline,\nso it is not watched"
+    await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, title, body, image)
+    sent = httpx.Request(http.last["method"], http.last["url"], headers=http.last["headers"], content=http.last["data"])
+    received = {name: str(make_header(decode_header(value))) for name, value in sent.headers.items()}
+    assert received["title"] == title
+    assert (received["message"] if image else sent.content.decode()) == body
+
+
 async def test_ntfy_raises_on_rejection() -> None:
     with pytest.raises(RuntimeError, match="HTTP 403"):
         await NOTIFIERS["ntfy"].send(RecordingHttp(status=403), {"url": "u"}, "T", "B", None)
+
+
+async def test_ntfy_sends_the_alert_as_text_when_the_server_takes_no_attachments() -> None:
+    """A self-hosted ntfy without attachment-cache-dir and base-url answers an upload with 400."""
+
+    class NoAttachments(RecordingHttp):
+        async def __call__(self, method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
+            await super().__call__(method, url, **kwargs)
+            if "Filename" in kwargs["headers"]:
+                return 400, {"code": 40014, "http": 400, "error": "invalid request: attachments not allowed"}
+            return 200, NTFY_PUBLISHED
+
+    http = NoAttachments()
+    with pytest.raises(RuntimeError, match="refused the snapshot with HTTP 400, so the alert was sent as text"):
+        await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t", "token": "tk"}, "Title", "Body", JPEG)
+    attached, text = http.calls
+    assert (attached["method"], attached["data"]) == ("PUT", JPEG)
+    assert (text["method"], text["url"], text["data"]) == ("POST", "https://ntfy.sh/t", b"Body")
+    assert text["headers"] == {"Title": "Title", "Priority": "urgent", "Tags": "rotating_light", "Authorization": "Bearer tk"}
+
+
+async def test_ntfy_rejecting_the_text_too_is_a_rejection() -> None:
+    http = RecordingHttp(status=403)
+    with pytest.raises(RuntimeError, match="rejected the alert: HTTP 403"):
+        await NOTIFIERS["ntfy"].send(http, {"url": "u"}, "T", "B", JPEG)
+    assert [call["method"] for call in http.calls] == ["PUT", "POST"]
 
 
 async def test_telegram_sends_photo_as_multipart() -> None:
@@ -173,23 +267,79 @@ async def test_pushover_defaults_priority_when_unset_or_invalid() -> None:
 
 
 async def test_discord_uploads_snapshot_with_payload_json() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(status=204)
     await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", JPEG)
     call = http.last
-    assert jsonlib.dumps({"content": "**T**\nB"}).encode() in call["data"]
+    assert jsonlib.dumps({"content": "**T**\nB", "allowed_mentions": {"parse": []}}).encode() in call["data"]
     assert b'filename="snapshot.jpg"' in call["data"]
     assert JPEG in call["data"]
 
 
 async def test_discord_posts_json_without_snapshot() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(status=204)
     await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", None)
-    assert http.last["json"] == {"content": "**T**\nB"}
+    assert http.last["json"] == {"content": "**T**\nB", "allowed_mentions": {"parse": []}}
+
+
+async def test_discord_pings_nobody_a_monitor_is_named_after() -> None:
+    http = RecordingHttp(status=204)
+    for image in (None, JPEG):
+        await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "Defect on @everyone", "B", image)
+        payload = http.last["json"] if image is None else jsonlib.loads(_field(http.last["data"], "payload_json"))
+        assert payload == {"content": "**Defect on @everyone**\nB", "allowed_mentions": {"parse": []}}
 
 
 async def test_discord_raises_on_rejection() -> None:
     with pytest.raises(RuntimeError, match="HTTP 404"):
         await NOTIFIERS["discord"].send(RecordingHttp(status=404), {"webhook_url": "u"}, "T", "B", None)
+
+
+@pytest.mark.parametrize(
+    ("provider", "config"),
+    [
+        ("ntfy", {"url": "https://proxy.example/topic"}),
+        ("discord", {"webhook_url": "https://proxy.example/hook"}),
+        ("telegram", {"bot_token": "12:ab", "chat_id": "77"}),
+        ("pushover", {"api_token": "ap", "user_key": "uk"}),
+    ],
+)
+@pytest.mark.parametrize("image", [None, JPEG])
+async def test_a_notifier_answered_with_a_page_has_not_delivered(provider: str, config: dict[str, Any], image: bytes | None) -> None:
+    """A topic or webhook URL behind an auth proxy answers 200 with its sign-in page, which counted as sent."""
+    with pytest.raises(RuntimeError, match=f"{NOTIFIERS[provider].label} did not answer the alert like its API: HTTP 200"):
+        await NOTIFIERS[provider].send(RecordingHttp(*SIGN_IN_PAGE), config, "T", "B", image)
+
+
+async def test_discord_takes_the_message_a_waiting_webhook_answers_with() -> None:
+    await NOTIFIERS["discord"].send(RecordingHttp(body={"id": "1", "channel_id": "2"}), {"webhook_url": "https://discord.com/api/webhooks/1/a?wait=true"}, "T", "B", None)
+
+
+async def test_ntfy_that_refuses_the_snapshot_and_answers_the_text_with_a_page_has_not_delivered() -> None:
+    class TextAnsweredWithAPage(RecordingHttp):
+        async def __call__(self, method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
+            await super().__call__(method, url, **kwargs)
+            return (400, {"code": 40014}) if "Filename" in kwargs["headers"] else SIGN_IN_PAGE
+
+    with pytest.raises(RuntimeError, match="ntfy did not answer the alert like its API"):
+        await NOTIFIERS["ntfy"].send(TextAnsweredWithAPage(), {"url": "https://proxy.example/topic"}, "T", "B", JPEG)
+
+
+@pytest.mark.parametrize(
+    ("provider", "config", "said"),
+    [
+        ("octoprint", {"base_url": "admin:hunter2pw@192.168.1.5:5000", "api_key": "k"}, "Base URL needs http:// or https:// at the start"),
+        ("klipper", {"base_url": "192.168.1.60:7125"}, "Base URL needs http:// or https:// at the start"),
+        ("prusa", {"base_url": "ftp://192.168.1.80", "password": "pw"}, "Base URL needs http:// or https:// at the start"),
+        ("ntfy", {"url": "ntfy.sh/my-printers"}, "Topic URL needs http:// or https:// at the start"),
+        ("discord", {"webhook_url": "discord.com/api/webhooks/1/a"}, "Webhook URL needs http:// or https:// at the start"),
+    ],
+)
+def test_an_address_saved_without_its_scheme_is_refused(provider: str, config: dict[str, Any], said: str) -> None:
+    """One with a password in it was stored and shown whole, since nothing recognised it as an address."""
+    adapter = {**INTEGRATIONS, **NOTIFIERS}[provider]
+    with pytest.raises(ValueError, match=said):
+        adapter.require(config)
+    adapter.require({**config, next(iter(config)): "HTTPS://192.168.1.5"})
 
 
 async def test_native_delivers_with_snapshot_written_to_disk(monkeypatch) -> None:
@@ -214,6 +364,31 @@ async def test_native_delivers_text_without_snapshot(monkeypatch) -> None:
     monkeypatch.setattr(NOTIFIERS["native"], "_deliver", deliver)
     await NOTIFIERS["native"].send(None, {}, "T", "B", None)
     assert sent == [None], "no snapshot means no attachment"
+
+
+@pytest.mark.parametrize("scheduled", [True, False])
+async def test_native_reports_a_notification_the_system_would_not_schedule(monkeypatch, scheduled: bool) -> None:
+    import logging
+    import sys
+
+    class FakeNotifier:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        async def request_authorisation(self) -> bool:
+            return True
+
+        async def send(self, **kwargs: Any) -> None:
+            if not scheduled:
+                logging.getLogger("desktop_notifier.backends.macos").warning("Error when scheduling notification: code=1")
+
+    library = SimpleNamespace(Attachment=lambda path: path, DesktopNotifier=FakeNotifier, Icon=lambda path: path)
+    monkeypatch.setitem(sys.modules, "desktop_notifier", library)
+    if scheduled:
+        await NOTIFIERS["native"].send(None, {}, "T", "B", None)
+    else:
+        with pytest.raises(RuntimeError, match="Error when scheduling notification: code=1"):
+            await NOTIFIERS["native"].send(None, {}, "T", "B", None)
 
 
 def test_native_runs_in_the_desktop_app_only() -> None:
@@ -266,9 +441,9 @@ async def test_octoprint_heater_targets() -> None:
         await INTEGRATIONS["octoprint"].heat(RecordingHttp(status=409), {"base_url": "http://op"}, "nozzle", 200.0)
 
 
-async def test_octoprint_unreachable_is_offline() -> None:
-    state = await INTEGRATIONS["octoprint"].fetch_state(RecordingHttp(status=502, body="bad gateway"), {"base_url": "http://op"})
-    assert state.status is DeviceStatus.OFFLINE
+async def test_octoprint_that_answers_badly_says_why() -> None:
+    with pytest.raises(RuntimeError, match="HTTP 502"):
+        await INTEGRATIONS["octoprint"].fetch_state(RecordingHttp(status=502, body="bad gateway"), {"base_url": "http://op"})
 
 
 async def test_octoprint_exposes_webcam_stream() -> None:
@@ -277,8 +452,8 @@ async def test_octoprint_exposes_webcam_stream() -> None:
     assert http.last["url"] == "http://op:5000/api/settings"
     assert http.last["headers"] == {"X-Api-Key": "k"}
     assert cams == [
-        {"key": "webcam", "name": "OctoPrint webcam", "source": {"kind": "url", "url": "http://op:5000/webcam/?action=stream"}}
-    ]
+        {"key": "webcam", "name": "OctoPrint webcam", "source": {"kind": "url", "url": "http://op/webcam/?action=stream"}}
+    ], "a relative stream is served on the host's web port, not the API port"
 
 
 async def test_octoprint_reads_19_plus_classicwebcam_location() -> None:
@@ -346,7 +521,7 @@ async def test_klipper_without_progress_has_no_time_left() -> None:
 
 
 async def test_klipper_heater_targets_go_through_gcode_script() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(body=MOONRAKER_OK)
     await INTEGRATIONS["klipper"].heat(http, {"base_url": "http://kl/", "api_key": "kk"}, "nozzle", 215.0)
     assert (http.last["method"], http.last["url"]) == ("POST", "http://kl/printer/gcode/script")
     assert http.last["json"] == {"script": "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=215"}
@@ -358,13 +533,13 @@ async def test_klipper_heater_targets_go_through_gcode_script() -> None:
 
 
 async def test_klipper_actions_and_auth() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(body=MOONRAKER_OK)
     await INTEGRATIONS["klipper"].send(http, {"base_url": "http://kl/", "api_key": "kk"}, DeviceAction.CANCEL)
     assert http.last["url"] == "http://kl/printer/print/cancel"
     assert http.last["headers"] == {"X-Api-Key": "kk"}
 
-    state = await INTEGRATIONS["klipper"].fetch_state(RecordingHttp(status=500, body={}), {"base_url": "http://kl"})
-    assert state.status is DeviceStatus.OFFLINE
+    with pytest.raises(RuntimeError, match="HTTP 500"):
+        await INTEGRATIONS["klipper"].fetch_state(RecordingHttp(status=500, body={}), {"base_url": "http://kl"})
 
     with pytest.raises(RuntimeError, match="pause"):
         await INTEGRATIONS["klipper"].send(RecordingHttp(status=400), {"base_url": "http://kl"}, DeviceAction.PAUSE)
@@ -434,6 +609,53 @@ async def test_klipper_webrtc_without_snapshot_derives_mjpeg_from_stream_path() 
     assert cams[0]["source"]["url"] == "http://kl/webcam/stream", "absent a snapshot URL the MJPEG path is derived from the WebRTC path"
 
 
+async def test_klipper_never_registers_a_still_as_the_stream() -> None:
+    """A snapshot that names no stream sibling was registered as it was, so the camera was one frame."""
+    body = {"result": {"webcams": [
+        {"name": "Still", "uid": "u1", "service": "webrtc-camerastreamer", "stream_url": "/webcam/webrtc", "snapshot_url": "/webcam/snap.jpg"},
+        {"name": "Neither", "uid": "u2", "service": "webrtc-janus", "stream_url": "/janus/", "snapshot_url": "/webcam/snap.jpg"},
+    ]}}
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl:7125"})
+    assert [cam["source"]["url"] for cam in cams] == ["http://kl/webcam/stream"]
+
+
+@pytest.mark.parametrize(
+    ("webcam", "registered"),
+    [
+        ({"service": "webrtc-camerastreamer", "stream_url": "/webcam/webrtc", "snapshot_url": "http://127.0.0.1:8080/?action=snapshot"}, "http://192.168.1.60:8080/?action=stream"),
+        ({"service": "webrtc-camerastreamer", "stream_url": "/webcam/webrtc", "snapshot_url": "http://localhost/webcam/?action=snapshot"}, "http://192.168.1.60/webcam/?action=stream"),
+        ({"service": "mjpegstreamer", "stream_url": "http://[::1]:8080/?action=stream", "snapshot_url": ""}, "http://192.168.1.60:8080/?action=stream"),
+    ],
+)
+async def test_klipper_reads_a_webcam_on_the_printers_loopback_from_the_printer(webcam: dict[str, str], registered: str) -> None:
+    """The hub registered its own loopback, where there is no camera."""
+    body = {"result": {"webcams": [{"name": "Cam", "uid": "u1", **webcam}]}}
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://user:pw@192.168.1.60:7125"})
+    assert [cam["source"]["url"] for cam in cams] == [registered]
+
+
+async def test_klipper_derives_mjpeg_without_renaming_the_host() -> None:
+    body = {"result": {"webcams": [
+        {"name": "Still", "uid": "u1", "service": "webrtc-camerastreamer", "stream_url": "http://snapshot-cam.local/webrtc",
+         "snapshot_url": "http://snapshot-cam.local/snapshot"},
+        {"name": "Rtc", "uid": "u2", "service": "webrtc-camerastreamer", "stream_url": "http://webrtc-cam.local/webcam/webrtc"},
+    ]}}
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl"})
+    assert [cam["source"]["url"] for cam in cams] == ["http://snapshot-cam.local/stream", "http://webrtc-cam.local/webcam/stream"]
+
+
+async def test_klipper_leaves_out_a_webcam_it_cannot_read() -> None:
+    """Each was registered with its signalling address or its page as the stream, which never opens."""
+    body = {"result": {"webcams": [
+        {"name": "janus", "uid": "u1", "service": "webrtc-janus", "stream_url": "http://pi.lan/janus"},
+        {"name": "page", "uid": "u2", "service": "iframe", "stream_url": "http://pi.lan/camera.html"},
+        {"name": "jmuxer", "uid": "u3", "service": "jmuxer-stream", "stream_url": "ws://pi.lan:8080/stream"},
+        {"name": "mjpeg", "uid": "u4", "service": "mjpegstreamer", "stream_url": "/webcam/?action=stream"},
+    ]}}
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl"})
+    assert [cam["name"] for cam in cams] == ["mjpeg"]
+
+
 async def test_klipper_preserves_whep_endpoint() -> None:
     body = {"result": {"webcams": [
         {"name": "WHEP", "uid": "u1", "stream_url": "/webcam/whep", "enabled": True},
@@ -441,6 +663,34 @@ async def test_klipper_preserves_whep_endpoint() -> None:
     assert await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl"}) == [
         {"key": "u1", "name": "WHEP", "source": {"kind": "url", "url": "http://kl/webcam/whep"}}
     ]
+
+
+async def test_klipper_pulls_mediamtx_and_go2rtc_webcams_over_whep() -> None:
+    """Neither serves camera-streamer's MJPEG sibling: the page and the still are what Moonraker lists."""
+    body = {"result": {"webcams": [
+        {"name": "mtx", "uid": "u1", "service": "webrtc-mediamtx", "stream_url": "http://pi.lan:8889/cam/", "snapshot_url": ""},
+        {"name": "go", "uid": "u2", "service": "webrtc-go2rtc", "stream_url": "http://pi.lan:1984/stream.html?src=cam",
+         "snapshot_url": "http://pi.lan:1984/api/frame.jpeg?src=cam"},
+        {"name": "proxied", "uid": "u3", "service": "webrtc-go2rtc", "stream_url": "/go2rtc/api/ws?src=cam"},
+        {"name": "already", "uid": "u4", "service": "webrtc-mediamtx", "stream_url": "/cam/whep"},
+    ]}}
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "https://kl:7130"})
+    assert [cam["source"]["url"] for cam in cams] == [
+        "http://pi.lan:8889/cam/whep",
+        "whep://pi.lan:1984/api/webrtc?src=cam",
+        "wheps://kl/go2rtc/api/webrtc?src=cam",
+        "https://kl/cam/whep",
+    ]
+    assert all(whep_endpoint(cam["source"]["url"]) for cam in cams)
+
+
+async def test_klipper_webcam_without_a_uid_is_keyed_by_a_name_safe_in_a_path() -> None:
+    body = {"result": {"webcams": [
+        {"name": "Front Cam", "stream_url": "/webcam/?action=stream"},
+        {"name": "nozzle-2.x", "stream_url": "/webcam2/?action=stream"},
+    ]}}
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl"})
+    assert [(cam["key"], cam["name"]) for cam in cams] == [("Front-Cam", "Front Cam"), ("nozzle-2.x", "nozzle-2.x")]
 
 
 async def test_klipper_without_webcams_api_exposes_nothing() -> None:
@@ -491,7 +741,7 @@ BAMBU_CONFIG = {"host": "192.168.1.70", "serial": "01S00A", "access_code": "1234
         ("PAUSE", DeviceStatus.PAUSED),
         ("IDLE", DeviceStatus.IDLE),
         ("FINISH", DeviceStatus.IDLE),
-        ("FAILED", DeviceStatus.ERROR),
+        ("FAILED", DeviceStatus.IDLE),
         ("", DeviceStatus.UNKNOWN),
     ],
 )
@@ -541,6 +791,377 @@ async def test_bambu_command_payloads(monkeypatch) -> None:
         assert published[-1] == {"print": {"sequence_id": "0", "command": command, "param": ""}}
 
 
+BAMBU_FULL_REPORT = {"command": "push_status", "gcode_state": "RUNNING", "mc_percent": 5, "nozzle_temper": 220.0}
+
+
+class FakeBambuPrinter:
+    """paho client stand-in that answers the way a printer's broker does, on the calling thread."""
+
+    answer = "Success"
+    acknowledges = True
+    full_report: dict[str, Any] | None = BAMBU_FULL_REPORT
+    version_modules: list[dict[str, Any]] = [{"name": "ota", "product_name": "Bambu Lab P1S"}]
+    verdict: dict[str, Any] | None = {"result": "success", "reason": ""}
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.requests: list[dict[str, Any]] = []
+        self.subscriptions: list[str] = []
+        self.connected = False
+        self.printers.append(self)
+
+    def username_pw_set(self, username: str, password: str) -> None:
+        self.credentials = (username, password)
+
+    def tls_set_context(self, context: Any) -> None:
+        pass
+
+    def connect(self, host: str, port: int, keepalive: int) -> None:
+        self.address = (host, port)
+
+    def loop_start(self) -> None:
+        answer = ReasonCode(PacketTypes.CONNACK, self.answer)
+        self.connected = not answer.is_failure
+        self.on_connect(self, None, None, answer, None)
+
+    def is_connected(self) -> bool:
+        return self.connected
+
+    def subscribe(self, topic: str) -> None:
+        self.subscriptions.append(topic)
+
+    def report(self, payload: dict[str, Any]) -> None:
+        self.on_message(self, None, SimpleNamespace(payload=jsonlib.dumps(payload).encode()))
+
+    def publish(self, topic: str, payload: str, qos: int = 0) -> Any:
+        request = jsonlib.loads(payload)
+        self.requests.append(request)
+        ((kind, body),) = request.items()
+        if body["command"] == "pushall" and self.full_report:
+            self.report({"print": self.full_report})
+        elif body["command"] == "get_version":
+            self.report({"info": {"command": "get_version", "sequence_id": "0", "module": self.version_modules}})
+        elif kind == "print" and self.verdict:
+            self.report({"print": {**body, "result": "failed", "reason": "someone else's command", "sequence_id": "0"}})
+            self.report({"print": {**body, **self.verdict}})
+        return SimpleNamespace(wait_for_publish=lambda timeout: None, is_published=lambda: self.acknowledges)
+
+    def disconnect(self) -> None:
+        self.connected = False
+
+    def loop_stop(self) -> None:
+        pass
+
+
+@pytest.fixture
+def bambu_printers(monkeypatch) -> list[FakeBambuPrinter]:
+    printers: list[FakeBambuPrinter] = []
+    monkeypatch.setattr(FakeBambuPrinter, "printers", printers, raising=False)
+    monkeypatch.setattr(bambu.mqtt, "Client", FakeBambuPrinter)
+    monkeypatch.setattr(bambu, "_REPLY_TIMEOUT_S", 0.01)
+    return printers
+
+
+def _commands(printer: FakeBambuPrinter) -> list[str]:
+    return [body["command"] for request in printer.requests for body in request.values()]
+
+
+async def test_bambu_holds_one_connection_and_merges_what_changed(bambu_printers) -> None:
+    adapter = BambuAdapter()
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).progress == 5.0
+    (printer,) = bambu_printers
+    printer.report({"print": {"command": "push_status", "mc_percent": 50}})
+    state = await adapter.fetch_state(None, BAMBU_CONFIG)
+    assert (state.status, state.progress) == (DeviceStatus.PRINTING, 50.0), "a P1 report carries only what changed"
+    assert state.public()["nozzle"] == {"actual": 220.0, "target": 0.0}
+    await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    assert len(bambu_printers) == 1, "polls and commands share the connection"
+    assert printer.subscriptions == ["device/01S00A/report"]
+    assert _commands(printer) == ["get_version", "pushall", "pause"], "the full report is asked for once"
+    await adapter.close(BAMBU_CONFIG)
+    assert not printer.connected
+
+
+@pytest.mark.parametrize(
+    "report",
+    [
+        b"[1, 2]",
+        b"null",
+        b'{"info": {"command": "get_version", "module": [1]}}',
+        b'{"info": {"command": "get_version", "module": 1}}',
+        b'{"print": {"command": "pause", "sequence_id": [1]}}',
+    ],
+)
+async def test_bambu_report_of_another_shape_is_ignored(bambu_printers, report: bytes) -> None:
+    """paho ends its network thread on what on_message raises, and the connection still says it is live."""
+    adapter = BambuAdapter()
+    await adapter.fetch_state(None, BAMBU_CONFIG)
+    (printer,) = bambu_printers
+    printer.on_message(printer, None, SimpleNamespace(payload=report))
+    printer.report({"print": {"command": "push_status", "mc_percent": 50}})
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).progress == 50.0
+    await adapter.close()
+
+
+async def test_bambu_printer_that_goes_silent_is_reconnected_not_believed(bambu_printers, monkeypatch) -> None:
+    adapter = BambuAdapter()
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.PRINTING
+    monkeypatch.setattr(FakeBambuPrinter, "full_report", None)
+    monkeypatch.setattr(bambu, "_SILENCE_LIMIT_S", -1.0)
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.OFFLINE
+    silent, reconnected = bambu_printers[:2]
+    assert not silent.connected and reconnected.connected
+    await adapter.close()
+
+
+async def test_bambu_dropped_connection_is_offline_until_a_full_report(bambu_printers, monkeypatch) -> None:
+    adapter = BambuAdapter()
+    await adapter.fetch_state(None, BAMBU_CONFIG)
+    monkeypatch.setattr(FakeBambuPrinter, "full_report", None)
+    bambu_printers[0].connected = False
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.OFFLINE
+    bambu_printers[1].report({"print": {"command": "push_status", "mc_percent": 60}})
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.OFFLINE, "a change without the full report says nothing of the state"
+    bambu_printers[1].report({"print": {**BAMBU_FULL_REPORT, "gcode_state": "FINISH"}})
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.IDLE
+    await adapter.close()
+
+
+async def test_bambu_never_waits_for_the_pool_inference_runs_on(bambu_printers) -> None:
+    release = threading.Event()
+    busy = ThreadPoolExecutor(max_workers=1)
+    asyncio.get_running_loop().set_default_executor(busy)
+    stuck = asyncio.get_running_loop().run_in_executor(None, release.wait)
+    adapter = BambuAdapter()
+    try:
+        state = await asyncio.wait_for(adapter.fetch_state(None, BAMBU_CONFIG), 2.0)
+        assert state.status is DeviceStatus.PRINTING
+    finally:
+        release.set()
+        await stuck
+        await adapter.close()
+        busy.shutdown()
+
+
+async def test_bambu_that_never_reports_says_to_check_the_serial(bambu_printers, monkeypatch) -> None:
+    monkeypatch.setattr(FakeBambuPrinter, "full_report", None)
+    adapter = BambuAdapter()
+    with pytest.raises(RuntimeError, match="check the serial number"):
+        await adapter.fetch_state(None, BAMBU_CONFIG)
+    await adapter.close()
+
+
+async def test_bambu_refused_connection_raises(bambu_printers, monkeypatch) -> None:
+    monkeypatch.setattr(FakeBambuPrinter, "answer", "Not authorized")
+    adapter = BambuAdapter()
+    with pytest.raises(RuntimeError, match="refused the connection: Not authorized"):
+        await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    with pytest.raises(RuntimeError, match="refused the connection"):
+        await adapter.fetch_state(None, BAMBU_CONFIG)
+    assert all("pause" not in _commands(printer) for printer in bambu_printers)
+
+
+async def test_bambu_unacknowledged_command_raises(bambu_printers, monkeypatch) -> None:
+    monkeypatch.setattr(FakeBambuPrinter, "acknowledges", False)
+    adapter = BambuAdapter()
+    with pytest.raises(RuntimeError, match="did not acknowledge pause"):
+        await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    await adapter.close()
+
+
+async def test_bambu_command_that_fails_is_never_left_for_the_connection_to_replay(bambu_printers, monkeypatch) -> None:
+    """paho resends a queued QoS 1 publish, so a pause reported as failed must lose its session."""
+    adapter = BambuAdapter()
+    await adapter.fetch_state(None, BAMBU_CONFIG)
+    monkeypatch.setattr(FakeBambuPrinter, "acknowledges", False)
+    with pytest.raises(RuntimeError, match="did not acknowledge pause"):
+        await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    (failed,) = bambu_printers
+    assert not failed.connected, "the session holding an unacknowledged pause stayed open to resend it"
+
+    monkeypatch.setattr(FakeBambuPrinter, "acknowledges", True)
+    await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    retried = bambu_printers[1]
+    assert _commands(failed).count("pause") == 1 and "pause" in _commands(retried), "the next command reused the dropped session"
+
+    retried.connected = False
+    await adapter.send(None, BAMBU_CONFIG, DeviceAction.RESUME)
+    assert "resume" not in _commands(retried), "a command was queued on a connection already lost"
+    assert "resume" in _commands(bambu_printers[2])
+    await adapter.close()
+
+
+async def test_bambu_command_the_printer_fails_raises(bambu_printers, monkeypatch) -> None:
+    monkeypatch.setattr(FakeBambuPrinter, "verdict", {"result": "failed", "reason": "mqtt message verify failed", "err_code": 84033543})
+    adapter = BambuAdapter()
+    with pytest.raises(RuntimeError, match="refused pause: mqtt message verify failed"):
+        await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    with pytest.raises(RuntimeError, match="refused gcode_line"):
+        await adapter.heat(None, BAMBU_CONFIG, "bed", 60.0)
+    await adapter.close()
+
+
+async def test_bambu_command_without_a_verdict_stands_on_the_acknowledgement(bambu_printers, monkeypatch) -> None:
+    monkeypatch.setattr(FakeBambuPrinter, "verdict", None)
+    adapter = BambuAdapter()
+    await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    (pause,) = [body for request in bambu_printers[0].requests for body in request.values() if body["command"] == "pause"]
+    assert pause["sequence_id"] != "0", "a number of its own tells this command's answer from another client's"
+    await adapter.close()
+
+
+async def test_bambu_host_that_never_finishes_connecting_does_not_queue_callers(bambu_printers, monkeypatch) -> None:
+    """A host that accepts on 8883 and never finishes TLS holds connect() for paho's keepalive."""
+    connecting, release = threading.Event(), threading.Event()
+
+    def connect(self, host: str, port: int, keepalive: int) -> None:
+        connecting.set()
+        release.wait()
+
+    monkeypatch.setattr(FakeBambuPrinter, "connect", connect)
+    monkeypatch.setattr(bambu, "_CONNECT_TIMEOUT_S", 0.01)
+    adapter = BambuAdapter()
+    stalled = asyncio.ensure_future(adapter.fetch_state(None, BAMBU_CONFIG))
+    try:
+        await asyncio.to_thread(connecting.wait)
+        with pytest.raises(RuntimeError, match="not answering the connection"):
+            await asyncio.wait_for(adapter.fetch_state(None, BAMBU_CONFIG), 1.0)
+        with pytest.raises(RuntimeError, match="not answering the connection"):
+            await asyncio.wait_for(adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE), 1.0)
+    finally:
+        release.set()
+        await stalled
+    await adapter.close()
+
+
+async def test_bambu_command_is_not_sent_once_its_caller_has_stopped_waiting(bambu_printers, monkeypatch) -> None:
+    def connect(self, host: str, port: int, keepalive: int) -> None:
+        time.sleep(0.02)
+
+    monkeypatch.setattr(FakeBambuPrinter, "connect", connect)
+    monkeypatch.setattr(bambu, "_DEADLINE_S", 0.01)
+    adapter = BambuAdapter()
+    with pytest.raises(RuntimeError, match="took too long to connect"):
+        await asyncio.to_thread(adapter._publish, BAMBU_CONFIG, {"print": {"sequence_id": "0", "command": "pause", "param": ""}})
+    assert "pause" not in _commands(bambu_printers[0]), "a pause reported as timed out reached the printer afterwards"
+    await adapter.close()
+
+
+async def test_bambu_command_is_not_sent_without_time_left_to_hear_it_was_taken(bambu_printers, monkeypatch) -> None:
+    """A slow reconnect used to leave the two waits running past the caller, who saw a pause that happened time out."""
+
+    def connect(self, host: str, port: int, keepalive: int) -> None:
+        time.sleep(0.2)
+
+    def publish(self, topic: str, payload: str, qos: int = 0) -> Any:
+        self.requests.append(jsonlib.loads(payload))
+        return SimpleNamespace(wait_for_publish=time.sleep, is_published=lambda: True)
+
+    monkeypatch.setattr(FakeBambuPrinter, "connect", connect)
+    monkeypatch.setattr(FakeBambuPrinter, "publish", publish)
+    monkeypatch.setattr(bambu, "_REPLY_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(bambu, "_DEADLINE_S", 0.5)
+    adapter = BambuAdapter()
+    with pytest.raises(RuntimeError, match="took too long to connect"):
+        await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    assert "pause" not in _commands(bambu_printers[0]), "a pause that could only be reported as timed out was sent"
+    await adapter.close()
+
+
+async def test_bambu_caller_closes_only_the_session_it_was_using(bambu_printers, monkeypatch) -> None:
+    """A poll that found its session lost used to close whichever one a command had opened since."""
+    adapter = BambuAdapter()
+    stale = adapter._session(BAMBU_CONFIG)
+    bambu_printers[0].connected = False
+    fresh = adapter._session(BAMBU_CONFIG)
+    assert fresh is not stale and len(bambu_printers) == 2
+    adapter._drop(BAMBU_CONFIG, stale)
+    assert bambu_printers[1].connected and adapter._session(BAMBU_CONFIG) is fresh
+    await adapter.close(BAMBU_CONFIG)
+    assert not bambu_printers[1].connected
+
+
+def test_bambu_upload_does_not_wait_on_the_data_channels_tls_shutdown(monkeypatch) -> None:
+    """The printer leaves the shutdown unanswered, so ftplib's own storbinary raises after the file is stored."""
+    import ftplib
+    import ssl
+
+    sent: list[bytes] = []
+    commands: list[str] = []
+
+    class DataChannel(ssl.SSLSocket):
+        session = None
+
+        def __init__(self) -> None:
+            self._closed = False
+            self._timeout: float | None = None
+
+        def settimeout(self, value: float | None) -> None:
+            self._timeout = value
+
+        def gettimeout(self) -> float | None:
+            return self._timeout
+
+        def sendall(self, data: bytes) -> None:
+            sent.append(data)
+
+        def unwrap(self) -> None:
+            raise TimeoutError("The read operation timed out")
+
+        def close(self) -> None:
+            self._closed = True
+
+    channels: list[DataChannel] = []
+    confirmed_within: list[float | None] = []
+
+    class Context:
+        def wrap_socket(self, sock: Any, **kwargs: Any) -> DataChannel:
+            channels.append(DataChannel())
+            return channels[-1]
+
+    def connect(self, host: str, port: int) -> None:
+        self.host, self.sock = host, object()
+
+    monkeypatch.setattr(bambu, "_tls_context", Context)
+    monkeypatch.setattr(ftplib.FTP, "connect", connect)
+    monkeypatch.setattr(ftplib.FTP, "login", lambda self, user, passwd, acct="": commands.append(f"USER {user}"))
+    monkeypatch.setattr(ftplib.FTP_TLS, "prot_p", lambda self: commands.append("PROT P"))
+    monkeypatch.setattr(ftplib.FTP, "voidcmd", lambda self, cmd: commands.append(cmd))
+    monkeypatch.setattr(ftplib.FTP, "ntransfercmd", lambda self, cmd, rest=None: (commands.append(cmd) or object(), None))
+    monkeypatch.setattr(ftplib.FTP, "voidresp", lambda self: confirmed_within.append(self.sock.gettimeout()) or "226 Transfer complete")
+    monkeypatch.setattr(ftplib.FTP, "close", lambda self: None)
+    BambuAdapter()._upload(BAMBU_CONFIG, "benchy.3mf", b"3mf bytes")
+    assert commands == ["USER bblp", "PROT P", "TYPE I", "STOR benchy.3mf"]
+    assert sent == [b"3mf bytes"] and channels[-1]._closed
+    assert confirmed_within == [bambu._STORED_REPLY_TIMEOUT_S] and bambu._STORED_REPLY_TIMEOUT_S > bambu._CONNECT_TIMEOUT_S, (
+        "a printer confirms a large file only after writing it, which the control socket's own timeout must not cut short"
+    )
+
+
+@pytest.mark.parametrize(
+    ("product", "url"),
+    [
+        ("Bambu Lab P1S", "file:///sdcard/benchy.3mf"),
+        ("Bambu Lab A1 mini", "file:///sdcard/benchy.3mf"),
+        ("Bambu Lab H2D", "ftp:///benchy.3mf"),
+        ("Bambu Lab H2D Pro", "ftp:///benchy.3mf"),
+        ("Bambu Lab P2S", "ftp:///benchy.3mf"),
+        ("Bambu Lab X2D", "ftp:///benchy.3mf"),
+        ("Bambu Lab H2S", "ftp:///benchy.3mf"),
+        ("Bambu Lab H2C", "ftp:///benchy.3mf"),
+        ("", "file:///sdcard/benchy.3mf"),
+    ],
+)
+async def test_bambu_hands_only_the_x1_p1_and_a1_series_a_path_on_the_sd_card(bambu_printers, monkeypatch, product: str, url: str) -> None:
+    from test_gcode import sliced_3mf
+
+    monkeypatch.setattr(FakeBambuPrinter, "version_modules", [{"name": "esp32", "product_name": ""}, {"name": "ota", "product_name": product}])
+    adapter = BambuAdapter()
+    monkeypatch.setattr(adapter, "_upload", lambda config, filename, data: None)
+    await adapter.print_file(None, BAMBU_CONFIG, "benchy.3mf", sliced_3mf(plate=1))
+    assert bambu_printers[0].requests[-1]["print"]["url"] == url
+    await adapter.close()
+
+
 async def test_bambu_exposes_rtsps_camera_for_x1_h2(monkeypatch) -> None:
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_rtsps_fingerprint", lambda host: "ABCDEF")
     cams = await INTEGRATIONS["bambu"].cameras(None, BAMBU_CONFIG)
@@ -583,7 +1204,8 @@ ELEGOO_MOONRAKER_CONFIG = {"family": "moonraker", "host": "192.168.1.91", "api_k
 class FakeCentauri:
     """pycentauri client stand-in for adapter contract tests."""
 
-    def __init__(self, print_status: int = 13, camera_port: int = 3031) -> None:
+    def __init__(self, print_status: int = 13, camera_port: int = 3031, ack: int = 0) -> None:
+        self.ack = ack
         self.state = SimpleNamespace(
             print_status=print_status,
             progress=42,
@@ -592,7 +1214,8 @@ class FakeCentauri:
             temp_nozzle_target=205.0,
             temp_bed=None,
             temp_bed_target=None,
-            raw={"_cc2": {"remaining_time_sec": 900}},
+            print_info=SimpleNamespace(total_ticks=3000.0, current_ticks=2100.0),
+            raw={},
         )
         self.camera_port = camera_port
         self.actions: list[str] = []
@@ -601,20 +1224,27 @@ class FakeCentauri:
         self._closed = False
         self.mainboard_id = "mainboard-id"
 
+    def answer(self) -> Any:
+        return SimpleNamespace(inner={"Cmd": 0, "Data": {"Ack": self.ack}})
+
     async def status(self) -> Any:
-        return self.state
+        return SimpleNamespace(**vars(self.state))
 
-    async def set_temperatures(self, **targets: float) -> None:
+    async def set_temperatures(self, **targets: float) -> Any:
         self.targets.append(targets)
+        return self.answer()
 
-    async def pause(self) -> None:
+    async def pause(self) -> Any:
         self.actions.append("pause")
+        return self.answer()
 
-    async def resume(self) -> None:
+    async def resume(self) -> Any:
         self.actions.append("resume")
+        return self.answer()
 
-    async def stop(self) -> None:
+    async def stop(self) -> Any:
         self.actions.append("stop")
+        return self.answer()
 
     async def close(self) -> None:
         self.closed = True
@@ -626,6 +1256,14 @@ def _fake_centauri(client: FakeCentauri):
         return client
 
     return connect
+
+
+async def test_elegoo_centauri_past_its_estimate_has_no_negative_time_left(monkeypatch) -> None:
+    client = FakeCentauri()
+    client.state.print_info = SimpleNamespace(total_ticks=3000.0, current_ticks=3300.0)
+    monkeypatch.setattr(INTEGRATIONS["elegoo"], "_connect_centauri", _fake_centauri(client))
+    state = await INTEGRATIONS["elegoo"].fetch_state(None, ELEGOO_CENTAURI_CONFIG)
+    assert state.remaining_s == 0
 
 
 @pytest.mark.parametrize(
@@ -653,6 +1291,29 @@ async def test_elegoo_centauri_normalises_states(monkeypatch, print_status: int,
     assert not client.closed
 
 
+@pytest.mark.parametrize(
+    ("machine_status", "print_status", "expected"),
+    [
+        (0, 0, DeviceStatus.UNKNOWN),
+        (1, 0, DeviceStatus.IDLE),
+        (2, 13, DeviceStatus.PRINTING),
+        (2, 6, DeviceStatus.PAUSED),
+        (3, 27, DeviceStatus.UNKNOWN),
+        (4, 29, DeviceStatus.UNKNOWN),
+        (5, 15, DeviceStatus.UNKNOWN),
+        (6, 14, DeviceStatus.UNKNOWN),
+    ],
+)
+async def test_elegoo_centauri_carbon_2_reads_a_job_only_from_idle_and_printing(
+    monkeypatch, machine_status: int, print_status: int, expected: DeviceStatus
+) -> None:
+    """The print status is what pycentauri maps each machine state to, 0 being both initialising and a missing one."""
+    client = FakeCentauri(print_status)
+    client.state.raw = {"_cc2": {"machine_status": machine_status}}
+    monkeypatch.setattr(INTEGRATIONS["elegoo"], "_connect_centauri", _fake_centauri(client))
+    assert (await INTEGRATIONS["elegoo"].fetch_state(None, ELEGOO_CENTAURI_CONFIG)).status is expected
+
+
 async def test_elegoo_centauri_heater_targets(monkeypatch) -> None:
     client = FakeCentauri()
     monkeypatch.setattr(INTEGRATIONS["elegoo"], "_connect_centauri", _fake_centauri(client))
@@ -668,6 +1329,79 @@ async def test_elegoo_centauri_actions_enable_control(monkeypatch) -> None:
     for action in (DeviceAction.PAUSE, DeviceAction.RESUME, DeviceAction.CANCEL):
         await INTEGRATIONS["elegoo"].send(None, ELEGOO_CENTAURI_CONFIG, action)
     assert client.actions == ["pause", "resume", "stop"]
+
+
+async def test_elegoo_centauri_refused_commands_raise_and_keep_the_connection() -> None:
+    client = FakeCentauri(ack=1)
+
+    async def start_print(filename, *, storage="local"):
+        return client.answer()
+
+    async def upload_file(path, *, remote_name=None):
+        return remote_name
+
+    client.start_print, client.upload_file = start_print, upload_file
+    adapter = ElegooAdapter()
+    adapter._connections[adapter.connection_key(ELEGOO_CENTAURI_CONFIG)] = client
+    with pytest.raises(RuntimeError, match="refused pause: Ack 1"):
+        await adapter.send(None, ELEGOO_CENTAURI_CONFIG, DeviceAction.PAUSE)
+    with pytest.raises(RuntimeError, match="refused the bed target"):
+        await adapter.heat(None, ELEGOO_CENTAURI_CONFIG, "bed", 60.0)
+    with pytest.raises(RuntimeError, match="refused to print benchy.gcode"):
+        await adapter.print_file(None, ELEGOO_CENTAURI_CONFIG, "benchy.gcode", b"G1 X1\n")
+    assert not client.closed, "a refusal says the connection works, and the poll shares it"
+
+
+async def test_elegoo_centauri_target_out_of_range_keeps_the_connection() -> None:
+    client = FakeCentauri()
+
+    async def set_temperatures(**targets: float) -> Any:
+        raise ValueError("bed target 140°C out of safe range 0..110")
+
+    client.set_temperatures = set_temperatures
+    adapter = ElegooAdapter()
+    adapter._connections[adapter.connection_key(ELEGOO_CENTAURI_CONFIG)] = client
+    with pytest.raises(ValueError, match="out of safe range"):
+        await adapter.heat(None, ELEGOO_CENTAURI_CONFIG, "bed", 140.0)
+    assert not client.closed
+
+
+class RepeatingCentauri(FakeCentauri):
+    """A Centauri Carbon 1 client, which answers status() with its last push for ever."""
+
+    def __init__(self, pushes: list[Any]) -> None:
+        super().__init__(print_status=0)
+        self.pushes = pushes
+
+    async def status(self) -> Any:
+        return self.state
+
+    async def watch(self) -> Any:
+        yield self.state
+        for push in self.pushes:
+            self.state = push
+            yield push
+        await asyncio.Event().wait()
+
+
+async def test_elegoo_centauri_waits_out_a_status_it_has_already_read(monkeypatch) -> None:
+    adapter = ElegooAdapter()
+    printing = SimpleNamespace(**{**vars(FakeCentauri().state), "print_status": 13})
+    client = RepeatingCentauri([printing])
+    monkeypatch.setattr(adapter, "_connect_centauri", _fake_centauri(client))
+    assert (await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)).status is DeviceStatus.IDLE
+    assert (await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)).status is DeviceStatus.PRINTING
+
+
+async def test_elegoo_centauri_that_stops_reporting_fails_the_poll(monkeypatch) -> None:
+    adapter = ElegooAdapter()
+    client = RepeatingCentauri([])
+    adapter._connections[adapter.connection_key(ELEGOO_CENTAURI_CONFIG)] = client
+    monkeypatch.setattr("printguard.engine.integrations.elegoo._FRESH_STATUS_TIMEOUT_S", 0.01)
+    assert (await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)).status is DeviceStatus.IDLE
+    with pytest.raises(RuntimeError, match="stopped reporting"):
+        await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)
+    assert client.closed, "the poll that fails drops the connection, so the next one starts again"
 
 
 @pytest.mark.parametrize(
@@ -713,6 +1447,74 @@ async def test_elegoo_centauri_reuses_one_connection(monkeypatch) -> None:
     assert client.closed
 
 
+async def test_a_cancelled_centauri_connect_closes_what_it_went_on_to_open(monkeypatch) -> None:
+    adapter = ElegooAdapter()
+    client = FakeCentauri()
+    opened = asyncio.Event()
+
+    async def connect_auto(host: str, **kwargs: Any) -> FakeCentauri:
+        await asyncio.sleep(0.05)
+        opened.set()
+        return client
+
+    async def discover_mainboard_id(host: str) -> None:
+        return None
+
+    monkeypatch.setattr(adapter, "_discover_mainboard_id", discover_mainboard_id)
+    monkeypatch.setattr("pycentauri.connect_auto", connect_auto)
+    asked = asyncio.create_task(adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG))
+    await asyncio.sleep(0.01)
+    asked.cancel()
+    await opened.wait()
+    await asyncio.sleep(0.01)
+    await asyncio.gather(*adapter._abandoned)
+    assert client.closed and not adapter._connections
+
+
+async def test_closing_a_centauri_carbon_2_that_is_slow_to_stop_does_not_stop_the_loop(monkeypatch) -> None:
+    """paho's loop_stop joins a network thread that a printer which is off keeps in a reconnect for up to about 5 s."""
+    adapter = ElegooAdapter()
+    stopped: list[str] = []
+
+    class SlowMqtt:
+        running = True
+
+        def disconnect(self) -> None:
+            stopped.append("disconnect")
+            time.sleep(0.4 if self.running else 0)
+
+        def loop_stop(self) -> None:
+            stopped.append("loop_stop")
+            time.sleep(0.4 if self.running else 0)
+            self.running = False
+
+    class SlowCentauri(FakeCentauri):
+        _mqtt = SlowMqtt()
+
+        async def close(self) -> None:
+            self._mqtt.disconnect()
+            self._mqtt.loop_stop()
+            await super().close()
+
+    client = SlowCentauri()
+    monkeypatch.setattr(adapter, "_connect_centauri", _fake_centauri(client))
+    await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)
+    adapter._connections[adapter.connection_key(ELEGOO_CENTAURI_CONFIG)] = client
+    ticks = 0
+
+    async def tick() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.01)
+            ticks += 1
+
+    ticking = asyncio.create_task(tick())
+    await adapter.close()
+    ticking.cancel()
+    assert client.closed and stopped[:2] == ["disconnect", "loop_stop"]
+    assert ticks > 50, f"the loop ran {ticks} times in the 0.8 s it took to stop the connection"
+
+
 async def test_elegoo_centauri_reconnects_after_failure(monkeypatch) -> None:
     adapter = ElegooAdapter()
 
@@ -740,6 +1542,34 @@ async def test_elegoo_centauri_reconnects_after_failure(monkeypatch) -> None:
     await adapter.close()
 
 
+async def test_elegoo_centauri_reconnects_with_the_id_of_the_printer_now_at_the_address(monkeypatch) -> None:
+    """pycentauri keeps an id it is given, so the last printer's id left a replacement at its address unanswered."""
+    adapter = ElegooAdapter()
+
+    class FailingCentauri(FakeCentauri):
+        async def status(self) -> Any:
+            raise RuntimeError("connection lost")
+
+    discovered = ["first-id", "second-id", None]
+    seeded: list[str | None] = []
+
+    async def discover_mainboard_id(host: str) -> str | None:
+        return discovered.pop(0)
+
+    async def connect_auto(host: str, **kwargs: Any) -> FakeCentauri:
+        seeded.append(kwargs["mainboard_id"])
+        client = FailingCentauri()
+        client.mainboard_id = kwargs["mainboard_id"]
+        return client
+
+    monkeypatch.setattr(adapter, "_discover_mainboard_id", discover_mainboard_id)
+    monkeypatch.setattr("pycentauri.connect_auto", connect_auto)
+    for _ in range(3):
+        with pytest.raises(RuntimeError, match="connection lost"):
+            await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)
+    assert seeded == ["first-id", "second-id", "second-id"], "a printer discovery does not reach keeps the id it last had"
+
+
 async def test_elegoo_moonraker_reuses_klipper_protocol() -> None:
     body = {
         "result": {
@@ -755,6 +1585,7 @@ async def test_elegoo_moonraker_reuses_klipper_protocol() -> None:
     assert state.progress == 50.0
     assert http.last["url"] == "http://192.168.1.91:7125/printer/objects/query?print_stats&virtual_sdcard&extruder&heater_bed"
     assert http.last["headers"] == {"X-Api-Key": "secret"}
+    http = RecordingHttp(body=MOONRAKER_OK)
     await INTEGRATIONS["elegoo"].send(http, ELEGOO_MOONRAKER_CONFIG, DeviceAction.PAUSE)
     assert http.last["url"] == "http://192.168.1.91:7125/printer/print/pause"
     await INTEGRATIONS["elegoo"].heat(http, ELEGOO_MOONRAKER_CONFIG, "bed", 60.0)
@@ -810,20 +1641,107 @@ async def test_prusa_normalises_job_states(monkeypatch, job_state: str, expected
 
 
 async def test_prusa_no_active_job_is_idle(monkeypatch) -> None:
-    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", _prusa_read(None))
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", _prusa_read(None, {"printer": {**PRUSA_STATUS["printer"], "state": "IDLE"}}))
     state = await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
     assert state.status is DeviceStatus.IDLE
     assert state.job is None, "204 No Content from /api/v1/job is idle, not a phantom job"
     assert state.public()["bed"] == {"actual": 59.6, "target": 60.0}, "an idle printer still reports its heaters"
 
 
-async def test_prusa_unreachable_is_offline(monkeypatch) -> None:
+@pytest.mark.parametrize("status", [{}, {"printer": {}}])
+async def test_prusa_that_says_nothing_of_its_state_is_not_idle(monkeypatch, status: dict[str, Any]) -> None:
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", _prusa_read(None, status))
+    state = await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
+    assert state.status is DeviceStatus.UNKNOWN, "missing data is not a positive not-printing, which would stand a monitor down"
+
+
+async def test_prusa_unreachable_says_why(monkeypatch) -> None:
     async def boom(config: dict[str, Any]) -> Any:
         raise ConnectionError("no route to printer")
 
     monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", boom)
+    with pytest.raises(ConnectionError, match="no route to printer"):
+        await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
+
+
+async def _prusa_answering(status_line: str, headers: str = "") -> tuple[asyncio.Server, dict[str, str]]:
+    async def answer(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.readuntil(b"\r\n\r\n")
+        writer.write(f"HTTP/1.1 {status_line}\r\nContent-Length: 0\r\nConnection: close\r\n{headers}\r\n".encode())
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(answer, "127.0.0.1", 0)
+    return server, {"base_url": f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}", "password": "pw"}
+
+
+async def test_prusa_behind_a_redirect_names_where_it_went() -> None:
+    server, config = await _prusa_answering("301 Moved Permanently", "Location: https://printer.local/\r\n")
+    async with server:
+        with pytest.raises(RuntimeError, match=r"redirects to https://printer\.local"):
+            await INTEGRATIONS["prusa"].fetch_state(None, config)
+
+
+async def test_prusa_upload_behind_a_redirect_names_where_it_went() -> None:
+    server, config = await _prusa_answering("301 Moved Permanently", "Location: https://printer.local/\r\n")
+    async with server:
+        with pytest.raises(RuntimeError, match=r"redirects to https://printer\.local"):
+            await INTEGRATIONS["prusa"].print_file(None, config, "benchy.gcode", b"G28")
+
+
+async def test_prusa_upload_to_something_that_lists_no_storage_says_it_is_not_prusalink() -> None:
+    server, config = await _prusa_answering("200 OK")
+    async with server:
+        with pytest.raises(RuntimeError, match="PrusaLink did not answer like its API$"):
+            await INTEGRATIONS["prusa"].print_file(None, config, "benchy.gcode", b"G28")
+
+
+@pytest.mark.parametrize(("answer", "said"), [("404 Not Found", "PrusaLink did not answer like its API: HTTP 404"), ("200 OK", "PrusaLink did not answer like its API$")])
+async def test_prusa_that_answers_like_something_else_says_so(answer: str, said: str) -> None:
+    server, config = await _prusa_answering(answer)
+    async with server:
+        with pytest.raises(RuntimeError, match=said):
+            await INTEGRATIONS["prusa"].fetch_state(None, config)
+
+
+async def test_prusa_refusing_a_pause_says_the_printer_is_in_the_way(monkeypatch) -> None:
+    server, config = await _prusa_answering("409 Conflict")
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_job", _prusa_job({"id": 7, "state": "PAUSED"}))
+    async with server:
+        with pytest.raises(RuntimeError, match="HTTP 409"):
+            await INTEGRATIONS["prusa"].send(None, config, DeviceAction.PAUSE)
+
+
+async def test_prusa_answering_with_an_error_names_the_status() -> None:
+    server, config = await _prusa_answering("502 Bad Gateway")
+    async with server:
+        with pytest.raises(RuntimeError, match="HTTP 502"):
+            await INTEGRATIONS["prusa"].fetch_state(None, config)
+
+
+@pytest.mark.parametrize(
+    ("job", "printer_state", "expected"),
+    [
+        ({"id": 1, "state": "ATTENTION"}, "ATTENTION", DeviceStatus.UNKNOWN),
+        ({"id": 1, "state": "PAUSED"}, "ATTENTION", DeviceStatus.UNKNOWN),
+        ({"id": 1, "state": "PAUSED"}, "PAUSED", DeviceStatus.PAUSED),
+        ({"id": 1, "state": "PRINTING"}, "ATTENTION", DeviceStatus.PRINTING),
+        ({"id": 1, "state": "BUSY"}, "BUSY", DeviceStatus.UNKNOWN),
+        ({"id": 1, "state": "READY"}, "READY", DeviceStatus.IDLE),
+        (None, "IDLE", DeviceStatus.IDLE),
+        (None, "READY", DeviceStatus.IDLE),
+        (None, "FINISHED", DeviceStatus.IDLE),
+        (None, "ERROR", DeviceStatus.ERROR),
+        (None, "BUSY", DeviceStatus.UNKNOWN),
+        (None, "ATTENTION", DeviceStatus.UNKNOWN),
+        (None, "PRINTING", DeviceStatus.PRINTING),
+        (None, "PAUSED", DeviceStatus.PAUSED),
+    ],
+)
+async def test_prusa_takes_the_printers_own_state_for_what_the_job_does_not_say(monkeypatch, job: Any, printer_state: str, expected: DeviceStatus) -> None:
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", _prusa_read(job, {"printer": {"state": printer_state}}))
     state = await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
-    assert state.status is DeviceStatus.OFFLINE, "an unreachable or unauthorised printer keeps inference watching"
+    assert state.status is expected
 
 
 async def test_prusa_falls_back_to_raw_filename(monkeypatch) -> None:
@@ -867,14 +1785,12 @@ def test_sanitise_monitor_clamps_and_defaults() -> None:
             "threshold": 9,
             "consecutive": 99,
             "cooldown_s": 10_000,
-            "on_defect": "explode",
         },
     )
     assert record["name"] == "Monitor"
-    assert record["threshold"] == 1.0
+    assert record["threshold"] == 0.95
     assert record["consecutive"] == 30
     assert record["cooldown_s"] == 600
-    assert record["on_defect"] == "none"
 
 
 def test_persisted_monitor_keeps_only_configuration() -> None:
@@ -946,8 +1862,8 @@ def test_classify_rejects_non_finite_embeddings() -> None:
         std=(0.25, 0.25, 0.25),
         prototypes={"success": np.zeros(4, np.float32), "failure": np.ones(4, np.float32)},
     )
-    bad = vision.classify(np.array([np.nan, 0, 0, 0], dtype=np.float32), assets)
-    assert bad["prediction"] == "unknown"
+    with pytest.raises(ValueError, match="non-finite"):
+        vision.classify(np.array([np.nan, 0, 0, 0], dtype=np.float32), assets)
     good = vision.classify(np.zeros(4, np.float32), assets)
     assert good["prediction"] == "success"
     assert good["margin"] == 2.0
@@ -983,7 +1899,7 @@ async def test_an_adapter_without_uploads_says_so() -> None:
 
 
 async def test_octoprint_uploads_selected_and_printing() -> None:
-    http = RecordingHttp(status=201)
+    http = RecordingHttp(status=201, body=OCTOPRINT_UPLOADED)
     await INTEGRATIONS["octoprint"].print_file(http, {"base_url": "http://op/", "api_key": "k"}, "benchy.gcode", b"G1 X1\n")
     call = http.last
     assert (call["method"], call["url"]) == ("POST", "http://op/api/files/local")
@@ -994,8 +1910,76 @@ async def test_octoprint_uploads_selected_and_printing() -> None:
         await INTEGRATIONS["octoprint"].print_file(RecordingHttp(status=415), {"base_url": "http://op", "api_key": "k"}, "x.gcode", b"")
 
 
+@pytest.mark.parametrize("command", ["pause", "resume", "cancel", "nozzle", "bed"])
+async def test_octoprint_that_answers_a_command_with_a_page_has_not_taken_it(command: str) -> None:
+    http = RecordingHttp(*SIGN_IN_PAGE)
+    adapter = INTEGRATIONS["octoprint"]
+    with pytest.raises(RuntimeError, match="did not answer .* like its API: HTTP 200"):
+        if command in ("nozzle", "bed"):
+            await adapter.heat(http, {"base_url": "http://op"}, command, 200.0)
+        else:
+            await adapter.send(http, {"base_url": "http://op"}, DeviceAction(command))
+
+
+@pytest.mark.parametrize("answer", [SIGN_IN_PAGE, (201, "<html>Sign in</html>"), (200, OCTOPRINT_UPLOADED), (201, {"effectivePrint": True})])
+async def test_octoprint_that_answers_an_upload_with_something_else_has_not_taken_it(answer: tuple[int, Any]) -> None:
+    with pytest.raises(RuntimeError, match="did not answer benchy.gcode like its API"):
+        await INTEGRATIONS["octoprint"].print_file(RecordingHttp(*answer), {"base_url": "http://op"}, "benchy.gcode", b"G1\n")
+
+
+async def test_octoprint_upload_it_stored_but_did_not_start_raises() -> None:
+    stored = {"files": {"local": {"name": "benchy.gcode"}}, "done": True, "effectiveSelect": False, "effectivePrint": False}
+    with pytest.raises(RuntimeError, match="did not start printing"):
+        await INTEGRATIONS["octoprint"].print_file(RecordingHttp(status=201, body=stored), {"base_url": "http://op", "api_key": "k"}, "benchy.gcode", b"G1 X1\n")
+
+
+async def test_octoprint_before_1_8_started_the_print_it_does_not_report() -> None:
+    """effectivePrint came with OctoPrint 1.8.0, and an older one's upload reply was refused as not OctoPrint's."""
+    stored = {"files": {"local": {"name": "benchy.gcode"}}, "done": True}
+    await INTEGRATIONS["octoprint"].print_file(RecordingHttp(status=201, body=stored), {"base_url": "http://op", "api_key": "k"}, "benchy.gcode", b"G1 X1\n")
+
+
+def test_prusa_signs_in_as_maker_unless_another_username_is_given() -> None:
+    from printguard.engine.integrations.prusa import _username
+
+    assert _username({"password": "p"}) == _username({"username": ""}) == "maker"
+    assert _username({"username": "olly"}) == "olly"
+
+
+MOONRAKER_UPLOADED = {"item": {"path": "benchy.gcode", "root": "gcodes"}, "print_started": True, "print_queued": False, "action": "create_file"}
+
+
+@pytest.mark.parametrize("command", ["pause", "resume", "cancel", "nozzle", "bed"])
+async def test_klipper_that_answers_a_command_with_a_page_has_not_taken_it(command: str) -> None:
+    http = RecordingHttp(*SIGN_IN_PAGE)
+    adapter = INTEGRATIONS["klipper"]
+    with pytest.raises(RuntimeError, match="did not answer .* like its API: HTTP 200"):
+        if command in ("nozzle", "bed"):
+            await adapter.heat(http, {"base_url": "http://kl"}, command, 200.0)
+        else:
+            await adapter.send(http, {"base_url": "http://kl"}, DeviceAction(command))
+
+
+@pytest.mark.parametrize("answer", [SIGN_IN_PAGE, (201, "<html>Sign in</html>"), (200, MOONRAKER_UPLOADED), (201, {"result": "ok"})])
+async def test_klipper_that_answers_an_upload_with_something_else_has_not_taken_it(answer: tuple[int, Any]) -> None:
+    with pytest.raises(RuntimeError, match="did not answer benchy.gcode like its API"):
+        await INTEGRATIONS["klipper"].print_file(RecordingHttp(*answer), {"base_url": "http://mr:7125"}, "benchy.gcode", b"G1\n")
+
+
+async def test_klipper_upload_that_moonraker_queued_says_it_may_start_later() -> None:
+    queued = {**MOONRAKER_UPLOADED, "print_started": False, "print_queued": True}
+    with pytest.raises(RuntimeError, match="queued benchy.gcode and will print it when the printer is free"):
+        await INTEGRATIONS["klipper"].print_file(RecordingHttp(status=201, body=queued), {"base_url": "http://mr:7125"}, "benchy.gcode", b"G1\n")
+
+
+async def test_klipper_upload_that_does_not_start_the_print_raises() -> None:
+    stored = {**MOONRAKER_UPLOADED, "print_started": False}
+    with pytest.raises(RuntimeError, match="did not start printing"):
+        await INTEGRATIONS["klipper"].print_file(RecordingHttp(status=201, body=stored), {"base_url": "http://mr:7125"}, "benchy.gcode", b"G1 X1\n")
+
+
 async def test_klipper_uploads_into_gcodes_and_prints() -> None:
-    http = RecordingHttp(status=201)
+    http = RecordingHttp(status=201, body=MOONRAKER_UPLOADED)
     await INTEGRATIONS["klipper"].print_file(http, {"base_url": "http://mr:7125", "api_key": "s"}, "benchy.gcode", b"G1 X1\n")
     call = http.last
     assert (call["method"], call["url"]) == ("POST", "http://mr:7125/server/files/upload")
@@ -1006,48 +1990,93 @@ async def test_klipper_uploads_into_gcodes_and_prints() -> None:
         await INTEGRATIONS["klipper"].print_file(RecordingHttp(status=400), {"base_url": "http://mr:7125"}, "x.gcode", b"")
 
 
-async def test_prusa_puts_onto_the_first_available_storage_and_prints_after_upload(monkeypatch) -> None:
-    from contextlib import asynccontextmanager
+class FakePrusaLink:
+    """A loopback PrusaLink that challenges every request without digest credentials."""
 
-    uploads: list[tuple[str, dict[str, str], bytes]] = []
+    def __init__(self, storages: list[dict[str, Any]], listing: int = 200, stored: str = "201 Created") -> None:
+        self.storages, self.listing, self.stored = storages, listing, stored
+        self.received: list[tuple[str, str, bool, dict[str, str], bytes]] = []
 
-    class FakeLink:
-        async def get_storage(self):
-            return [{"path": "/local", "available": False}, {"path": "/usb", "available": True}]
+    async def __aenter__(self) -> dict[str, str]:
+        self.server = await asyncio.start_server(self.answer, "127.0.0.1", 0)
+        return {"base_url": f"http://127.0.0.1:{self.server.sockets[0].getsockname()[1]}", "password": "pw"}
 
-    @asynccontextmanager
-    async def link(config):
-        yield FakeLink()
+    async def __aexit__(self, *_: Any) -> None:
+        self.server.close()
+        await self.server.wait_closed()
 
-    async def upload(config, path, headers, data):
-        uploads.append((path, headers, data))
+    async def answer(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        head = (await reader.readuntil(b"\r\n\r\n")).decode().split("\r\n")
+        method, path, _ = head[0].split(" ")
+        headers = {name.lower(): value for name, _, value in (line.partition(": ") for line in head[1:] if line)}
+        body = await reader.readexactly(int(headers.get("content-length", 0)))
+        authorised = headers.get("authorization", "").startswith("Digest ")
+        self.received.append((method, path, authorised, headers, body))
+        if not authorised:
+            status, extra, payload = "401 Unauthorized", 'WWW-Authenticate: Digest realm="Printer API", nonce="abc123"\r\n', b""
+        elif method == "GET":
+            status, extra = f"{self.listing} Listing", "Content-Type: application/json\r\n"
+            payload = jsonlib.dumps({"storage_list": self.storages}).encode()
+        else:
+            status, extra, payload = self.stored, "", b""
+        writer.write(f"HTTP/1.1 {status}\r\nContent-Length: {len(payload)}\r\nConnection: close\r\n{extra}\r\n".encode() + payload)
+        await writer.drain()
+        writer.close()
 
-    monkeypatch.setattr(INTEGRATIONS["prusa"], "_link", link)
-    monkeypatch.setattr(INTEGRATIONS["prusa"], "_upload", upload)
-    await INTEGRATIONS["prusa"].print_file(None, PRUSA_CONFIG, "benchy.bgcode", b"GCDE")
-    assert uploads == [
-        (
-            "/api/v1/files/usb/benchy.bgcode",
-            {"Content-Type": "application/octet-stream", "Print-After-Upload": "?1", "Overwrite": "?1"},
-            b"GCDE",
-        )
-    ]
+
+async def test_prusa_puts_onto_the_first_writable_storage_and_sends_the_file_once() -> None:
+    printer = FakePrusaLink(
+        [
+            {"path": "/local", "available": False},
+            {"path": "/sdcard", "available": True, "read_only": True},
+            {"path": "/usb", "available": True, "read_only": False},
+        ]
+    )
+    async with printer as config:
+        await INTEGRATIONS["prusa"].print_file(None, config, "benchy.bgcode", b"GCDE" * 1000)
+    assert [(method, path, authorised, len(body)) for method, path, authorised, _, body in printer.received] == [
+        ("GET", "/api/v1/storage", False, 0),
+        ("GET", "/api/v1/storage", True, 0),
+        ("PUT", "/api/v1/files/usb/benchy.bgcode", True, 4000),
+    ], "the challenge the listing answered signs the upload, so the file crosses the network once"
+    upload = printer.received[-1][3]
+    assert (upload["content-type"], upload["print-after-upload"], upload["overwrite"]) == ("text/x.gcode", "?1", "?1"), (
+        "PrusaLink on a Raspberry Pi sniffs the destination for any other type, which fails for a new file name"
+    )
 
 
-async def test_prusa_without_storage_raises(monkeypatch) -> None:
-    from contextlib import asynccontextmanager
+async def test_prusa_that_answers_an_upload_with_something_else_has_not_taken_it() -> None:
+    async with FakePrusaLink([{"path": "/usb", "available": True}], stored="200 OK") as config:
+        with pytest.raises(RuntimeError, match="did not answer the file like its API: HTTP 200"):
+            await INTEGRATIONS["prusa"].print_file(None, config, "benchy.gcode", b"G1")
 
-    class FakeLink:
-        async def get_storage(self):
-            return [{"path": "/usb", "available": False}]
 
-    @asynccontextmanager
-    async def link(config):
-        yield FakeLink()
+async def test_prusa_commands_are_taken_on_a_204_and_on_nothing_else() -> None:
+    for action, method, path in (
+        (DeviceAction.PAUSE, "PUT", "/api/v1/job/7/pause"),
+        (DeviceAction.RESUME, "PUT", "/api/v1/job/7/resume"),
+        (DeviceAction.CANCEL, "DELETE", "/api/v1/job/7"),
+    ):
+        async with FakePrusaLink([], stored="204 No Content") as config:
+            await INTEGRATIONS["prusa"]._command(config, 7, action)
+        async with FakePrusaLink([], stored="200 OK") as config:
+            with pytest.raises(RuntimeError, match=f"did not answer {action.value} like its API: HTTP 200"):
+                await INTEGRATIONS["prusa"]._command(config, 7, action)
+    commands = FakePrusaLink([], stored="204 No Content")
+    async with commands as config:
+        await INTEGRATIONS["prusa"]._command(config, 7, DeviceAction.CANCEL)
+    assert [(method, path) for method, path, *_ in commands.received] == [("DELETE", "/api/v1/job/7"), ("DELETE", "/api/v1/job/7")]
 
-    monkeypatch.setattr(INTEGRATIONS["prusa"], "_link", link)
-    with pytest.raises(RuntimeError, match="no storage"):
-        await INTEGRATIONS["prusa"].print_file(None, PRUSA_CONFIG, "benchy.gcode", b"G1")
+
+async def test_prusa_without_storage_raises() -> None:
+    printer = FakePrusaLink([{"path": "/usb", "available": False}])
+    async with printer as config:
+        with pytest.raises(RuntimeError, match="no storage"):
+            await INTEGRATIONS["prusa"].print_file(None, config, "benchy.gcode", b"G1")
+    assert not [method for method, *_ in printer.received if method == "PUT"]
+    async with FakePrusaLink([], listing=403) as config:
+        with pytest.raises(RuntimeError, match="refused to list its storage: HTTP 403"):
+            await INTEGRATIONS["prusa"].print_file(None, config, "benchy.gcode", b"G1")
 
 
 async def test_bambu_uploads_over_ftps_then_prints_the_plate(monkeypatch) -> None:
@@ -1056,7 +2085,8 @@ async def test_bambu_uploads_over_ftps_then_prints_the_plate(monkeypatch) -> Non
     steps: list[Any] = []
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_upload", lambda config, filename, data: steps.append(("upload", filename, data)))
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_publish", lambda config, payload: steps.append(("publish", payload)))
-    data = sliced_3mf(plate=3)
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_product", lambda config: "Bambu Lab P1S")
+    data = sliced_3mf(plate="03")
     await INTEGRATIONS["bambu"].print_file(None, BAMBU_CONFIG, "benchy.3mf", data)
     assert steps[0] == ("upload", "benchy.3mf", data), "the file is on the SD card before the print is asked for"
     assert steps[1] == (
@@ -1065,7 +2095,7 @@ async def test_bambu_uploads_over_ftps_then_prints_the_plate(monkeypatch) -> Non
             "print": {
                 "sequence_id": "0",
                 "command": "project_file",
-                "param": "Metadata/plate_3.gcode",
+                "param": "Metadata/plate_03.gcode",
                 "url": "file:///sdcard/benchy.3mf",
                 "subtask_name": "benchy",
                 "bed_type": "auto",
@@ -1111,6 +2141,7 @@ async def test_elegoo_centauri_uploads_then_starts(monkeypatch) -> None:
 
     async def start_print(filename, *, storage="local"):
         steps.append(("start", filename, storage))
+        return client.answer()
 
     client.upload_file = upload_file
     client.start_print = start_print
@@ -1121,7 +2152,322 @@ async def test_elegoo_centauri_uploads_then_starts(monkeypatch) -> None:
 
 
 async def test_elegoo_moonraker_family_uploads_through_moonraker() -> None:
-    http = RecordingHttp(status=201)
+    http = RecordingHttp(status=201, body=MOONRAKER_UPLOADED)
     await INTEGRATIONS["elegoo"].print_file(http, ELEGOO_MOONRAKER_CONFIG, "benchy.gcode", b"G1\n")
     assert http.last["url"] == "http://192.168.1.91:7125/server/files/upload"
     assert http.last["headers"]["X-Api-Key"] == "secret"
+
+
+@pytest.mark.parametrize(
+    ("api_ports", "base_url", "stream", "resolved"),
+    [
+        (klipper._API_PORTS, "http://pi.lan:7125", "/webcam/?action=stream", "http://pi.lan/webcam/?action=stream"),
+        (klipper._API_PORTS, "http://pi.lan:7126", "/webcam2/?action=stream", "http://pi.lan/webcam2/?action=stream"),
+        (klipper._API_PORTS, "https://pi.lan:7130", "/webcam/?action=stream", "https://pi.lan/webcam/?action=stream"),
+        (klipper._API_PORTS, "http://pi.lan:8080", "/webcam/?action=stream", "http://pi.lan:8080/webcam/?action=stream"),
+        (klipper._API_PORTS, "http://pi.lan", "/webcam/?action=stream", "http://pi.lan/webcam/?action=stream"),
+        (klipper._API_PORTS, "http://[fd00::7]:7125", "/webcam/?action=stream", "http://[fd00::7]/webcam/?action=stream"),
+        (klipper._API_PORTS, "http://[fd00::7]:8080", "/webcam/?action=stream", "http://[fd00::7]:8080/webcam/?action=stream"),
+        (klipper._API_PORTS, "http://[fd00::7]", "/webcam/?action=stream", "http://[fd00::7]/webcam/?action=stream"),
+        (octoprint._API_PORTS, "http://octopi.local:5000", "/webcam/?action=stream", "http://octopi.local/webcam/?action=stream"),
+        (octoprint._API_PORTS, "http://nas.lan:8080", "/webcam/?action=stream", "http://nas.lan:8080/webcam/?action=stream"),
+        (octoprint._API_PORTS, "https://print.example.com", "/webcam/?action=stream", "https://print.example.com/webcam/?action=stream"),
+        (octoprint._API_PORTS, "http://octopi.local:5000", "http://cam.lan/stream", "http://cam.lan/stream"),
+        (octoprint._API_PORTS, "http://octopi.local:5000", "http://127.0.0.1:8080/?action=stream", "http://octopi.local:8080/?action=stream"),
+        (octoprint._API_PORTS, "http://[fd00::7]:5000", "http://localhost/webcam/?action=stream", "http://[fd00::7]/webcam/?action=stream"),
+        (octoprint._API_PORTS, "http://127.0.0.1:5000", "http://127.0.0.1:8080/?action=stream", "http://127.0.0.1:8080/?action=stream"),
+    ],
+)
+def test_a_relative_webcam_url_resolves_where_the_web_interface_is_served(
+    api_ports: Container[int], base_url: str, stream: str, resolved: str
+) -> None:
+    """The service's own API port serves no webcam, so only a web server's or a proxy's port is kept."""
+    assert webcam_url(base_url, stream, api_ports) == resolved
+
+
+async def test_elegoo_centauri_carbon_1_reports_the_time_left(monkeypatch) -> None:
+    """A Carbon 1 pushes the seconds a job takes and has run, and pycentauri hands a Carbon 2's on in the same fields."""
+    from pycentauri.models import Status
+
+    client = FakeCentauri()
+    payload = {"CurrentStatus": [1], "PrintInfo": {"Status": 13, "Filename": "boat.gcode", "Progress": 42, "CurrentTicks": 2100, "TotalTicks": 3000}}
+    client.state = Status.from_payload(payload)
+    monkeypatch.setattr(INTEGRATIONS["elegoo"], "_connect_centauri", _fake_centauri(client))
+    monkeypatch.setattr(client, "status", lambda: asyncio.sleep(0, client.state))
+    assert (await INTEGRATIONS["elegoo"].fetch_state(None, ELEGOO_CENTAURI_CONFIG)).remaining_s == 900
+    client.state = Status.from_payload({"CurrentStatus": [0], "PrintInfo": {"Status": 0, "CurrentTicks": 0, "TotalTicks": 0}})
+    assert (await INTEGRATIONS["elegoo"].fetch_state(None, ELEGOO_CENTAURI_CONFIG)).remaining_s is None, "no job has no time left"
+
+
+async def test_a_command_a_centauri_carbon_2_refuses_keeps_the_connection_and_one_it_never_answers_does_not() -> None:
+    from pycentauri.client import PrinterError, RequestTimeoutError
+
+    client = FakeCentauri()
+    failures: list[Exception] = [PrinterError("CC2 method 1021 returned error_code=1009"), RequestTimeoutError("CC2 method 1021 timed out after 90.0s")]
+
+    async def pause() -> Any:
+        raise failures.pop(0)
+
+    client.pause = pause
+    adapter = ElegooAdapter()
+    adapter._connections[adapter.connection_key(ELEGOO_CENTAURI_CONFIG)] = client
+    with pytest.raises(PrinterError, match="error_code=1009"):
+        await adapter.send(None, ELEGOO_CENTAURI_CONFIG, DeviceAction.PAUSE)
+    assert not client.closed, "a refusal says the connection works, and the poll shares it"
+    with pytest.raises(RequestTimeoutError):
+        await adapter.send(None, ELEGOO_CENTAURI_CONFIG, DeviceAction.PAUSE)
+    assert client.closed, "a connection that stopped answering is opened afresh"
+
+
+async def test_a_failed_centauri_call_leaves_a_connection_opened_since_alone() -> None:
+    failed, current = FakeCentauri(), FakeCentauri()
+    asked = asyncio.Event()
+    lost = asyncio.Event()
+
+    async def pause() -> Any:
+        asked.set()
+        await lost.wait()
+        raise RuntimeError("connection lost")
+
+    failed.pause = pause
+    adapter = ElegooAdapter()
+    key = adapter.connection_key(ELEGOO_CENTAURI_CONFIG)
+    adapter._connections[key] = failed
+    command = asyncio.create_task(adapter.send(None, ELEGOO_CENTAURI_CONFIG, DeviceAction.PAUSE))
+    await asked.wait()
+    adapter._connections[key] = current
+    lost.set()
+    with pytest.raises(RuntimeError, match="connection lost"):
+        await command
+    assert adapter._connections[key] is current and not current.closed
+
+
+@pytest.mark.parametrize(
+    ("provider", "config", "status", "reason"),
+    [
+        ("octoprint", {"base_url": "http://op", "api_key": "wrong"}, 403, "OctoPrint rejected the API key: HTTP 403"),
+        ("klipper", {"base_url": "http://kl"}, 401, "Moonraker rejected the API key: HTTP 401"),
+    ],
+)
+async def test_a_rejected_api_key_says_so_where_an_unreachable_printer_is_offline(provider: str, config: dict[str, Any], status: int, reason: str) -> None:
+    with pytest.raises(PermissionError, match=reason):
+        await INTEGRATIONS[provider].fetch_state(RecordingHttp(status=status, body={}), config)
+
+
+async def test_a_rejected_prusalink_password_says_so_on_a_read_and_on_a_command() -> None:
+    """A pause PrusaLink answered with 401 surfaced as the bare word InvalidAuth."""
+    async def answer(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.readuntil(b"\r\n\r\n")
+        writer.write(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(answer, "127.0.0.1", 0)
+    config = {"base_url": f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}", "password": "wrong"}
+    try:
+        prusa = INTEGRATIONS["prusa"]
+        for call in (lambda: prusa.fetch_state(None, config), lambda: prusa.send(None, config, DeviceAction.PAUSE), lambda: prusa._command(config, 7, DeviceAction.PAUSE)):
+            with pytest.raises(PermissionError, match="PrusaLink rejected the username or password"):
+                await call()
+    finally:
+        server.close()
+
+
+async def test_prusa_reads_the_ca_bundle_once_not_at_every_poll(monkeypatch) -> None:
+    import ssl
+
+    built: list[Any] = []
+    create = ssl.create_default_context
+    monkeypatch.setattr(ssl, "create_default_context", lambda *args, **kwargs: built.append(args) or create(*args, **kwargs))
+    for _ in range(2):
+        async with INTEGRATIONS["prusa"]._link(PRUSA_CONFIG):
+            pass
+    assert built == []
+
+
+async def test_a_bambu_upload_is_not_cut_off_by_a_deadline(monkeypatch) -> None:
+    from test_gcode import sliced_3mf
+
+    monkeypatch.setattr(bambu, "_UPLOAD_DEADLINE_S", 0.01, raising=False)
+    uploaded: list[str] = []
+
+    def slow_upload(config: dict[str, Any], filename: str, data: bytes) -> None:
+        time.sleep(0.1)
+        uploaded.append(filename)
+
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_upload", slow_upload)
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_publish", lambda config, payload: None)
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_product", lambda config: "Bambu Lab A1")
+    await INTEGRATIONS["bambu"].print_file(None, BAMBU_CONFIG, "big.3mf", sliced_3mf(plate=1))
+    assert uploaded == ["big.3mf"]
+
+
+@pytest.mark.parametrize("password", ["pa/ss-w0rd", "pa?ss-w0rd", "pa#ss-w0rd", "pa/s?s#w0rd"])
+def test_a_password_holding_a_url_delimiter_is_still_scrubbed(password: str) -> None:
+    from printguard.engine import reports
+
+    url = f"http://olly:{password}@octopi.local:5000/api"
+    scrubbed = reports.scrub_url(url)
+    assert password not in scrubbed and "olly" not in scrubbed, "everything before the last @ is credentials"
+    assert scrubbed.startswith("http://") and "octopi.local:5000" in scrubbed
+    assert {"olly", password} <= reports.url_secrets(url)
+    assert reports.scrub_urls({"base_url": url})["base_url"] == scrubbed
+
+
+async def test_ntfy_marks_only_an_urgent_notice_urgent() -> None:
+    for urgent, expected in ((True, {"Priority": "urgent", "Tags": "rotating_light"}), (False, {})):
+        http = RecordingHttp(body=NTFY_PUBLISHED)
+        await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, "T", "B", None, urgent=urgent)
+        assert {name: value for name, value in http.last["headers"].items() if name in ("Priority", "Tags")} == expected
+        http = RecordingHttp(body=NTFY_PUBLISHED)
+        await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, "T", "B", JPEG, urgent=urgent)
+        assert {name: value for name, value in http.last["headers"].items() if name in ("Priority", "Tags")} == expected
+
+
+@pytest.mark.parametrize(("configured", "expected"), [("1", "0"), ("0", "0"), ("-1", "-1"), ("-2", "-2")])
+async def test_pushover_sends_a_quiet_notice_at_normal_priority_at_most(configured: str, expected: str) -> None:
+    http = RecordingHttp(body={"status": 1})
+    await NOTIFIERS["pushover"].send(http, {"api_token": "ap", "user_key": "uk", "priority": configured}, "T", "B", None, urgent=False)
+    assert http.last["data"].endswith(f"priority={expected}".encode())
+
+
+async def test_pushover_keeps_the_configured_priority_for_an_urgent_notice() -> None:
+    http = RecordingHttp(body={"status": 1})
+    await NOTIFIERS["pushover"].send(http, {"api_token": "ap", "user_key": "uk"}, "T", "B", None, urgent=True)
+    assert http.last["data"].endswith(b"priority=1")
+
+
+async def test_telegram_sends_a_quiet_notice_silently() -> None:
+    http = RecordingHttp(body={"ok": True})
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "12:ab", "chat_id": "77"}, "T", "B", None, urgent=False)
+    assert http.last["json"]["disable_notification"] is True
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "12:ab", "chat_id": "77"}, "T", "B", JPEG, urgent=False)
+    assert b'name="disable_notification"\r\n\r\ntrue\r\n' in http.last["data"]
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "12:ab", "chat_id": "77"}, "T", "B", None)
+    assert "disable_notification" not in http.last["json"]
+
+
+async def test_discord_sends_a_quiet_notice_with_notifications_suppressed() -> None:
+    http = RecordingHttp(status=204)
+    await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", None, urgent=False)
+    assert http.last["json"] == {"content": "**T**\nB", "allowed_mentions": {"parse": []}, "flags": 4096}
+    await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", JPEG, urgent=False)
+    assert jsonlib.dumps({"content": "**T**\nB", "allowed_mentions": {"parse": []}, "flags": 4096}).encode() in http.last["data"]
+    await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", None)
+    assert http.last["json"] == {"content": "**T**\nB", "allowed_mentions": {"parse": []}}
+
+
+async def test_native_takes_urgent_and_ignores_it(monkeypatch) -> None:
+    async def deliver(title: str, body: str, snapshot: Any) -> None:
+        return None
+
+    monkeypatch.setattr(NOTIFIERS["native"], "_deliver", deliver)
+    await NOTIFIERS["native"].send(None, {}, "Title", "Body", None, urgent=False)
+
+
+LONG_NAME = "Printer " + "é" * 600
+
+
+def _field(multipart: bytes, name: str) -> str:
+    return multipart.split(f'name="{name}"\r\n\r\n'.encode())[1].split(b"\r\n--")[0].decode()
+
+
+def test_text_is_cut_to_a_limit_with_an_ellipsis_where_it_was_cut() -> None:
+    from printguard.engine.notifiers.base import truncated
+
+    assert truncated("short", 10) == "short" and truncated("x" * 10, 10) == "x" * 10
+    assert truncated("x" * 11, 10) == "x" * 9 + "…"
+    assert truncated("é" * 10, 10, utf8_bytes=True) == "é" * 3 + "…", "a byte limit never cuts a character in two"
+    assert len(truncated("é" * 3000, 4096, utf8_bytes=True).encode()) <= 4096
+
+
+async def test_pushover_cuts_a_long_title_and_message_to_what_it_takes() -> None:
+    from urllib.parse import parse_qs
+
+    http = RecordingHttp(body={"status": 1})
+    await NOTIFIERS["pushover"].send(http, {"api_token": "ap", "user_key": "uk"}, f"Defect on {LONG_NAME}", LONG_NAME * 3, None)
+    sent = {key: values[0] for key, values in parse_qs(http.last["data"].decode()).items()}
+    assert len(sent["title"]) == 250 and sent["title"].endswith("…")
+    assert len(sent["message"]) == 1024 and sent["message"].endswith("…")
+
+
+async def test_telegram_cuts_a_long_caption_and_a_long_text_to_what_it_takes() -> None:
+    http = RecordingHttp(body={"ok": True})
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "b", "chat_id": "7"}, f"Defect on {LONG_NAME}", LONG_NAME * 6, JPEG)
+    caption = _field(http.last["data"], "caption")
+    assert len(caption) == 1024 and caption.endswith("…")
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "b", "chat_id": "7"}, f"Defect on {LONG_NAME}", LONG_NAME * 6, None)
+    text = http.last["json"]["text"]
+    assert 1024 < len(text) == 4096 and text.endswith("…")
+
+
+async def test_discord_cuts_a_long_message_to_what_it_takes() -> None:
+    http = RecordingHttp(status=204)
+    await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/x"}, f"Defect on {LONG_NAME}", LONG_NAME * 4, None)
+    assert len(http.last["json"]["content"]) == 2000 and http.last["json"]["content"].endswith("…")
+    await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/x"}, "T", LONG_NAME * 4, JPEG)
+    assert len(jsonlib.loads(_field(http.last["data"], "payload_json"))["content"]) == 2000
+
+
+async def test_ntfy_cuts_a_long_message_to_the_bytes_it_takes() -> None:
+    http = RecordingHttp(body=NTFY_PUBLISHED)
+    await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, "Defect", LONG_NAME * 5, None)
+    assert len(http.last["data"]) <= 4096 and http.last["data"].decode().endswith("…")
+
+
+async def test_ntfy_cuts_a_long_title_before_it_becomes_a_header() -> None:
+    import base64
+
+    http = RecordingHttp(body=NTFY_PUBLISHED)
+    await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, f"Defect on {LONG_NAME}", "B", None)
+    title = base64.b64decode(http.last["headers"]["Title"].removeprefix("=?UTF-8?B?").removesuffix("?=")).decode()
+    assert len(title) == 250 and title == f"Defect on {LONG_NAME}"[:249] + "…"
+
+
+def test_a_config_is_held_to_the_choices_its_schema_offers() -> None:
+    pushover, elegoo = NOTIFIERS["pushover"], INTEGRATIONS["elegoo"]
+    pushover.require({"api_token": "a", "user_key": "u", "priority": "-1"})
+    pushover.require({"api_token": "a", "user_key": "u", "priority": ""})
+    with pytest.raises(ValueError, match=r"Priority \(applies to every notice\) is one of -2, -1, 0, 1"):
+        pushover.require({"api_token": "a", "user_key": "u", "priority": "7"})
+    with pytest.raises(ValueError, match="Printer family is one of centauri, moonraker"):
+        elegoo.require({"family": "resin", "host": "10.0.0.9"})
+
+
+@pytest.mark.parametrize("adapter", [*INTEGRATIONS.values(), *NOTIFIERS.values()], ids=lambda adapter: adapter.id)
+def test_a_config_keeps_only_its_declared_fields_without_the_whitespace_around_them(adapter: Any) -> None:
+    pasted = {key: " pasted\n" for key in adapter.schema["properties"]}
+    assert adapter.declared({**pasted, "undeclared": "x", "api_token ": "y"}) == {key: "pasted" for key in pasted}
+    assert adapter.declared({"undeclared": None}) == {}
+
+
+def test_a_stored_config_is_made_one_a_save_would_take() -> None:
+    assert NOTIFIERS["pushover"].restored({"api_token": "ap ", "user_key": "uk", "priority": 1, "left": "over"}) == (
+        {"api_token": "ap", "user_key": "uk", "priority": "1"},
+        [],
+    )
+    assert NOTIFIERS["pushover"].restored({"api_token": ["ap"], "user_key": "uk", "priority": 7}) == ({"user_key": "uk"}, ["Application API token", "Priority (applies to every notice)"])
+    assert INTEGRATIONS["octoprint"].restored({"base_url": "http://op", "api_key": 12345}) == ({"base_url": "http://op", "api_key": "12345"}, [])
+    assert INTEGRATIONS["octoprint"].restored({"base_url": "http://op", "api_key": True}) == ({"base_url": "http://op"}, ["API key"])
+
+
+@pytest.mark.parametrize(
+    ("adapter", "config", "header"),
+    [
+        (INTEGRATIONS["octoprint"], {"base_url": "http://op ", "api_key": "KEY\n"}, ("X-Api-Key", "KEY")),
+        (INTEGRATIONS["klipper"], {"base_url": "http://mr", "api_key": " KEY"}, ("X-Api-Key", "KEY")),
+    ],
+)
+async def test_a_printer_key_pasted_with_whitespace_is_sent_without_it(adapter: Any, config: dict, header: tuple[str, str]) -> None:
+    http = RecordingHttp(status=401)
+    with pytest.raises(PermissionError):
+        await adapter.fetch_state(http, adapter.declared(config))
+    assert http.last["url"].startswith(config["base_url"].strip() + "/") and http.last["headers"][header[0]] == header[1]
+
+
+async def test_a_channel_key_pasted_with_whitespace_is_sent_without_it() -> None:
+    http = RecordingHttp(body={"ok": True, "id": "sPs71M8A2T"})
+    await NOTIFIERS["ntfy"].send(http, NOTIFIERS["ntfy"].declared({"url": " https://ntfy.sh/t\n", "token": "tk\n"}), "T", "B", None)
+    assert (http.last["url"], http.last["headers"]["Authorization"]) == ("https://ntfy.sh/t", "Bearer tk")
+    await NOTIFIERS["telegram"].send(http, NOTIFIERS["telegram"].declared({"bot_token": "12:ab \n", "chat_id": " 77"}), "T", "B", None)
+    assert http.last["url"] == "https://api.telegram.org/bot12:ab/sendMessage" and http.last["json"]["chat_id"] == "77"

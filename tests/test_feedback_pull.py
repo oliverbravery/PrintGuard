@@ -1,0 +1,157 @@
+"""The script that empties the training inbox into a local dataset."""
+
+from __future__ import annotations
+
+import datetime
+import importlib.util
+import io
+import json
+import sys
+import types
+from pathlib import Path
+from typing import Any
+
+import pytest
+from PIL import Image
+
+HUB = "a" * 32
+PRINT = "b" * 12
+UPLOADED = datetime.datetime(2026, 10, 6, tzinfo=datetime.timezone.utc)
+
+
+@pytest.fixture(scope="module")
+def pull() -> types.ModuleType:
+    sys.modules.setdefault("boto3", types.ModuleType("boto3"))
+    spec = importlib.util.spec_from_file_location("pull", Path(__file__).parent.parent / "feedback-worker" / "pull.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def jpeg(size: tuple[int, int] = (64, 48), **save: Any) -> bytes:
+    out = io.BytesIO()
+    Image.new("RGB", size, (200, 30, 30)).save(out, "JPEG", **save)
+    return out.getvalue()
+
+
+def labels(**changes: str) -> dict[str, str]:
+    return {"label": "good", "kind": "spaced", "score": "0.12", "version": "2.6.0", "provider": "klipper", "printer": "Voron 2.4", **changes}
+
+
+class Bucket:
+    class exceptions:
+        class NoSuchKey(Exception):
+            pass
+
+    def __init__(self, objects: dict[str, tuple[bytes, dict[str, str]]], expiring: tuple[str, ...] = ()) -> None:
+        self.objects = dict(objects)
+        self.expiring = expiring
+
+    def get_paginator(self, _name: str) -> Any:
+        keys = sorted(self.objects)
+
+        class Pages:
+            def paginate(self, Bucket: str) -> Any:
+                for start in range(0, len(keys), 2):
+                    yield {"Contents": [{"Key": key} for key in keys[start : start + 2]]}
+
+        return Pages()
+
+    def get_object(self, Bucket: str, Key: str) -> dict[str, Any]:
+        if Key in self.expiring:
+            del self.objects[Key]
+        if Key not in self.objects:
+            raise self.exceptions.NoSuchKey(Key)
+        body, metadata = self.objects[Key]
+        return {"Body": io.BytesIO(body), "Metadata": metadata, "LastModified": UPLOADED}
+
+    def delete_object(self, Bucket: str, Key: str) -> None:
+        del self.objects[Key]
+
+
+def key(frame: int) -> str:
+    return f"{HUB}/{PRINT}/{frame:012x}.jpg"
+
+
+def test_a_label_that_only_looks_encoded_is_kept_as_sent(pull: types.ModuleType, tmp_path: Path) -> None:
+    bucket = Bucket({key(frame): (jpeg(), labels(printer="=?utf-8?b?A?=" if frame == 2 else "Voron 2.4")) for frame in (1, 2, 3)})
+
+    assert pull.pull(bucket, tmp_path) == (3, 0)
+
+    assert bucket.objects == {}
+    rows = [json.loads(row) for row in (tmp_path / "frames.jsonl").read_text().splitlines()]
+    assert sorted(row["printer"] for row in rows) == ["=?utf-8?b?A?=", "Voron 2.4", "Voron 2.4"]
+
+
+def test_an_object_that_expires_between_the_listing_and_the_download_is_skipped_and_the_rest_are_pulled(
+    pull: types.ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bucket = Bucket({key(frame): (jpeg(), labels()) for frame in (1, 2, 3)}, expiring=(key(2),))
+
+    assert pull.pull(bucket, tmp_path) == (2, 0)
+
+    assert bucket.objects == {}
+    assert key(2) in capsys.readouterr().out
+    assert sorted(json.loads(row)["file"] for row in (tmp_path / "frames.jsonl").read_text().splitlines()) == [f"{HUB}/{PRINT}/{1:012x}.jpg", f"{HUB}/{PRINT}/{3:012x}.jpg"]
+
+
+def test_a_label_in_rfc_2047_is_decoded(pull: types.ModuleType) -> None:
+    assert pull.labels({"printer": "=?utf-8?b?UHJ1c2EgTUs0?="}) == {"printer": "Prusa MK4"}
+
+
+def test_a_label_loses_its_control_characters_even_when_they_were_encoded(pull: types.ModuleType) -> None:
+    assert pull.labels({"printer": "=?utf-8?q?=1B[2J=0Ainjected?="}) == {"printer": "[2Jinjected"}
+    assert pull.labels({"printer": "a\x00b\x7f"}) == {"printer": "ab"}
+
+
+def test_a_frame_sent_again_after_a_pull_leaves_one_row(pull: types.ModuleType, tmp_path: Path) -> None:
+    pull.pull(Bucket({key(1): (jpeg(), labels(label="good"))}), tmp_path)
+    pull.pull(Bucket({key(1): (jpeg(), labels(label="failure"))}), tmp_path)
+
+    assert [json.loads(row)["label"] for row in (tmp_path / "frames.jsonl").read_text().splitlines()] == ["failure"]
+
+def test_a_frame_over_the_pixel_cap_is_discarded_before_it_is_decoded(pull: types.ModuleType) -> None:
+    assert pull.sanitised(jpeg((5780, 5780), quality=10)) is None
+    assert pull.sanitised(jpeg((4096, 4096), quality=10)) is not None
+
+
+def test_the_clean_copy_carries_nothing_the_uploader_chose(pull: types.ModuleType) -> None:
+    exif = Image.Exif()
+    exif[0x010F] = "EXIF-MAKE-MARKER"
+    raw = jpeg(comment=b"COMMENT-MARKER", exif=exif.tobytes(), icc_profile=b"ICC-MARKER" * 20, xmp=b"<x:xmpmeta>XMP-MARKER</x:xmpmeta>")
+    assert b"COMMENT-MARKER" in raw
+
+    clean = pull.sanitised(raw)
+
+    assert clean is not None
+    assert not any(marker in clean for marker in (b"COMMENT-MARKER", b"EXIF-MAKE-MARKER", b"ICC-MARKER", b"XMP-MARKER"))
+    assert "comment" not in Image.open(io.BytesIO(clean)).info
+
+
+
+def test_an_object_that_is_not_a_frame_key_is_discarded_and_does_not_stop_the_pull(pull: types.ModuleType, tmp_path: Path) -> None:
+    bucket = Bucket({"stray.jpg": (jpeg(), labels()), key(1): (jpeg(), labels())})
+
+    assert pull.pull(bucket, tmp_path) == (1, 1)
+
+    assert bucket.objects == {}
+
+
+@pytest.mark.parametrize("stray", ["../../escaped.jpg", f"{HUB}/../../escaped.jpg", f"../{PRINT}/{1:012x}.jpg", f"{HUB.upper()}/{PRINT}/{1:012x}.jpg", f"{HUB}/{PRINT}/{1:012x}.png"])
+def test_a_key_that_could_leave_the_dataset_is_discarded_unwritten(pull: types.ModuleType, tmp_path: Path, stray: str) -> None:
+    out = tmp_path / "level1" / "dataset"
+    bucket = Bucket({stray: (jpeg(), labels())})
+
+    assert pull.pull(bucket, out) == (0, 1)
+
+    assert bucket.objects == {}
+    assert [path for path in tmp_path.rglob("*") if path.suffix == ".jpg"] == []
+
+
+def test_a_label_named_like_the_rows_own_field_cannot_replace_it(pull: types.ModuleType, tmp_path: Path) -> None:
+    pull.pull(Bucket({key(1): (jpeg(), {**labels(), "hub": "someone-else", "file": "../../x", "print": "p", "uploaded": "never"})}), tmp_path)
+
+    row = json.loads((tmp_path / "frames.jsonl").read_text())
+
+    assert (row["hub"], row["print"], row["file"], row["uploaded"]) == (HUB, PRINT, f"{HUB}/{PRINT}/{1:012x}.jpg", UPLOADED.isoformat())

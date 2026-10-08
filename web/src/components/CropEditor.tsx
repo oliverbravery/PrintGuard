@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ReactCrop, { type PercentCrop } from "react-image-crop";
+import { useFocusKept } from "../a11y";
 import { renderVideoFrame, useVideoStream } from "../image";
 import type { Camera, Crop } from "../types";
 
@@ -34,6 +35,7 @@ export function CropEditor({
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [editing, setEditing] = useState(false);
+  const actions = useFocusKept<HTMLDivElement>();
   const [draft, setDraft] = useState<PercentCrop | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
 
@@ -70,7 +72,7 @@ export function CropEditor({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <span className="label">Crop region</span>
-        <div className="flex gap-2">
+        <div ref={actions} className="flex gap-2">
           {editing ? (
             <>
               <button
@@ -88,6 +90,7 @@ export function CropEditor({
             </>
           ) : (
             <button
+              key="edit"
               className="btn !py-1 !px-2.5 !text-[0.62rem]"
               onClick={() => {
                 setDraft(watched);

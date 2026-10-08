@@ -1,29 +1,36 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
-import type { AdapterMeta, Printer } from "../types";
+import { useSubmit } from "../submit";
+import type { AdapterConfig, AdapterMeta, Printer } from "../types";
+import { ConfirmButton } from "./ConfirmButton";
 import { Dialog } from "./Dialog";
 import { DeviceChip } from "./MonitorTile";
-import { SchemaForm } from "./SchemaForm";
+import { retypeReason, SchemaForm, savedSecretTitles } from "./SchemaForm";
 import { TestRow } from "./TestRow";
+
+const NEW_PRINTER = "new";
 
 function providerLabel(integrations: AdapterMeta[], id: string): string {
   return integrations.find((i) => i.id === id)?.label ?? id;
 }
 
-function PrinterTest({ provider, config }: { provider: string; config: Record<string, string> }) {
+function PrinterTest({ id, provider, config }: { id: string; provider: string; config: AdapterConfig }) {
   const { printerTest, testing, testPrinter } = useStore();
+  const target = JSON.stringify([id, provider, config]);
   return (
     <TestRow
       label="Test connection"
       busyLabel="Testing…"
-      busy={testing}
-      disabled={!provider || testing}
-      onTest={() => testPrinter(provider, config)}
+      busy={testing === target}
+      disabled={!provider || testing !== null}
+      onTest={() => testPrinter(target, provider, config, id === NEW_PRINTER ? undefined : id)}
       result={
-        printerTest && {
-          ok: printerTest.ok,
-          message: printerTest.ok ? `ok, ${printerTest.status}` : printerTest.error || printerTest.status || "failed",
-        }
+        printerTest?.target === target
+          ? {
+              ok: printerTest.ok,
+              message: printerTest.ok ? `ok, ${printerTest.status}` : printerTest.error || printerTest.status || "failed",
+            }
+          : null
       }
     />
   );
@@ -33,21 +40,21 @@ function PrinterRow({ printer }: { printer: Printer }) {
   const { engine, send, isPending } = useStore();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(printer.name);
-  const [config, setConfig] = useState<Record<string, string>>(printer.config ?? {});
+  const [config, setConfig] = useState<AdapterConfig>(printer.config ?? {});
   const integrations = engine?.integrations ?? [];
   const meta = integrations.find((i) => i.id === printer.provider);
+  const save = useSubmit(() => setConfig(printer.config ?? {}));
 
-  useEffect(() => {
-    setName(printer.name);
-    setConfig(printer.config ?? {});
-  }, [printer.id]);
+  useEffect(() => setName(printer.name), [printer.id, printer.name]);
+  useEffect(() => setConfig(printer.config ?? {}), [printer.id]);
 
-  const dirty = name !== printer.name || JSON.stringify(config) !== JSON.stringify(printer.config ?? {});
+  const retype = meta ? retypeReason(config, printer.config ?? {}, savedSecretTitles(meta, printer.secrets_set ?? [])) : null;
+  const dirty = name.trim() !== printer.name || JSON.stringify(config) !== JSON.stringify(printer.config ?? {});
 
   return (
     <div className="panel overflow-hidden">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
-        <span className={`led ${printer.online ? "led-on" : "led-off"}`} />
+        <span role="img" aria-label={printer.online ? "online" : "offline"} className={`led ${printer.online ? "led-on" : "led-off"}`} title={printer.online ? "online" : "offline"} />
         <div className="min-w-0 grow basis-40 leading-tight">
           <div className="text-sm font-medium truncate">{printer.name}</div>
           <div className="mono text-[0.62rem] text-text-2 truncate">{providerLabel(integrations, printer.provider)}</div>
@@ -57,27 +64,33 @@ function PrinterRow({ printer }: { printer: Printer }) {
           <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setOpen((v) => !v)}>
             {open ? "Hide" : "Edit"}
           </button>
-          <button
-            className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
-            disabled={isPending("printer.remove")}
-            onClick={() => send({ cmd: "printer.remove", id: printer.id })}
+          <ConfirmButton
+            className="!py-1 !px-2.5 !text-[0.62rem]"
+            disabled={isPending("printer.remove", printer.id)}
+            onConfirm={() => send({ cmd: "printer.remove", id: printer.id })}
           >
-            {isPending("printer.remove") ? "Removing…" : "Remove"}
-          </button>
+            {isPending("printer.remove", printer.id) ? "Removing…" : "Remove"}
+          </ConfirmButton>
         </div>
       </div>
       {open && meta && (
         <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">
-          <input className="field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <SchemaForm meta={meta} value={config} onChange={setConfig} />
-          <PrinterTest provider={printer.provider} config={config} />
+          <input className="field" aria-label="Name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+          <SchemaForm meta={meta} value={config} stored={printer.config ?? {}} saved={printer.secrets_set} onChange={setConfig} />
+          <PrinterTest id={printer.id} provider={printer.provider} config={config} />
           <button
             className="btn btn-primary w-full !py-1.5"
-            disabled={!dirty || isPending("printer.update")}
-            onClick={() => send({ cmd: "printer.update", id: printer.id, patch: { name: name.trim(), config } })}
+            disabled={!dirty || retype !== null || isPending("printer.update", printer.id)}
+            onClick={() => save.submit({ cmd: "printer.update", id: printer.id, patch: { name: name.trim(), config } })}
           >
-            {isPending("printer.update") ? "Saving…" : "Save"}
+            {isPending("printer.update", printer.id) ? "Saving…" : "Save"}
           </button>
+          {retype && <span className="block text-[0.7rem] text-text-2">{retype}</span>}
+          {save.error && (
+            <span role="alert" className="chip chip-message chip-bad">
+              {save.error}
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -89,14 +102,37 @@ function RegisterPrinter() {
   const integrations = engine?.integrations ?? [];
   const [provider, setProvider] = useState("");
   const [name, setName] = useState("");
-  const [config, setConfig] = useState<Record<string, string>>({});
+  const [config, setConfig] = useState<AdapterConfig>({});
   const meta = integrations.find((i) => i.id === provider);
   const busy = isPending("printer.add");
+  const printers = engine?.printers.length ?? 0;
+  const printersWhenSent = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (busy || printersWhenSent.current === null) return;
+    if (printers > printersWhenSent.current) {
+      setProvider("");
+      setName("");
+      setConfig({});
+    }
+    printersWhenSent.current = null;
+  }, [busy]);
+
+  const required = meta?.schema.required ?? [];
+  const incomplete = required.some((key) => !String(config[key] ?? meta?.schema.properties[key]?.default ?? "").trim());
 
   return (
-    <div className="space-y-3">
+    <form
+      className="space-y-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        printersWhenSent.current = printers;
+        send({ cmd: "printer.add", printer: { name: name.trim(), provider, config } });
+      }}
+    >
       <select
         className="field"
+        aria-label="Printer service"
         value={provider}
         onChange={(e) => {
           setProvider(e.target.value);
@@ -112,24 +148,15 @@ function RegisterPrinter() {
       </select>
       {meta && (
         <>
-          <input className="field" placeholder={`Name (e.g. ${meta.label} Ender 3)`} value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="field" aria-label="Name" placeholder={`Name (e.g. ${meta.label} Ender 3)`} value={name} onChange={(e) => setName(e.target.value)} />
           <SchemaForm meta={meta} value={config} onChange={setConfig} />
-          <PrinterTest provider={provider} config={config} />
-          <button
-            className="btn btn-primary w-full"
-            disabled={busy}
-            onClick={() => {
-              send({ cmd: "printer.add", printer: { name: name.trim(), provider, config } });
-              setProvider("");
-              setName("");
-              setConfig({});
-            }}
-          >
+          <PrinterTest id={NEW_PRINTER} provider={provider} config={config} />
+          <button type="submit" className="btn btn-primary w-full" disabled={busy || incomplete}>
             {busy ? "Registering…" : "Register printer"}
           </button>
         </>
       )}
-    </div>
+    </form>
   );
 }
 

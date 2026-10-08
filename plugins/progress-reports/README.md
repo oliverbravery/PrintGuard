@@ -1,6 +1,6 @@
 # Progress reports
 
-Sends a tally of a print through your alert channels as often as you ask: how far it has got, how long it has been going and how many defects have been seen. Useful for long prints you want to glance at from your phone without opening the dashboard.
+Sends a tally of a print through your alert channels as often as you ask: how far it has got and how many defects have been seen. Useful for long prints you want to glance at from your phone without opening the dashboard.
 
 ![Turning reports on for a monitor](shots/settings.png)
 

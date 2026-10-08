@@ -59,8 +59,8 @@ declare global {
     threshold: number;
     /** The last score, or null before the first one. */
     result: { ts: number; score: number } | null;
-    /** The alert in force, or null when nothing is wrong. */
-    alert: { ts: number; score: number; action: string } | null;
+    /** The alert in force, absent until the monitor's first alert and null once one has cleared. */
+    alert?: { ts: number; score: number; action: string } | null;
   }
 
   /** A camera, as `state:read` allows you to see it. */
@@ -74,7 +74,7 @@ declare global {
     /** Whether a monitor is using it. */
     in_use: boolean;
     max_fps: number;
-    /** What inference is managing, against the monitor's target. */
+    /** The rate of completed inferences on this camera, a second. */
     achieved_fps: number;
   }
 
@@ -122,7 +122,7 @@ declare global {
     printers?: PluginPrinter[];
   }
 
-  /** The events a worker can hook, and what each one carries. */
+  /** The events `plugin.js` and `worker.js` can hook, and what each one carries. */
   interface PluginEvents {
     /** The answer to one of your own `ctx.http` calls, carrying the `tag` you named it with. */
     http: { event: "http"; tag: string; status: number; body: unknown };
@@ -141,19 +141,47 @@ declare global {
       event: "history";
       monitor_id: string;
       now: number;
-      buckets: { t: number; n: number; sum: number; min: number; max: number; defects: number }[];
+      /** One per minute with a reading in it, oldest first. */
+      buckets: {
+        /** The minute's start, in seconds since the epoch. */
+        t: number;
+        /** How many frames were scored in it. */
+        n: number;
+        sum: number;
+        min: number;
+        max: number;
+        /** How many of them reached the threshold. */
+        defects: number;
+        /** Seconds of it the monitor was watching, never more than 60. */
+        watched: number;
+      }[];
       alerts: { ts: number; score: number; action: string }[];
-      stats: { current: number; avg: number; min: number; max: number; inferences: number; defect_frames: number };
+      stats: {
+        current: number;
+        avg: number;
+        min: number;
+        max: number;
+        inferences: number;
+        defect_frames: number;
+        /** `defect_frames` as a percentage of `inferences`, to one decimal place. */
+        defect_pct: number;
+        /** How many alerts fired. */
+        alerts: number;
+        /** Whole minutes the readings spanned, with gaps over 30 seconds left out. */
+        watch_min: number;
+        /** How many alert snapshots are kept. */
+        snaps: number;
+      };
     };
-    /** Every inference on a watched monitor, capped at 5 a second per monitor, before any threshold or streak logic. */
+    /** Every inference on a watched monitor, capped at 5 a second per monitor, before any threshold or streak logic. Needs `state:read`. */
     result: { event: "result"; monitor_id: string; camera_id: string; score: number; prediction: "failure" | "success"; margin: number; ms: number; ts: number };
-    /** A defect held long enough to act on. `action` is what PrintGuard did to the printer. */
+    /** A defect held long enough to act on. `action` is what PrintGuard did to the printer. Needs `state:read`. */
     alert: { event: "alert"; monitor_id: string; score: number; action: string; ts: number };
-    /** A watchdog condition, and again with `recovered` when it clears. */
+    /** A watchdog condition, and again with `recovered` when it clears. Needs `state:read`. */
     warning: { event: "warning"; monitor_id?: string; message: string; recovered: boolean };
-    /** A printer's status changed, carrying everything its `device_state` does. */
+    /** A printer's status changed, carrying everything its `device_state` does. Needs `state:read`. */
     device: { event: "device"; printer_id: string } & PluginDeviceState;
-    /** Anything that failed. */
+    /** Anything that failed. Needs `state:read`. */
     error: { event: "error"; message: string };
     /** The snapshot your permissions allow, once a second. */
     state: { event: "state" } & PluginState;
@@ -168,7 +196,7 @@ declare global {
     query: Record<string, string>;
     /** Cookie, authorization, accept, content-type, x-forwarded-for and user-agent, where present. */
     headers: Record<string, string>;
-    /** Null for a request without one, and capped at 64 KB. */
+    /** Capped at 64 KB and empty for a request without one. Null when a gate is being asked. */
     body: string | null;
   }
 
@@ -205,7 +233,8 @@ declare global {
     command(cmd: { cmd: string; [field: string]: unknown }): void;
     /**
      * Makes an HTTP request for you. Needs `net` and a URL your patterns cover.
-     * The answer arrives as an `http` event under the same `tag`.
+     * The answer arrives as an `http` event under the same `tag`. A redirect is
+     * not followed, so its 3xx status is the answer. A `Host` header is refused.
      */
     http(request: { method?: string; url: string; headers?: Record<string, string>; json?: unknown; tag?: string }): void;
     /** Opens a WebSocket PrintGuard holds for you, answering on `tag`. Needs `net` and a `ws` or `wss` pattern covering the URL. */
@@ -225,8 +254,8 @@ declare global {
     /** Plays an audio file you shipped, named as it appears in the manifest's `assets`. Needs `sound`. */
     sound(asset: string): void;
     /**
-     * Puts a picture behind the dashboard. Needs `background`, takes a `data:` URL,
-     * and clears when passed nothing.
+     * Puts a picture behind the dashboard. Needs `background`, takes a base64 `data:` URL
+     * of a PNG, JPEG, WebP or GIF, and clears when passed anything else.
      */
     background(image: string): void;
     /**
@@ -241,25 +270,25 @@ declare global {
   }
 
   /**
-   * Registers what your plugin does. `render` and `action` are the panel half
-   * in `plugin.js`, the rest are the worker half in `worker.js`.
+   * Registers what your plugin does. `render` and `action` are for `plugin.js`
+   * alone, `route` and `gate` for `worker.js` alone, and `on` and `serve` work in either.
    */
   interface PluginApi {
     /**
      * Draws the view, again on every state change and after every action, so
-     * keep it a plain function of `ctx`. On the `monitor` surface it is called
-     * once more per monitor, with `ctx.target` naming which.
+     * keep it a plain function of `ctx`. On the `monitor` and `settings` surfaces it is
+     * called once more per monitor, with `ctx.target` naming which.
      */
     render(view: (ctx: PluginContext) => PluginNode | null): void;
     /** Handles a press or a choice, named by the node's `action` and given its `arg`. */
     action(handler: (name: string, arg: any, ctx: PluginContext) => void): void;
-    /** Wakes the worker on an engine event. Name it in the manifest's `events` too, or it never fires. */
+    /** Hooks an engine event, in `plugin.js` or `worker.js`. Name it in the manifest's `events` too, or it never fires. */
     on<K extends keyof PluginEvents>(event: K, handler: (event: PluginEvents[K], ctx: PluginContext) => void): void;
     /** Answers everything under `/plugins/<id>/` on the hub. Needs `routes`, and pages are served into a sandboxed origin. */
     route(handler: (request: PluginRequest, ctx: PluginContext) => PluginResponse): void;
     /** Approves or refuses every other request to the hub. Needs `gate`, and anything but `true` refuses. */
     gate(handler: (request: PluginRequest, ctx: PluginContext) => boolean): void;
-    /** Answers another plugin asking on one of the channels your manifest offers. Needs `link:provide`. */
+    /** Answers another plugin asking on one of the channels your manifest offers, from `plugin.js` or `worker.js`. Needs `link:provide`. */
     serve(handler: (request: PluginEvents["call"], ctx: PluginContext) => unknown): void;
   }
 
@@ -274,12 +303,14 @@ declare global {
   interface PluginPanel extends Omit<PluginContext, "target" | "surface" | "assets"> {
     /** The dashboard's theme, the same custom properties it sets on its own `:root`. */
     theme: Record<string, string>;
+    /** The names of the secrets your plugin holds, never their values. `oauth` is there once the user has signed in. */
+    secrets: string[];
     /** Called once the panel is drawn, then on every state change and every event you named. */
     on<K extends keyof PluginEvents | "ready" | "state">(
       event: K,
       handler: (event: K extends keyof PluginEvents ? PluginEvents[K] : PluginState) => void,
     ): void;
-    /** A URL for a file you shipped, good inside this panel and nowhere else. Point an `img` or a `video` at it. */
+    /** A URL for a file you shipped, good inside this panel and nowhere else. Point an `img` at it. Audio and video play only if the plugin was granted `sound`. */
     asset(name: string): string;
   }
 
