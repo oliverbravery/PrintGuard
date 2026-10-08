@@ -897,7 +897,7 @@ class Engine:
             camera = self.cameras.get(notice.camera_id) if notice.camera_id else None
             subject = f"'{camera.name}' " if camera else ""
             self.emit({"event": "warning", "message": subject + notice.message, "recovered": notice.recovered})
-        self.emit(self.state_event())
+        self._broadcast(self.state_event())
         return STATE_TICK_S
 
     async def _update_loop(self) -> None:
@@ -915,7 +915,7 @@ class Engine:
     async def _announce_updates(self) -> None:
         """Checks for an update without being asked to, and tells every client what it found."""
         await self._check_updates()
-        self.emit(self.state_event())
+        self._broadcast(self.state_event())
 
     async def _check_updates(self) -> None:
         """Fetches and stores the update status, raising if it cannot.
@@ -1114,7 +1114,7 @@ class Engine:
             return
         for req_id in requesters:
             self.emit({"event": "review_sent", **review.public(), "ok": review.status == "sent", "req_id": req_id})
-        self.emit(self.state_event())
+        self._broadcast(self.state_event())
 
     def _requesters(self, review: Review) -> list[Any]:
         """The ``req_id`` of every request an upload answers, or one None when the clock started it."""
