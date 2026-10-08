@@ -3005,3 +3005,27 @@ test("a camera with no access code and a scrubbed address still lists", async ({
   await expect(page.getByText("bambu://192.168.1.9").first()).toBeVisible();
   await expect(page.getByText("rtsp://shed/live").first()).toBeVisible();
 });
+
+test("a feed that has no size yet leaves the crop square where it can be dragged", async ({ page }) => {
+  await dashboard(page);
+  await page.evaluate(() => (window as any).__pg.getState().openDialog("cameras", "c1"));
+  const feed = page.getByRole("dialog").locator("video");
+  await feed.dispatchEvent("loadedmetadata");
+  await page.getByRole("button", { name: "Set crop", exact: true }).click();
+  const selection = page.locator(".ReactCrop__crop-selection");
+  await expect(selection).toBeVisible();
+  await feed.evaluate((video) => {
+    Object.defineProperties(video, { videoWidth: { value: 400 }, videoHeight: { value: 300 } });
+    video.dispatchEvent(new Event("resize"));
+  });
+  await expect.poll(async () => (await selection.boundingBox())!.width / (await feed.boundingBox())!.width).toBeCloseTo(0.75, 1);
+  await selection.scrollIntoViewIfNeeded();
+  const before = (await selection.boundingBox())!;
+  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(before.x + before.width / 2 - 80, before.y + before.height / 2, { steps: 5 });
+  await page.mouse.up();
+  expect((await selection.boundingBox())!.x).toBeLessThan(before.x - 40);
+  await page.evaluate(() => (window as any).__pg.getState().flushUpdates());
+  expect((await sent(page, "camera.update")).patch.crop.x).toBeLessThan(0.2);
+});

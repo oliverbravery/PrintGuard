@@ -7,6 +7,16 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.1] - 2026-10-08
+
+### Changed
+
+- The image and the desktop apps are built on Node 26 and with current versions of the GitHub Actions they use.
+
+### Fixed
+
+- The crop square is drawn and can be dragged on a camera whose feed reports no size when it first loads. It was missing, so the crop couldn't be set.
+
 ## [2.6.0] - 2026-10-08
 
 ### Added

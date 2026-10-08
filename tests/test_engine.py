@@ -3127,7 +3127,7 @@ async def test_switching_the_update_check_on_checks_at_once() -> None:
         await asyncio.sleep(0.05)
 
     assert unchecked is None and checked is not None, "the check waited for the daily loop to come round"
-    assert len([call for call in platform.http_calls if "api.github.com" in call[1]]) == 1, "saving the setting unchanged checked again"
+    assert len([call for call in platform.http_calls if urlparse(call[1]).hostname == "api.github.com"]) == 1, "saving the setting unchanged checked again"
 
 
 async def test_no_alert_means_no_snapshot() -> None:
