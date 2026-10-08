@@ -7,6 +7,12 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.1] - 2026-10-08
+
+### Changed
+
+- The image and the desktop apps are built with current versions of the GitHub Actions they use. PrintGuard itself behaves the same as 2.6.0.
+
 ## [2.6.0] - 2026-10-08
 
 ### Added
