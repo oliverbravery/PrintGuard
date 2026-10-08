@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type SyntheticEvent } from "react";
 import ReactCrop, { type PercentCrop } from "react-image-crop";
 import { useFocusKept } from "../a11y";
 import { renderVideoFrame, useVideoStream } from "../image";
@@ -48,6 +48,12 @@ export function CropEditor({
   const watched = toPercent(watchedSquare(crop, frameAspect));
 
   useVideoStream(videoRef, camera);
+
+  const measureFrame = ({ currentTarget: video }: SyntheticEvent<HTMLVideoElement>) => {
+    if (video.videoWidth === 0) return;
+    setDims({ w: video.videoWidth, h: video.videoHeight });
+    setDraft(null);
+  };
 
   useEffect(() => {
     if (!needsCanvas) return;
@@ -122,7 +128,8 @@ export function CropEditor({
             autoPlay
             muted
             playsInline
-            onLoadedMetadata={(e) => setDims({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight })}
+            onLoadedMetadata={measureFrame}
+            onResize={measureFrame}
             className={`absolute inset-0 w-full h-full object-contain pointer-events-none ${needsCanvas ? "invisible" : ""}`}
           />
           {needsCanvas && <canvas ref={canvasRef} className="absolute inset-0 m-auto pointer-events-none" />}
