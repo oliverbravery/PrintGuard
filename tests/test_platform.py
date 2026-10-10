@@ -1295,7 +1295,7 @@ def test_a_browser_camera_push_to_a_listener_that_never_answers_gives_up(monkeyp
 async def test_a_live_view_that_stops_answering_never_delays_the_frames_detection_reads(monkeypatch: pytest.MonkeyPatch) -> None:
     """Each retry blocked the capture thread for the push's whole timeout, so a camera gave a frame half the time."""
 
-    def stalls(self: object, frame: object) -> None:
+    def stalls(self: object, frame: object, arrived: float) -> None:
         time.sleep(1.0)
         raise av.error.TimeoutError(errno.ETIMEDOUT, "Operation timed out")
 

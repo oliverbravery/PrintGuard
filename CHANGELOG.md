@@ -7,7 +7,11 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.6.2] - 2026-10-08
+## [2.6.2] - 2026-10-10
+
+### Fixed
+
+- The live view of a camera PrintGuard transcodes, such as MJPEG over HTTP, no longer drops every few seconds on the Windows desktop app with "Invalid argument ... returned 22". Thanks to @solnqq7-gif.
 
 ## [2.6.1] - 2026-10-08
 
