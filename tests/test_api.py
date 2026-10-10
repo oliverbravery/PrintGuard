@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import time
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -492,6 +493,61 @@ def test_published_frames_share_one_single_threaded_scaler(monkeypatch, scalers)
     push.close()
 
     assert [scaler.calls for scaler in scalers] == [[("yuv420p", 1)] * 3]
+
+
+def test_frames_that_waited_to_be_encoded_keep_the_spacing_they_arrived_with(monkeypatch, scalers) -> None:
+    """Stamped as they were encoded, two frames taken off the queue together shared a timestamp on Windows and the muxer refused the second."""
+    from printguard.server import publish
+
+    encoding, resume = threading.Event(), threading.Event()
+
+    def encode(frame):
+        encoding.set()
+        resume.wait()
+        return []
+
+    stream = SimpleNamespace(
+        width=0, height=0, pix_fmt="", codec_context=SimpleNamespace(options={}, time_base=None), encode=Mock(side_effect=encode)
+    )
+    monkeypatch.setattr(
+        publish.av, "open", Mock(return_value=SimpleNamespace(add_stream=Mock(return_value=stream), mux=Mock()))
+    )
+    push = publish.H264Push("rtsp://mediamtx/camera", 30, 3.0)
+
+    push.send(SimpleNamespace(width=64, height=48))
+    encoding.wait()
+    for _ in range(2):
+        time.sleep(0.05)
+        push.send(SimpleNamespace(width=64, height=48))
+    resume.set()
+    while stream.encode.call_count < 3:
+        time.sleep(0.01)
+    push.close()
+
+    first, second, third = (call.args[0].pts for call in stream.encode.call_args_list[:3])
+    assert second - first >= 0.04 * publish.RTP_CLOCK and third - second >= 0.04 * publish.RTP_CLOCK
+
+
+def test_frames_that_arrive_in_the_same_instant_are_still_timestamped_apart(monkeypatch, scalers) -> None:
+    """The muxer refuses a timestamp that repeats, which dropped the live view for the retry delay."""
+    from printguard.server import publish
+
+    stream = SimpleNamespace(
+        width=0, height=0, pix_fmt="", codec_context=SimpleNamespace(options={}, time_base=None), encode=Mock(return_value=[])
+    )
+    monkeypatch.setattr(
+        publish.av, "open", Mock(return_value=SimpleNamespace(add_stream=Mock(return_value=stream), mux=Mock()))
+    )
+    monkeypatch.setattr(publish.time, "perf_counter", lambda: 5.0)
+    push = publish.H264Push("rtsp://mediamtx/camera", 30, 3.0)
+
+    for sent in range(3):
+        push.send(SimpleNamespace(width=64, height=48))
+        while stream.encode.call_count <= sent:
+            time.sleep(0.01)
+    push.close()
+
+    assert [call.args[0].pts for call in stream.encode.call_args_list[:3]] == [0, 1, 2]
 
 
 async def test_unknown_ids_and_events() -> None:

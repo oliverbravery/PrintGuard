@@ -781,7 +781,7 @@ class Engine:
         event = self.state_event()
         if req_id is not None:
             event["req_id"] = req_id
-        self.emit(event)
+        self._broadcast(event)
 
     async def _attach(self, camera: Camera) -> None:
         """Opens a camera's frame source.

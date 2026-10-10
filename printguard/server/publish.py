@@ -116,7 +116,10 @@ class H264Push:
     """Transcodes decoded frames to H.264 and pushes them to a MediaMTX path.
 
     Republishes sources MediaMTX cannot pull itself (e.g. MJPEG over HTTP) so
-    viewers receive them as HLS. Timestamps follow the wall clock and a
+    viewers receive them as HLS. A frame is timestamped as it arrives, so one
+    that waited to be encoded keeps its distance from the frame behind it, and
+    always later than the last, since the muxer refuses a timestamp that
+    repeats and the push would drop. A
     keyframe is forced every KEYFRAME_INTERVAL_S, keeping HLS segments short
     regardless of the source's real, often variable, frame rate.
 
@@ -148,8 +151,9 @@ class H264Push:
         self._stream: av.video.stream.VideoStream | None = None
         self._start = 0.0
         self._last_key = 0.0
+        self._last_pts = 0
         self._retry_at = 0.0
-        self._frames: deque[av.VideoFrame] = deque(maxlen=PUSH_QUEUED_FRAMES)
+        self._frames: deque[tuple[av.VideoFrame, float]] = deque(maxlen=PUSH_QUEUED_FRAMES)
         self._ready = threading.Event()
         self._closing = False
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -157,7 +161,7 @@ class H264Push:
 
     def send(self, frame: av.VideoFrame) -> None:
         """Queues a frame for the live view without waiting on it."""
-        self._frames.append(frame)
+        self._frames.append((frame, time.perf_counter()))
         self._ready.set()
 
     def close(self) -> None:
@@ -171,11 +175,11 @@ class H264Push:
             self._ready.wait()
             self._ready.clear()
             while self._frames and not self._closing:
-                frame = self._frames.popleft()
+                frame, arrived = self._frames.popleft()
                 if time.monotonic() < self._retry_at:
                     continue
                 try:
-                    self._encode(frame)
+                    self._encode(frame, arrived)
                 except Exception as exc:
                     self._close_push()
                     self._retry_at = time.monotonic() + self._retry_after
@@ -184,9 +188,13 @@ class H264Push:
                     self._outcome(None)
         self._close_push()
 
-    def _encode(self, frame: av.VideoFrame) -> None:
-        """Encodes and muxes one decoded frame, opening the push lazily."""
-        now = time.monotonic()
+    def _encode(self, frame: av.VideoFrame, arrived: float) -> None:
+        """Encodes and muxes one decoded frame, opening the push lazily.
+
+        Args:
+            frame: The decoded frame.
+            arrived: When ``send`` took it, on the ``time.perf_counter`` clock.
+        """
         if self._push is None:
             self._push = av.open(
                 self._rtsp_url, mode="w", format="rtsp", options={"rtsp_transport": "tcp", "timeout": str(PUSH_TIMEOUT_US)}
@@ -196,14 +204,15 @@ class H264Push:
             self._stream.pix_fmt = "yuv420p"
             self._stream.codec_context.options = {"preset": "ultrafast", "tune": "zerolatency"}
             self._stream.codec_context.time_base = self._clock
-            self._start = now
-            self._last_key = now - KEYFRAME_INTERVAL_S
+            self._start = arrived
+            self._last_key = arrived - KEYFRAME_INTERVAL_S
+            self._last_pts = -1
         out = self._reformatter.reformat(frame, format="yuv420p", threads=1)
-        out.pts = int((now - self._start) / self._clock)
+        out.pts = self._last_pts = max(int((arrived - self._start) / self._clock), self._last_pts + 1)
         out.time_base = self._clock
-        if now - self._last_key >= KEYFRAME_INTERVAL_S:
+        if arrived - self._last_key >= KEYFRAME_INTERVAL_S:
             out.pict_type = PictureType.I
-            self._last_key = now
+            self._last_key = arrived
         for packet in self._stream.encode(out):
             self._push.mux(packet)
 
