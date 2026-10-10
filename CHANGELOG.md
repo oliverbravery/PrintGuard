@@ -9,6 +9,10 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [2.6.2] - 2026-10-08
 
+### Fixed
+
+- The live view of a camera PrintGuard transcodes, such as MJPEG over HTTP, no longer drops every few seconds on the Windows desktop app with "Invalid argument ... returned 22". Thanks to @solnqq7-gif.
+
 ## [2.6.1] - 2026-10-08
 
 ### Changed
