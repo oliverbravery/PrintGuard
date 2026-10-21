@@ -7,6 +7,17 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.3] - 2026-10-21
+
+### Fixed
+
+- The live view of a camera PrintGuard transcodes, such as MJPEG over HTTP, no longer sends every frame as a keyframe, so it uses a fraction of the bandwidth. Thanks to @solnqq7-gif.
+
+### Security
+
+- The MCP server is updated past an advisory that let a client exhaust the hub's memory by opening sessions without end.
+- Pillow is updated to 13.0.0 for 25 advisories in its image decoders, and certifi drops the emSign root certificates whose intermediate keys were compromised.
+
 ## [2.6.2] - 2026-10-10
 
 ### Fixed
