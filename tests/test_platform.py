@@ -1196,6 +1196,36 @@ def test_a_live_view_listener_that_never_answers_fails_the_push_instead_of_stall
     assert isinstance(outcomes[0], av.error.FFmpegError), "the push never gave up on a listener that does not answer"
 
 
+def test_a_republished_mjpeg_camera_is_keyframed_once_a_second_not_every_frame(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every decoded JPEG is marked as a keyframe, and libx264 kept that mark, so the live view was all keyframes."""
+    from printguard.server import publish
+
+    jpeg_encoder = av.CodecContext.create("mjpeg", "w")
+    jpeg_encoder.width, jpeg_encoder.height, jpeg_encoder.pix_fmt = 320, 240, "yuvj420p"
+    jpeg_encoder.time_base = Fraction(1, 15)
+    jpeg_decoder = av.CodecContext.create("mjpeg", "r")
+    pushed = io.BytesIO()
+    open_container = av.open
+    monkeypatch.setattr(publish.av, "open", lambda *args, **kwargs: open_container(pushed, mode="w", format="matroska"))
+    outcomes: list[Exception | None] = []
+    push = publish.H264Push("rtsp://mediamtx/camera", 15, 60.0, outcomes.append)
+
+    for index in range(10):
+        pixels = np.zeros((240, 320, 3), dtype=np.uint8)
+        pixels[:, index * 20 : index * 20 + 40] = 255
+        for packet in jpeg_encoder.encode(av.VideoFrame.from_ndarray(pixels, format="rgb24")):
+            for decoded in jpeg_decoder.decode(packet):
+                push.send(decoded)
+                while len(outcomes) <= index:
+                    time.sleep(0.01)
+    push.close()
+
+    assert outcomes == [None] * 10
+    with open_container(io.BytesIO(pushed.getvalue())) as recording:
+        keyframes = [packet.is_keyframe for packet in recording.demux(video=0) if packet.size]
+    assert len(keyframes) == 10 and sum(keyframes) == 1
+
+
 def test_a_browser_camera_recording_slower_than_a_frame_a_second_is_still_pushed() -> None:
     """Its rate rounded down to 0 and the divide by it closed the publish socket with 1011."""
     from printguard.server.publish import ChunkStream, remux

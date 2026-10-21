@@ -121,7 +121,9 @@ class H264Push:
     always later than the last, since the muxer refuses a timestamp that
     repeats and the push would drop. A
     keyframe is forced every KEYFRAME_INTERVAL_S, keeping HLS segments short
-    regardless of the source's real, often variable, frame rate.
+    regardless of the source's real, often variable, frame rate. Those are the
+    only ones forced: a frame decoded from MJPEG arrives marked as a keyframe,
+    which libx264 would otherwise honour on every frame.
 
     Encoding, connecting and writing all happen on a thread of this push's own,
     and ``send`` only queues, so a live view that stops answering costs the
@@ -208,6 +210,7 @@ class H264Push:
             self._last_key = arrived - KEYFRAME_INTERVAL_S
             self._last_pts = -1
         out = self._reformatter.reformat(frame, format="yuv420p", threads=1)
+        out.pict_type = PictureType.NONE
         out.pts = self._last_pts = max(int((arrived - self._start) / self._clock), self._last_pts + 1)
         out.time_base = self._clock
         if arrived - self._last_key >= KEYFRAME_INTERVAL_S:

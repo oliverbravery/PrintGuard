@@ -9,6 +9,10 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [2.6.3] - 2026-10-21
 
+### Fixed
+
+- The live view of a camera PrintGuard transcodes, such as MJPEG over HTTP, no longer sends every frame as a keyframe, so it uses a fraction of the bandwidth. Thanks to @solnqq7-gif.
+
 ### Security
 
 - The MCP server is updated past an advisory that let a client exhaust the hub's memory by opening sessions without end.
