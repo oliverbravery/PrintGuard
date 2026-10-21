@@ -1,6 +1,6 @@
 [project]
 name = "printguard"
-version = "2.6.2"
+version = "2.6.3"
 description = "Real-time 3D print failure detection"
 
 license = "GPL-2.0-only"
@@ -19,7 +19,7 @@ dependencies = [
     "onnxruntime-windowsml>=1.24.1; sys_platform == 'win32'",
     "packaging>=24.0",
     "paho-mqtt>=2.1",
-    "pillow>=10",
+    "pillow>=13.0.0",
     "pycentauri>=0.9.1",
     "pydantic>=2.0",
     "pyobjc-framework-cocoa>=12.2; sys_platform == 'darwin'",
@@ -61,7 +61,7 @@ packages = ["printguard"]
 
 [dependency-groups]
 dev = [
-    "mcp>=1.0",
+    "mcp>=1.30.0",
     "pyinstaller>=6.11",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
