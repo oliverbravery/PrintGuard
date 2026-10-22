@@ -9,6 +9,12 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [2.6.4] - 2026-10-22
 
+### Changed
+
+- The image runs on Python 3.14.
+- The bundled MediaMTX is updated to 1.21.2, which drops the stray SEI units some TP-Link Tapo cameras send and fixes several RTSP and RTMP disconnects.
+- The image's UI is built on the current Node 26 image, and releases with current versions of the GitHub Actions they use.
+
 ## [2.6.3] - 2026-10-21
 
 ### Fixed
