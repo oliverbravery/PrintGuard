@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { copyText } from "../src/components/CopyButton";
 import { Wordmark } from "../src/components/Wordmark";
 import { NewTab } from "../src/components/NewTab";
@@ -8,6 +8,8 @@ import printerDetail from "../../docs/assets/printer-detail.png";
 import printViewer from "../../docs/assets/print-viewer.png";
 import pluginsLive from "../../docs/assets/plugins-live.png";
 import customise from "../../docs/assets/customise.png";
+import film from "./film.mp4";
+import filmPoster from "./film-poster.jpg";
 
 const REPO_URL = "https://github.com/oliverbravery/PrintGuard";
 const MODEL_URL = "https://github.com/oliverbravery/Edge-FDM-Fault-Detection";
@@ -149,6 +151,49 @@ function Showcase({ src, alt, w, h, kicker, title, body, flip }: { src: string; 
   );
 }
 
+function Film() {
+  const video = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const element = video.current!;
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const observer = new IntersectionObserver(([entry]) => (entry.isIntersecting ? element.play().catch(() => undefined) : element.pause()), { threshold: 0.5 });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div className="grid items-center gap-6 lg:grid-cols-2">
+      <div className="panel tile reveal relative overflow-hidden">
+        <span className="corner corner-tl" />
+        <span className="corner corner-tr" />
+        <span className="corner corner-bl" />
+        <span className="corner corner-br" />
+        <video
+          ref={video}
+          src={film}
+          poster={filmPoster}
+          width={720}
+          height={720}
+          muted
+          loop
+          playsInline
+          controls
+          preload="none"
+          aria-label="A print fails, PrintGuard pauses the printer and sends an alert, then a tour of the dashboard"
+          className="block h-auto w-full"
+        />
+      </div>
+      <div>
+        <p className="label mb-2 text-accent">IN 90 SECONDS</p>
+        <h3 className="display mb-3 text-2xl font-bold sm:text-3xl">Watch it catch a failure</h3>
+        <p className="leading-relaxed text-text-1">
+          A print comes loose, PrintGuard pauses the printer and the alert reaches your phone. Then it runs through
+          preheating, the print library, the printers it works with and how it compares to Obico's Spaghetti Detective.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function DocLink({ title, page, body }: { title: string; page: string; body: string }) {
   return (
     <a className="panel group block p-5 transition-colors hover:border-accent" href={`${DOCS_URL}/${page}`} target="_blank" rel="noreferrer">
@@ -204,6 +249,10 @@ export function Home() {
 
       <section className="mx-auto max-w-6xl px-5 pb-20">
         <Shot src={dashboardDark} alt="PrintGuard dashboard: three cameras at a glance, one print mid-failure and auto-paused" w={1360} h={620} eager />
+      </section>
+
+      <section className="mx-auto max-w-6xl px-5 pb-20">
+        <Film />
       </section>
 
       <section id="features" className="mx-auto max-w-6xl scroll-mt-20 px-5 pb-20">
