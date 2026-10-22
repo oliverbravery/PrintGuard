@@ -25,7 +25,7 @@ cd feedback-worker && npm ci && npm test  # the training inbox Worker
 ```
 
 There is no Python lint step. The **tests** check in CI runs `uv run pytest`, on Python 3.12 and
-again on the image's 3.13, `npm run typecheck`, `npm run site:build` and `npm run test:sandbox` in
+again on the image's 3.14, `npm run typecheck`, `npm run site:build` and `npm run test:sandbox` in
 `web/`, and the feedback Worker's `typecheck` and tests.
 
 ## Architecture
