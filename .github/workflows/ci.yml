@@ -30,7 +30,7 @@ jobs:
       - run: uv sync --locked
       - run: uv run pytest
       - name: Run the tests again on the Python the image ships
-        run: uv run --isolated --locked --python 3.13 pytest
+        run: uv run --isolated --locked --python 3.14 pytest
       - run: npm run typecheck --prefix web
       - run: npm run site:build --prefix web
       - id: playwright
