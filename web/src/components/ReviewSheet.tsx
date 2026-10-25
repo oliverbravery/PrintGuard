@@ -130,6 +130,7 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
   const frames = loaded ?? [];
   const switchedOff = engine?.settings.feedback === "off";
   const kept = frames.filter((frame) => !removed.has(frame.id));
+  const allLeftOut = frames.length > 0 && kept.length === 0;
   const showsFailure = (frame: ReviewFrame) => (outcome === "failed" && frame.kind === "alert") !== relabelled.has(frame.id);
   const close = () => openReview(null);
   const outcomeLabelId = useId();
@@ -176,11 +177,18 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
           </div>
           {outcome && (
             <>
-              <p className="text-[0.7rem] leading-relaxed text-text-2">
-                {outcome === "failed"
-                  ? "Alert frames are marked as real failures. Press a frame to change its label. Use the × to leave one out, and Undo to put it back."
-                  : "Every frame is marked good. Press one to change it, or use the × to leave it out and Undo to put it back."}
-              </p>
+              <div className="flex items-start gap-3">
+                <p className="flex-1 text-[0.7rem] leading-relaxed text-text-2">
+                  {outcome === "failed"
+                    ? "Alert frames are marked as real failures. Press a frame to change its label. Use the × to leave one out, and Undo to put it back."
+                    : "Every frame is marked good. Press one to change it, or use the × to leave it out and Undo to put it back."}
+                </p>
+                {frames.length > 1 && (
+                  <button className="btn shrink-0" onClick={() => setRemoved(new Set(allLeftOut ? [] : frames.map((frame) => frame.id)))}>
+                    {allLeftOut ? "Put all back" : "Leave all out"}
+                  </button>
+                )}
+              </div>
               {!loaded && (
                 <p role="status" className="mono text-[0.7rem] text-text-2">
                   loading the frames

@@ -48,7 +48,7 @@ isn't offered for review.
 1. Answer whether the print finished fine.
 2. Press any frame to change its label. An alert frame is a real failure or a false alarm, and
    any other frame is good or a failure.
-3. Use the × on a frame to leave it out, and **Undo** to put it back.
+3. Use the × on a frame to leave it out, and **Undo** to put it back. **Leave all out** clears every frame, so you can put back just the ones you want to send.
 4. Add your printer model if you like, then press **Send**.
 
 **Not this print** takes it off your list of prints to review. Its frames stay on the hub, so

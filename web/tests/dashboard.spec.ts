@@ -302,6 +302,29 @@ test("a review answered before its frames arrive still marks the alert frames, a
   expect(await page.evaluate(() => (window as any).__pg.getState().snapshotCache)).toEqual({});
 });
 
+test("every frame of a review can be left out at once and one put back to send it alone", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [review()] }), reviewId: "r1" });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  await sheet.getByRole("button", { name: "Yes" }).click();
+  const frames = [
+    { id: "a1", ts: 60, score: 0.9, kind: "alert", action: "pause", size: 1 },
+    { id: "s1", ts: 120, score: 0.1, kind: "spaced", size: 1 },
+    { id: "s2", ts: 180, score: 0.1, kind: "spaced", size: 1 },
+  ];
+  await emit(page, { event: "review", ...review(), frames });
+
+  await sheet.getByRole("button", { name: "Leave all out" }).click();
+  await expect(sheet.getByRole("button", { name: "Send 0 frames" })).toBeDisabled();
+  await sheet.getByRole("button", { name: "Put all back" }).click();
+  await expect(sheet.getByRole("button", { name: "Send 3 frames" })).toBeEnabled();
+
+  await sheet.getByRole("button", { name: "Leave all out" }).click();
+  await sheet.getByRole("button", { name: /^Send frame 1 of 3 at/ }).click();
+  await expect(sheet.getByRole("button", { name: "Leave all out" })).toBeVisible();
+  await sheet.getByRole("button", { name: "Send 1 frame" }).click();
+  expect(await sent(page, "review.send")).toMatchObject({ id: "r1", failures: [], removed: ["s1", "s2"] });
+});
+
 test("a review frame shows whole whatever its shape and any frame opens full size", async ({ page }) => {
   const square = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"/>')}`;
   const frames = [
