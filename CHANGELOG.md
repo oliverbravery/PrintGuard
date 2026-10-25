@@ -19,6 +19,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - The bundled MediaMTX is updated to 1.21.2, which drops the stray SEI units some TP-Link Tapo cameras send and fixes several RTSP and RTMP disconnects.
 - The image's UI is built on the current Node 26 image, and releases with current versions of the GitHub Actions they use.
 
+### Security
+
+- The MCP server is updated past advisories in how FastMCP authorises tool calls and how OpenTelemetry parses trace headers.
+- DOMPurify, which cleans the plugin READMEs the dashboard shows, is updated to 3.4.17 for three advisories.
+
 ## [2.6.3] - 2026-10-21
 
 ### Fixed
