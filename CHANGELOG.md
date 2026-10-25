@@ -9,6 +9,10 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [2.6.4] - 2026-10-22
 
+### Added
+
+- The review sheet has a button to leave every frame out at once, so you can send just the few you pick. Thanks to @jsbrich.
+
 ### Changed
 
 - The image runs on Python 3.14.
