@@ -45,7 +45,8 @@ isn't offered for review.
 
 ![The review sheet with a failed print's frames labelled good, failure and real failure](assets/review.png)
 
-1. Answer whether the print finished fine.
+1. Answer whether the print finished without any problems. A print you rescued and resumed still
+   had one.
 2. Press any frame to change its label. An alert frame is a real failure or a false alarm, and
    any other frame is good or a failure.
 3. Use the × on a frame to leave it out, and **Undo** to put it back. **Leave all out** clears every frame, so you can put back just the ones you want to send.

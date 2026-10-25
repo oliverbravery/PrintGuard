@@ -164,14 +164,14 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
           </p>
           <div>
             <span id={outcomeLabelId} className="label mb-2 block">
-              Did this print finish fine?
+              Did this print finish without any problems?
             </span>
             <div role="group" aria-labelledby={outcomeLabelId} className="flex gap-2">
               <button className={`btn flex-1 ${outcome === "fine" ? "!border-accent !text-accent" : ""}`} aria-pressed={outcome === "fine"} onClick={() => answer("fine")}>
                 Yes
               </button>
               <button className={`btn flex-1 ${outcome === "failed" ? "!border-accent !text-accent" : ""}`} aria-pressed={outcome === "failed"} onClick={() => answer("failed")}>
-                No, it failed
+                No, something went wrong
               </button>
             </div>
           </div>
