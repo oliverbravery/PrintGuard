@@ -12,6 +12,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 ### Added
 
 - The review sheet has a button to leave every frame out at once, so you can send just the few you pick. Thanks to @jsbrich.
+- Telegram alerts can go to a topic in a forum group. Thanks to @Gleb1982.
 
 ### Changed
 

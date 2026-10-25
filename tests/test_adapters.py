@@ -215,6 +215,16 @@ async def test_telegram_surfaces_api_description() -> None:
         await NOTIFIERS["telegram"].send(http, {"bot_token": "x", "chat_id": "0"}, "T", "B", None)
 
 
+async def test_telegram_posts_into_a_forum_topic() -> None:
+    http = RecordingHttp(body={"ok": True})
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "12:ab", "chat_id": "-1001", "topic_id": "42"}, "T", "B", None)
+    assert http.last["json"]["message_thread_id"] == "42"
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "12:ab", "chat_id": "-1001", "topic_id": "42"}, "T", "B", JPEG)
+    assert b'name="message_thread_id"\r\n\r\n42\r\n' in http.last["data"]
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "12:ab", "chat_id": "-1001", "topic_id": ""}, "T", "B", None)
+    assert "message_thread_id" not in http.last["json"]
+
+
 async def test_pushover_attaches_snapshot_as_multipart() -> None:
     http = RecordingHttp(body={"status": 1})
     await NOTIFIERS["pushover"].send(http, {"api_token": "ap", "user_key": "uk"}, "T", "B", JPEG)
