@@ -38,7 +38,7 @@ class TelegramNotifier(NotifierAdapter):
     async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None, *, urgent: bool = True) -> None:
         """Calls sendPhoto with a multipart upload, or sendMessage without, silently when not urgent.
 
-        A topic ID posts into that topic of a forum group rather than its General topic.
+        A topic ID posts into that topic of a forum group.
 
         The message is cut to the 1024 characters a photo's caption takes, or the 4096 a text message does.
 
