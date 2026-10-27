@@ -130,6 +130,7 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
   const frames = loaded ?? [];
   const switchedOff = engine?.settings.feedback === "off";
   const kept = frames.filter((frame) => !removed.has(frame.id));
+  const allLeftOut = frames.length > 0 && kept.length === 0;
   const showsFailure = (frame: ReviewFrame) => (outcome === "failed" && frame.kind === "alert") !== relabelled.has(frame.id);
   const close = () => openReview(null);
   const outcomeLabelId = useId();
@@ -163,24 +164,31 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
           </p>
           <div>
             <span id={outcomeLabelId} className="label mb-2 block">
-              Did this print finish fine?
+              Did this print finish without any problems?
             </span>
             <div role="group" aria-labelledby={outcomeLabelId} className="flex gap-2">
               <button className={`btn flex-1 ${outcome === "fine" ? "!border-accent !text-accent" : ""}`} aria-pressed={outcome === "fine"} onClick={() => answer("fine")}>
                 Yes
               </button>
               <button className={`btn flex-1 ${outcome === "failed" ? "!border-accent !text-accent" : ""}`} aria-pressed={outcome === "failed"} onClick={() => answer("failed")}>
-                No, it failed
+                No, something went wrong
               </button>
             </div>
           </div>
           {outcome && (
             <>
-              <p className="text-[0.7rem] leading-relaxed text-text-2">
-                {outcome === "failed"
-                  ? "Alert frames are marked as real failures. Press a frame to change its label. Use the × to leave one out, and Undo to put it back."
-                  : "Every frame is marked good. Press one to change it, or use the × to leave it out and Undo to put it back."}
-              </p>
+              <div className="flex items-start gap-3">
+                <p className="flex-1 text-[0.7rem] leading-relaxed text-text-2">
+                  {outcome === "failed"
+                    ? "Alert frames are marked as real failures. Press a frame to change its label. Use the × to leave one out, and Undo to put it back."
+                    : "Every frame is marked good. Press one to change it, or use the × to leave it out and Undo to put it back."}
+                </p>
+                {frames.length > 1 && (
+                  <button className="btn shrink-0" onClick={() => setRemoved(new Set(allLeftOut ? [] : frames.map((frame) => frame.id)))}>
+                    {allLeftOut ? "Put all back" : "Leave all out"}
+                  </button>
+                )}
+              </div>
               {!loaded && (
                 <p role="status" className="mono text-[0.7rem] text-text-2">
                   loading the frames

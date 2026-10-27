@@ -263,8 +263,8 @@ test("one kept frame is not called frames on the tile or in the review sheet", a
 test("the review's answer buttons sit in a group named by their question and the printer model has a name", async ({ page }) => {
   await dashboard(page, { engine: engine({ reviews: [review()] }), reviewId: "r1" });
   const sheet = page.getByRole("dialog", { name: "Prusa · review" });
-  const question = sheet.getByRole("group", { name: "Did this print finish fine?" });
-  await expect(question.getByRole("button")).toHaveText(["Yes", "No, it failed"]);
+  const question = sheet.getByRole("group", { name: "Did this print finish without any problems?" });
+  await expect(question.getByRole("button")).toHaveText(["Yes", "No, something went wrong"]);
 
   await question.getByRole("button", { name: "Yes" }).click();
   await expect(sheet.getByRole("textbox", { name: "Printer model" })).toBeVisible();
@@ -282,7 +282,7 @@ test("a review answered before its frames arrive still marks the alert frames, a
   await page.evaluate(() => (window as any).__pg.setState({ reconnecting: false }));
   await expect.poll(asked).toBe(onOpening + 1);
 
-  await sheet.getByRole("button", { name: "No, it failed" }).click();
+  await sheet.getByRole("button", { name: "No, something went wrong" }).click();
   const frames = [
     { id: "a1", ts: 60, score: 0.9, kind: "alert", action: "pause", size: 1 },
     { id: "s1", ts: 120, score: 0.1, kind: "spaced", size: 1 },
@@ -300,6 +300,29 @@ test("a review answered before its frames arrive still marks the alert frames, a
 
   await sheet.getByRole("button", { name: "Close print review" }).click();
   expect(await page.evaluate(() => (window as any).__pg.getState().snapshotCache)).toEqual({});
+});
+
+test("every frame of a review can be left out at once and one put back to send it alone", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [review()] }), reviewId: "r1" });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  await sheet.getByRole("button", { name: "Yes" }).click();
+  const frames = [
+    { id: "a1", ts: 60, score: 0.9, kind: "alert", action: "pause", size: 1 },
+    { id: "s1", ts: 120, score: 0.1, kind: "spaced", size: 1 },
+    { id: "s2", ts: 180, score: 0.1, kind: "spaced", size: 1 },
+  ];
+  await emit(page, { event: "review", ...review(), frames });
+
+  await sheet.getByRole("button", { name: "Leave all out" }).click();
+  await expect(sheet.getByRole("button", { name: "Send 0 frames" })).toBeDisabled();
+  await sheet.getByRole("button", { name: "Put all back" }).click();
+  await expect(sheet.getByRole("button", { name: "Send 3 frames" })).toBeEnabled();
+
+  await sheet.getByRole("button", { name: "Leave all out" }).click();
+  await sheet.getByRole("button", { name: /^Send frame 1 of 3 at/ }).click();
+  await expect(sheet.getByRole("button", { name: "Leave all out" })).toBeVisible();
+  await sheet.getByRole("button", { name: "Send 1 frame" }).click();
+  expect(await sent(page, "review.send")).toMatchObject({ id: "r1", failures: [], removed: ["s1", "s2"] });
 });
 
 test("a review frame shows whole whatever its shape and any frame opens full size", async ({ page }) => {
@@ -372,7 +395,7 @@ test("a failure card at the narrowest phone keeps its time and score inside the 
   await dashboard(page, { engine: engine({ reviews: [review({ frames: 1 })] }), reviewId: "r1" });
   await emit(page, { event: "review", ...review({ frames: 1 }), frames: [{ id: "a1", ts: 120, score: 0.9, kind: "alert", action: "pause", size: 1 }] });
   const sheet = page.getByRole("dialog", { name: "Prusa · review" });
-  await sheet.getByRole("button", { name: "No, it failed" }).click();
+  await sheet.getByRole("button", { name: "No, something went wrong" }).click();
 
   const card = (await sheet.locator(".panel").filter({ hasText: "Real failure" }).boundingBox())!;
   const score = (await sheet.locator(".label", { hasText: "90%" }).boundingBox())!;
@@ -2503,7 +2526,7 @@ test("a review says its frames are loading, and cannot be sent while the review 
   await dashboard(page, { engine: engine({ reviews: [dismissed], settings: { ...engine().settings, feedback: "off" } }), reviewId: "r1" });
   const sheet = page.getByRole("dialog", { name: "Prusa · review" });
   const loading = sheet.getByRole("status").filter({ hasText: "loading the frames" });
-  await sheet.getByRole("button", { name: "No, it failed" }).click();
+  await sheet.getByRole("button", { name: "No, something went wrong" }).click();
   await expect(loading).toBeVisible();
   await expect(sheet.getByRole("button", { name: "Send 3 frames" })).toBeDisabled();
   await expect(sheet.getByText("Alert frames are marked as real failures. Press a frame to change its label.")).toBeVisible();

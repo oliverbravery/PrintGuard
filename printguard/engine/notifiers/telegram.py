@@ -30,12 +30,15 @@ class TelegramNotifier(NotifierAdapter):
         "properties": {
             "bot_token": {"type": "string", "title": "Bot token", "secret": True, "placeholder": "From @BotFather"},
             "chat_id": {"type": "string", "title": "Chat ID", "placeholder": "From @userinfobot, e.g. 123456789"},
+            "topic_id": {"type": "string", "title": "Topic ID (optional)", "placeholder": "The last number in a link to the topic"},
         },
         "required": ["bot_token", "chat_id"],
     }
 
     async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None, *, urgent: bool = True) -> None:
         """Calls sendPhoto with a multipart upload, or sendMessage without, silently when not urgent.
+
+        A topic ID posts into that topic of a forum group.
 
         The message is cut to the 1024 characters a photo's caption takes, or the 4096 a text message does.
 
@@ -44,11 +47,12 @@ class TelegramNotifier(NotifierAdapter):
         """
         api = f"https://api.telegram.org/bot{config['bot_token']}"
         text = f"{title}\n{body}"
+        recipient = {"chat_id": config["chat_id"], **({"message_thread_id": config["topic_id"]} if config.get("topic_id") else {})}
         if image:
-            fields = {"chat_id": str(config["chat_id"]), "caption": truncated(text, CAPTION_LIMIT), **({} if urgent else {"disable_notification": "true"})}
+            fields = {**recipient, "caption": truncated(text, CAPTION_LIMIT), **({} if urgent else {"disable_notification": "true"})}
             headers, payload = multipart_form(fields, "photo", "snapshot.jpg", image)
             status, resp = await http("POST", f"{api}/sendPhoto", headers=headers, data=payload, timeout=15.0)
         else:
-            status, resp = await http("POST", f"{api}/sendMessage", json={"chat_id": config["chat_id"], "text": truncated(text, TEXT_LIMIT), **({} if urgent else {"disable_notification": True})}, timeout=15.0)
+            status, resp = await http("POST", f"{api}/sendMessage", json={**recipient, "text": truncated(text, TEXT_LIMIT), **({} if urgent else {"disable_notification": True})}, timeout=15.0)
         answered = resp if isinstance(resp, dict) else {}
         require_reply("Telegram", "the alert", status, answered.get("ok") is True, answered.get("description"))
