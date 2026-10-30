@@ -68,6 +68,7 @@ watched and warns you. See [failing safely](architecture.md#failing-safely).
 | [Elegoo](https://github.com/ELEGOO-3D/elegoo-link) | Access code on a Centauri Carbon 2, or an optional Moonraker API key | Centauri chamber camera, or Moonraker's configured webcams |
 | [Prusa (PrusaLink)](https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293) | HTTP Digest, user `maker` unless you set another | No local stream |
 | [Bambu Lab](https://github.com/Doridian/OpenBambuAPI) | Access code and serial | Chamber camera |
+| Ultimaker S5 (status only) | None on a trusted LAN | No camera exposed by this integration |
 
 <details>
 <summary><b>Bambu Lab</b>: LAN Only Mode and Developer Mode</summary>
