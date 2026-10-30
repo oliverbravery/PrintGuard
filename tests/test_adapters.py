@@ -1887,6 +1887,7 @@ def test_print_formats_and_heater_control_travel_with_adapter_meta() -> None:
         "prusa": (["gcode", "bgcode"], False),
         "bambu": (["3mf"], True),
         "elegoo": (["gcode"], True),
+        "ultimaker_s5": ([], False),
     }
 
 
@@ -2481,3 +2482,70 @@ async def test_a_channel_key_pasted_with_whitespace_is_sent_without_it() -> None
     assert (http.last["url"], http.last["headers"]["Authorization"]) == ("https://ntfy.sh/t", "Bearer tk")
     await NOTIFIERS["telegram"].send(http, NOTIFIERS["telegram"].declared({"bot_token": "12:ab \n", "chat_id": " 77"}), "T", "B", None)
     assert http.last["url"] == "https://api.telegram.org/bot12:ab/sendMessage" and http.last["json"]["chat_id"] == "77"
+
+
+@pytest.mark.parametrize(
+    ("reported", "expected"),
+    [
+        ("idle", DeviceStatus.IDLE),
+        ("printing", DeviceStatus.PRINTING),
+        ("error", DeviceStatus.ERROR),
+        ("booting", DeviceStatus.UNKNOWN),
+        ("waiting_for_peripherals", DeviceStatus.UNKNOWN),
+        ("maintenance", DeviceStatus.UNKNOWN),
+    ],
+)
+async def test_ultimaker_s5_status_mapping(reported, expected):
+    adapter = INTEGRATIONS["ultimaker_s5"]
+    http = RecordingHttp(body=reported)
+
+    state = await adapter.fetch_state(
+        http, {"base_url": "http://192.168.68.104/"}
+    )
+
+    assert state.status == expected
+    assert http.last["method"] == "GET"
+    assert http.last["url"] == (
+        "http://192.168.68.104/api/v1/printer/status"
+    )
+
+
+async def test_ultimaker_s5_rejects_http_errors():
+    adapter = INTEGRATIONS["ultimaker_s5"]
+    http = RecordingHttp(status=503, body="unavailable")
+
+    with pytest.raises(RuntimeError, match="HTTP 503"):
+        await adapter.fetch_state(
+            http, {"base_url": "http://192.168.68.104"}
+        )
+
+
+async def test_ultimaker_s5_rejects_unexpected_status_response():
+    adapter = INTEGRATIONS["ultimaker_s5"]
+    http = RecordingHttp(body={"status": "idle"})
+
+    with pytest.raises(RuntimeError, match="unexpected status response"):
+        await adapter.fetch_state(
+            http, {"base_url": "http://192.168.68.104"}
+        )
+
+
+async def test_ultimaker_s5_rejects_unknown_status():
+    adapter = INTEGRATIONS["ultimaker_s5"]
+    http = RecordingHttp(body="something_new")
+
+    with pytest.raises(RuntimeError, match="unknown printer status"):
+        await adapter.fetch_state(
+            http, {"base_url": "http://192.168.68.104"}
+        )
+
+
+async def test_ultimaker_s5_is_read_only():
+    adapter = INTEGRATIONS["ultimaker_s5"]
+
+    with pytest.raises(RuntimeError, match="read-only"):
+        await adapter.send(
+            RecordingHttp(),
+            {"base_url": "http://192.168.68.104"},
+            DeviceAction.PAUSE,
+        )
