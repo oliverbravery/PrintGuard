@@ -9,6 +9,10 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [2.6.5] - 2026-11-03
 
+### Added
+
+- Starting a print from the print library shows the printer's camera first, so you can check the build plate is on and the bed is clear.
+
 ### Changed
 
 - The bundled MediaMTX is updated to 1.21.3, which handles H.264 cameras that send recovery points instead of keyframes.
