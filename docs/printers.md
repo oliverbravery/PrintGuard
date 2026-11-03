@@ -171,6 +171,11 @@ with no tags can go to any printer whose service takes the format. Remove a prin
 tagged only for it stay tagged, so they start nowhere until you tag them for another. Either way the printer has to
 report idle at the moment you press **Print**, so nothing lands on top of a running job.
 
+**Print** opens the printer's camera before anything is sent, so you can check the build plate is on
+and the bed is clear, then **Start print**. It shows the camera the printer's monitor watches, or
+the one the printer exposes if no monitor covers it. A print started through the REST API or MCP
+starts straight away.
+
 | Service | Takes | How it starts |
 |---|---|---|
 | OctoPrint | `.gcode`, `.gco`, `.g` | Uploaded to local storage, selected and printed |

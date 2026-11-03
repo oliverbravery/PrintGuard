@@ -11,6 +11,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Added
 
+- Starting a print from the print library shows the printer's camera first, so you can check the build plate is on and the bed is clear.
 - Each print is recorded, one frame every 5 seconds, so you can scrub through it when you review it and add frames PrintGuard didn't pick. Recordings are deleted once you send or skip the print, or after 7 days, and the Storage tab in Settings lists them with their sizes. Thanks to @advgiraffe.
 - The review sheet counts the frames you have chosen against the 60 a day the training inbox takes.
 
