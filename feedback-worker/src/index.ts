@@ -14,7 +14,7 @@ const FrameDetails = z.object({
   print: frameId,
   frame: frameId,
   label: z.enum(["good", "failure"]),
-  kind: z.enum(["alert", "near", "spaced"]),
+  kind: z.enum(["alert", "near", "spaced", "added"]),
   score: z.number().min(0).max(1),
   threshold: z.number().min(0).max(1),
   ts: z.number(),

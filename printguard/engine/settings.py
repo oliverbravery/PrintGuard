@@ -30,6 +30,12 @@ def _true_or_false(raw: Any) -> bool:
     return raw
 
 
+def _recording_days(raw: Any) -> int:
+    if raw not in (0, 3, 7, 14) or isinstance(raw, bool):
+        raise ValueError("recording_days must be 0, 3, 7 or 14")
+    return raw
+
+
 def _address(raw: Any) -> str:
     if not isinstance(raw, str):
         raise ValueError("catalogue_url is an address")
@@ -58,6 +64,7 @@ CHECKS: dict[str, Callable[[Any], Any]] = {
     "fault_grace_s": clamp_grace,
     "preheat": sanitise_presets,
     "feedback": _one_of("feedback", "ask", "off"),
+    "recording_days": _recording_days,
 }
 """What each setting is checked with, raising ValueError for one of the wrong kind and returning it as it is stored."""
 

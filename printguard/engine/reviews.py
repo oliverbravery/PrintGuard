@@ -6,11 +6,17 @@ frames are near-duplicates, so the spread is thinned as a print runs on and a
 long print keeps no more than a short one. The JPEGs live in the platform's
 file store and the records ride in the persisted state, so both survive a
 restart.
+
+A print is also recorded, one frame every few seconds, so its reviewer can
+scrub through it and add frames of their own. A recording is one file of
+JPEGs written end to end beside an index of fixed-size entries, and lasts only
+until the print is reviewed or a set number of days has passed.
 """
 
 from __future__ import annotations
 
 import asyncio
+import struct
 import sys
 import time
 import uuid
@@ -19,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from . import vision
 from .bounds import clamp
+from .feedback import FRAMES_PER_DAY
 from .platform import Frame, Platform, as_chunks
 
 if TYPE_CHECKING:
@@ -33,9 +40,14 @@ ALERT_MAX = 40
 REVIEW_MAX = 20
 BYTES_MAX = 200 * 1024 * 1024
 UNLINKED_PRINT_S = 24 * 3600.0
+RECORD_EVERY_S = 5.0
+RECORDINGS_BYTES_MAX = 2 * 1024**3
+DAY_S = 24 * 3600.0
+INDEX_ENTRY = struct.Struct("<dfQI")
 ENDED_STATUSES = ("idle", "error")
 STATUSES = ("running", "ready", "dismissed", "skipped", "queued", "sent")
-FRAME_KINDS = ("alert", "near", "spaced")
+RECORDED_STATUSES = ("running", "ready")
+FRAME_KINDS = ("alert", "near", "spaced", "added")
 LABELS = ("failure", "good")
 
 
@@ -56,7 +68,8 @@ class Review:
             of every frame they kept, the printer model they typed, the frames
             already sent, and the refusal code and retry time when queued.
         frames: The kept frames in capture order, each with its id, time, score,
-            kind (alert, near or spaced), stored size and an alert's action.
+            kind (alert, near, spaced or added from the recording), stored size,
+            an alert's action and the label an added frame was added with.
     """
 
     id: str
@@ -87,6 +100,7 @@ class Review:
             "ended": self.ended,
             "status": self.status,
             "frames": len(self.frames),
+            "bytes": sum(frame["size"] for frame in self.frames),
             "alerts": len(self.of_kind("alert")),
             "chosen": len(submission.get("labels", {})),
             "sent": len(submission.get("sent", [])),
@@ -119,6 +133,8 @@ def stored_review(record: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("its kept frames are not a list of frames")
         if frame["kind"] == "alert" and not isinstance(frame.get("action"), str):
             raise ValueError("a kept alert frame has no action")
+        if frame["kind"] == "added" and frame.get("label") not in LABELS:
+            raise ValueError("a frame added from the recording has no label")
         for key in ("ts", "score", "size"):
             clamp(f"a kept frame's {key}", frame.get(key), 0.0, sys.float_info.max)
     if submission is None:
@@ -157,12 +173,43 @@ def frame_key(review_id: str, frame_id: str) -> str:
     return f"review-{review_id}-{frame_id}.jpg"
 
 
+def recording_key(review_id: str) -> str:
+    """The file store key a print's recorded JPEGs are written end to end under."""
+    return f"recording-{review_id}.frames"
+
+
+def index_key(review_id: str) -> str:
+    """The file store key of a recording's index, one ``INDEX_ENTRY`` per frame."""
+    return f"recording-{review_id}.index"
+
+
+@dataclass
+class Recording:
+    """The frames recorded through one print.
+
+    Attributes:
+        entries: Each frame's time, score, and where its JPEG begins and how
+            long it runs in the recording file, in capture order.
+        bytes: The size of every recorded JPEG together.
+    """
+
+    entries: list[tuple[float, float, int, int]] = field(default_factory=list)
+    bytes: int = 0
+
+    def add(self, ts: float, score: float, offset: int, size: int) -> None:
+        """Notes one more recorded frame."""
+        self.entries.append((ts, score, offset, size))
+        self.bytes += size
+
+
 class ReviewLibrary:
     """Chooses which frames of a print to keep and stores them, within a cap."""
 
     def __init__(self, platform: Platform) -> None:
         self._platform = platform
         self._reviews: dict[str, Review] = {}
+        self._recordings: dict[str, Recording] = {}
+        self._unrecorded: set[str] = set()
         self._stops = 0
 
     def restore(self, records: list[dict[str, Any]]) -> None:
@@ -173,9 +220,165 @@ class ReviewLibrary:
         """Serialises every review for the state store."""
         return [asdict(review) for review in self._reviews.values()]
 
-    def public(self) -> list[dict[str, Any]]:
-        """Summarises every review for the state event."""
-        return [review.public() for review in self._reviews.values()]
+    async def load_recordings(self) -> None:
+        """Reads back the index of every review's recording a previous run left.
+
+        A frame whose entry was cut short when the hub stopped is left out.
+        """
+        for review_id in self._reviews:
+            try:
+                index = await self._platform.files.read(index_key(review_id))
+            except FileNotFoundError:
+                continue
+            recording = self._recordings[review_id] = Recording()
+            for entry in INDEX_ENTRY.iter_unpack(index[: len(index) - len(index) % INDEX_ENTRY.size]):
+                recording.add(*entry)
+
+    def public(self, recording_days: int) -> list[dict[str, Any]]:
+        """Summarises every review for the state event.
+
+        Args:
+            recording_days: How many days a finished print's recording is kept.
+
+        Returns:
+            Each review's summary, with its recording's frame count, size and
+            the time it will be deleted, or None for a print not recorded.
+        """
+        return [{**review.public(), "recording": self._recording_summary(review, recording_days)} for review in self._reviews.values()]
+
+    def _recording_summary(self, review: Review, recording_days: int) -> dict[str, Any] | None:
+        recording = self._recordings.get(review.id)
+        if recording is None:
+            return None
+        expires = review.ended + recording_days * DAY_S if review.ended is not None else None
+        return {"frames": len(recording.entries), "bytes": recording.bytes, "expires": expires}
+
+    def timeline(self, review_id: str) -> list[list[float]]:
+        """Each recorded frame's time and score, in capture order, or none for a print not recorded."""
+        recording = self._recordings.get(review_id)
+        return [[round(ts, 1), round(score, 4)] for ts, score, _, _ in recording.entries] if recording else []
+
+    async def recorded_frame(self, review_id: str, index: int) -> tuple[float, float, bytes]:
+        """Reads one frame of a print's recording.
+
+        Args:
+            review_id: The review the print belongs to.
+            index: The frame's place in the recording, from 0.
+
+        Returns:
+            The frame's time, its score and its JPEG.
+
+        Raises:
+            LookupError: If the print has no recording or none that long.
+        """
+        recording = self._recordings.get(review_id)
+        if recording is None or not 0 <= index < len(recording.entries):
+            raise LookupError(f"no recorded frame {index} of review {review_id}")
+        ts, score, offset, size = recording.entries[index]
+        return ts, score, await self._platform.files.read_range(recording_key(review_id), offset, size)
+
+    async def add(self, review_id: str, index: int, label: str) -> None:
+        """Keeps a frame from a finished print's recording, so it can be sent with the rest.
+
+        Args:
+            review_id: The review the print belongs to.
+            index: The frame's place in the recording, from 0.
+            label: Whether the reviewer added it as ``good`` or as a ``failure``.
+
+        Raises:
+            LookupError: If there is no such review, or no such recorded frame.
+            ValueError: If the print is running or was already sent, the frame
+                was added before, the label is neither, or the print already
+                holds as many added frames as can be sent in a day.
+        """
+        review = self._reviews.get(review_id)
+        if review is None:
+            raise LookupError(f"no review {review_id}")
+        if review.status in ("running", "queued", "sent"):
+            raise ValueError("frames are added to a print once it has finished, before it is sent")
+        if label not in LABELS:
+            raise ValueError("a frame is added as good or as a failure")
+        ts, score, jpeg = await self.recorded_frame(review_id, index)
+        added = review.of_kind("added")
+        if any(frame["ts"] == ts for frame in added):
+            raise ValueError("that frame was already added")
+        if len(added) >= FRAMES_PER_DAY:
+            raise ValueError(f"a print can have at most {FRAMES_PER_DAY} frames added")
+        frame_id = uuid.uuid4().hex[:12]
+        size = await self._platform.files.store(frame_key(review.id, frame_id), as_chunks(jpeg))
+        review.frames.append({"id": frame_id, "ts": ts, "score": round(score, 4), "kind": "added", "label": label, "size": size})
+        review.frames.sort(key=lambda frame: frame["ts"])
+
+    def stop_recording(self, review_ids: list[str]) -> None:
+        """Has the next tidy delete these prints' recordings, and records no more of a print still running."""
+        self._unrecorded.update(review_ids)
+
+    async def tidy_recordings(self, now: float, recording_days: int) -> bool:
+        """Deletes every recording that is no longer wanted.
+
+        A recording lasts while its print runs or waits to be reviewed, and
+        until ``recording_days`` after the print ended. Pressing Send or Not
+        this print, the review being switched off, the print being dropped and
+        recording being switched off all end it, as does the reviewer deleting it.
+
+        Args:
+            now: Wall-clock time.
+            recording_days: How many days a finished print's recording is kept, 0 when recording is off.
+
+        Returns:
+            Whether any recording was deleted.
+
+        Raises:
+            OSError: If a file could not be deleted, once all the rest were tried.
+        """
+        unwanted = [
+            review_id
+            for review_id in self._recordings
+            if (review := self._reviews.get(review_id)) is None
+            or review.status not in RECORDED_STATUSES
+            or not recording_days
+            or review_id in self._unrecorded
+            or (review.ended is not None and review.ended + recording_days * DAY_S <= now)
+        ]
+        self._unrecorded &= {review.id for review in self._reviews.values() if review.ended is None}
+        for review_id in unwanted:
+            del self._recordings[review_id]
+        outcomes = await asyncio.gather(*(self._remove_recording(review_id) for review_id in unwanted), return_exceptions=True)
+        _raise_first(outcomes)
+        return bool(unwanted)
+
+    async def _remove_recording(self, review_id: str) -> None:
+        await asyncio.gather(self._platform.files.remove(recording_key(review_id)), self._platform.files.remove(index_key(review_id)))
+
+    async def _record(self, review: Review, frame: Frame, score: float, ts: float) -> None:
+        """Adds a frame to a running print's recording once the gap since the last has passed.
+
+        The oldest other recordings are deleted to make room under
+        ``RECORDINGS_BYTES_MAX``, and the frame is passed over when that is not enough.
+        """
+        if review.id in self._unrecorded:
+            return
+        recording = self._recordings.setdefault(review.id, Recording())
+        if recording.entries and ts - recording.entries[-1][0] < RECORD_EVERY_S:
+            return
+        jpeg = await self._jpeg(frame)
+        if not jpeg or not await self._make_room(len(jpeg), review.id):
+            return
+        offset = await self._platform.files.append(recording_key(review.id), jpeg)
+        if self._recordings.get(review.id) is not recording:
+            await self._remove_recording(review.id)
+            return
+        await self._platform.files.append(index_key(review.id), INDEX_ENTRY.pack(ts, score, offset, len(jpeg)))
+        recording.add(ts, score, offset, len(jpeg))
+
+    async def _make_room(self, size: int, keeping: str) -> bool:
+        """Deletes the recordings of the prints that began first until ``size`` more bytes fit, returning whether they do."""
+        others = sorted((review_id for review_id in self._recordings if review_id != keeping), key=lambda review_id: self._reviews[review_id].started if review_id in self._reviews else 0.0)
+        while others and sum(recording.bytes for recording in self._recordings.values()) + size > RECORDINGS_BYTES_MAX:
+            review_id = others.pop(0)
+            del self._recordings[review_id]
+            await self._remove_recording(review_id)
+        return sum(recording.bytes for recording in self._recordings.values()) + size <= RECORDINGS_BYTES_MAX
 
     def get(self, review_id: str) -> Review | None:
         """Returns a review by id, or None."""
@@ -192,7 +395,7 @@ class ReviewLibrary:
                 return await self._platform.files.read(frame_key(review.id, frame_id))
         return None
 
-    async def sample(self, monitor: dict[str, Any], frame: Frame, score: float, ts: float) -> bool:
+    async def sample(self, monitor: dict[str, Any], frame: Frame, score: float, ts: float, recording: bool) -> bool:
         """Considers one scored frame for a monitor's running print.
 
         A frame is kept as spaced when the print's current gap has passed since
@@ -204,6 +407,7 @@ class ReviewLibrary:
             frame: The frame that produced the score.
             score: Defect score in [0, 1].
             ts: Wall-clock time of the score.
+            recording: Whether prints are recorded for scrubbing in their review.
 
         Returns:
             Whether the kept frames changed.
@@ -211,6 +415,8 @@ class ReviewLibrary:
         score = round(score, 4)
         stops = self._stops
         review = self._running(monitor["id"]) or await self._begin(monitor["id"], ts)
+        if recording:
+            await self._record(review, frame, score, ts)
         spaced = review.of_kind("spaced")
         if not spaced or ts - spaced[-1]["ts"] >= review.spacing_s:
             await self._keep(review, frame, {"ts": ts, "score": score, "kind": "spaced"}, stops)
@@ -283,7 +489,8 @@ class ReviewLibrary:
 
         Raises:
             LookupError: If there is no such review.
-            ValueError: If the print is still running, was already sent, or no frame is left to send.
+            ValueError: If the print is still running, was already sent, or no
+                frame or more than a day's frames are left to send.
         """
         review = self._reviews.get(review_id)
         if review is None:
@@ -293,6 +500,8 @@ class ReviewLibrary:
         labels = {frame["id"]: "failure" if frame["id"] in failures else "good" for frame in review.frames if frame["id"] not in removed}
         if not labels:
             raise ValueError("there are no frames left to send")
+        if len(labels) > FRAMES_PER_DAY:
+            raise ValueError(f"a print sends at most {FRAMES_PER_DAY} frames, as many as the inbox takes from a hub in a day")
         sent = [frame_id for frame_id in (review.submission or {}).get("sent", []) if frame_id in labels]
         review.submission = {"labels": labels, "printer": printer, "sent": sent, "code": None, "retry_at": None}
         review.status = "queued"
@@ -373,10 +582,13 @@ class ReviewLibrary:
     def _stored_bytes(self) -> int:
         return sum(frame["size"] for review in self._reviews.values() for frame in review.frames)
 
+    async def _jpeg(self, frame: Frame) -> bytes | None:
+        """Encodes a frame at the size kept for review and sent for training, or None if it could not be."""
+        return await self._platform.encode_jpeg(await asyncio.to_thread(vision.shrink, frame.rgb, SHORTEST_PX))
+
     async def _keep(self, review: Review, frame: Frame, record: dict[str, Any], stops: int) -> None:
         """Stores a frame, unless its review was deleted or the review was switched off since ``stops`` was read."""
-        small = await asyncio.to_thread(vision.shrink, frame.rgb, SHORTEST_PX)
-        jpeg = await self._platform.encode_jpeg(small)
+        jpeg = await self._jpeg(frame)
         if not jpeg:
             return
         frame_id = uuid.uuid4().hex[:12]

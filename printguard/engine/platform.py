@@ -128,6 +128,27 @@ class FileStore(Protocol):
         """
         ...
 
+    async def append(self, key: str, data: bytes) -> int:
+        """Adds bytes to the end of a file, creating it if there is none.
+
+        Returns:
+            Where in the file the bytes begin.
+        """
+        ...
+
+    async def read_range(self, key: str, offset: int, size: int) -> bytes:
+        """Returns part of a stored file's bytes.
+
+        Args:
+            key: The file's name.
+            offset: Where the part begins.
+            size: How many bytes it runs to.
+
+        Raises:
+            FileNotFoundError: If nothing is stored under the key.
+        """
+        ...
+
     async def remove(self, key: str) -> None:
         """Deletes a stored file, if there is one."""
         ...

@@ -15,6 +15,7 @@ from .adapters import HttpFn
 
 ENDPOINT = "https://printguard-feedback.oliverbravery.uk"
 FRAME_BYTES_MAX = 150 * 1024
+FRAMES_PER_DAY = 60
 PRINTER_MODEL_MAX = 80
 TIMEOUT_S = 20.0
 
