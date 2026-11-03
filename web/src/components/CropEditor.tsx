@@ -5,12 +5,34 @@ import { renderVideoFrame, useVideoStream } from "../image";
 import type { Camera, Crop } from "../types";
 
 const MIN_SIZE_PX = 32;
+const LONGEST_RATIO = 4;
+const SQUARE_OVERLAP = 0.2;
 
-function watchedSquare(crop: Crop | null, frameAspect: number): Crop {
-  const region = crop ?? { x: 0, y: 0, w: 1, h: 1 };
+const WHOLE_FRAME: Crop = { x: 0, y: 0, w: 1, h: 1 };
+
+function squareIn(region: Crop, frameAspect: number): Crop {
   const w = Math.min(region.w, region.h / frameAspect);
   const h = w * frameAspect;
   return { x: region.x + (region.w - w) / 2, y: region.y + (region.h - h) / 2, w, h };
+}
+
+function isSquare(region: Crop, frameAspect: number): boolean {
+  return Math.abs(region.w * frameAspect - region.h) <= 0.01 * region.h;
+}
+
+function squareStarts(long: number, short: number): number[] {
+  const span = Math.min(long, short * LONGEST_RATIO);
+  const ratio = span / short;
+  if (ratio <= 1 + SQUARE_OVERLAP) return [(long - short) / 2];
+  const count = Math.ceil((ratio - SQUARE_OVERLAP) / (1 - SQUARE_OVERLAP));
+  const step = (span - short) / (count - 1);
+  return Array.from({ length: count }, (_, index) => (long - span) / 2 + index * step);
+}
+
+function scoredSquares(crop: Crop, frameAspect: number): Crop[] {
+  const width = crop.w * frameAspect;
+  if (width >= crop.h) return squareStarts(width, crop.h).map((start) => ({ x: crop.x + start / frameAspect, y: crop.y, w: crop.h / frameAspect, h: crop.h }));
+  return squareStarts(crop.h, width).map((start) => ({ x: crop.x, y: crop.y + start, w: crop.w, h: width }));
 }
 
 function toPercent(crop: Crop): PercentCrop {
@@ -37,6 +59,7 @@ export function CropEditor({
   const [editing, setEditing] = useState(false);
   const actions = useFocusKept<HTMLDivElement>();
   const [draft, setDraft] = useState<PercentCrop | null>(null);
+  const [freeform, setFreeform] = useState(false);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
 
   const brightness = camera.brightness ?? 1;
@@ -45,7 +68,9 @@ export function CropEditor({
   const needsCanvas = brightness !== 1 || contrast !== 1 || sharpness > 0 || rotation !== 0;
   const swap = rotation === 90 || rotation === 270;
   const frameAspect = dims ? (swap ? dims.h / dims.w : dims.w / dims.h) : 16 / 9;
-  const watched = toPercent(watchedSquare(crop, frameAspect));
+  const watched = toPercent(crop ?? squareIn(WHOLE_FRAME, frameAspect));
+  const region = editing && draft ? fromPercent(draft) : (crop ?? squareIn(WHOLE_FRAME, frameAspect));
+  const squares = crop || editing ? scoredSquares(region, frameAspect) : [region];
 
   useVideoStream(videoRef, camera);
 
@@ -100,6 +125,7 @@ export function CropEditor({
               className="btn !py-1 !px-2.5 !text-[0.62rem]"
               onClick={() => {
                 setDraft(watched);
+                setFreeform(!isSquare(fromPercent(watched), frameAspect));
                 setEditing(true);
               }}
             >
@@ -108,11 +134,36 @@ export function CropEditor({
           )}
         </div>
       </div>
+      {editing && (
+        <div role="group" aria-label="Crop shape" className="flex gap-1.5">
+          {[false, true].map((shape) => (
+            <button
+              key={String(shape)}
+              className={`btn flex-1 !py-1.5 !text-[0.66rem] ${freeform === shape ? "!border-accent !text-accent" : ""}`}
+              aria-pressed={freeform === shape}
+              onClick={() => {
+                setFreeform(shape);
+                if (shape) return;
+                const square = squareIn(region, frameAspect);
+                setDraft(toPercent(square));
+                onChange(square);
+              }}
+            >
+              {shape ? "Freeform" : "Square"}
+            </button>
+          ))}
+        </div>
+      )}
+      {editing && freeform && (
+        <p role="status" className="text-[0.7rem] leading-snug text-warn">
+          Square crops tend to do better at spotting defects than wide ones. A freeform crop still works, but detection might be worse.
+        </p>
+      )}
       <ReactCrop
         className="ReactCrop--no-animate"
         style={{ display: "block" }}
         crop={editing && draft ? draft : watched}
-        aspect={1}
+        aspect={freeform ? undefined : 1}
         minWidth={MIN_SIZE_PX}
         keepSelection
         disabled={!editing}
@@ -133,10 +184,23 @@ export function CropEditor({
             className={`absolute inset-0 w-full h-full object-contain pointer-events-none ${needsCanvas ? "invisible" : ""}`}
           />
           {needsCanvas && <canvas ref={canvasRef} className="absolute inset-0 m-auto pointer-events-none" />}
+          {squares.length > 1 &&
+            squares.map((square, index) => (
+              <span
+                key={index}
+                aria-hidden
+                className="pointer-events-none absolute border border-dashed border-accent/70"
+                style={{ left: `${square.x * 100}%`, top: `${square.y * 100}%`, width: `${square.w * 100}%`, height: `${square.h * 100}%` }}
+              />
+            ))}
         </div>
       </ReactCrop>
-      <p className="text-[0.7rem] leading-snug text-text-2">
-        The model only watches this square, so frame it tightly around the print.
+      <p role="status" className="text-[0.7rem] leading-snug text-text-2">
+        {!crop && !editing
+          ? "The model only watches this square until you crop the camera, so frame the print with a crop."
+          : squares.length > 1
+            ? `The model scores this crop as ${squares.length} overlapping squares, which takes ${squares.length} times the work. Frame it tightly around the print.`
+            : "The model watches this crop, so frame it tightly around the print."}
       </p>
     </div>
   );

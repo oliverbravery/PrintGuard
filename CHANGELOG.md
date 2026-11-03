@@ -12,6 +12,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 ### Added
 
 - Starting a print from the print library shows the printer's camera first, so you can check the build plate is on and the bed is clear.
+- A camera crop can be freeform, up to 4 to 1, so the model watches the whole bed of a wide camera. A wide crop is scored as overlapping squares and takes that many times the work. Crops stay square by default, since square ones tend to detect better. Thanks to @advgiraffe.
 - Each print is recorded, one frame every 5 seconds, so you can scrub through it when you review it and add frames PrintGuard didn't pick. Recordings are deleted once you send or skip the print, or after 7 days, and the Storage tab in Settings lists them with their sizes. Thanks to @advgiraffe.
 - The review sheet counts the frames you have chosen against the 60 a day the training inbox takes.
 

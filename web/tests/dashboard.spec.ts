@@ -3160,6 +3160,44 @@ test("a camera with no access code and a scrubbed address still lists", async ({
   await expect(page.getByText("rtsp://shed/live").first()).toBeVisible();
 });
 
+test("a crop wider than a square shows the squares the model scores and says what it costs", async ({ page }) => {
+  await dashboard(page, { engine: engine({ cameras: [camera({ crop: { x: 0, y: 0, w: 1, h: 1 } })] }) });
+  await page.evaluate(() => (window as any).__pg.getState().openDialog("cameras", "c1"));
+  const editor = page.getByRole("dialog");
+  await expect(editor.getByText("The model scores this crop as 2 overlapping squares, which takes 2 times the work.")).toBeVisible();
+  await expect(editor.locator(".border-dashed")).toHaveCount(2);
+
+  await editor.getByRole("button", { name: "Edit crop", exact: true }).click();
+  const shape = editor.getByRole("group", { name: "Crop shape" });
+  const warning = editor.getByText("Square crops tend to do better at spotting defects than wide ones.");
+  await expect(shape.getByRole("button", { name: "Freeform" })).toHaveAttribute("aria-pressed", "true");
+  await expect(warning).toBeVisible();
+  await shape.getByRole("button", { name: "Square" }).click();
+  await expect(warning).toBeHidden();
+  await page.evaluate(() => (window as any).__pg.getState().flushUpdates());
+  const square = (await lastSent(page, "camera.update")).patch.crop;
+  expect(square.w * (16 / 9)).toBeCloseTo(square.h, 2);
+  expect(square.x).toBeCloseTo((1 - 9 / 16) / 2, 2);
+
+  await editor.getByRole("button", { name: "Reset", exact: true }).click();
+  await expect(editor.getByText("The model only watches this square until you crop the camera")).toBeVisible();
+  await expect(editor.locator(".border-dashed")).toHaveCount(0);
+});
+
+test("a new crop is square until freeform is chosen, which warns that it might detect worse", async ({ page }) => {
+  await dashboard(page);
+  await page.evaluate(() => (window as any).__pg.getState().openDialog("cameras", "c1"));
+  const editor = page.getByRole("dialog");
+  await editor.getByRole("button", { name: "Set crop", exact: true }).click();
+  const shape = editor.getByRole("group", { name: "Crop shape" });
+  await expect(shape.getByRole("button", { name: "Square" })).toHaveAttribute("aria-pressed", "true");
+  await expect(editor.getByText(/Square crops tend to do better/)).toHaveCount(0);
+  await shape.getByRole("button", { name: "Freeform" }).click();
+  await expect(editor.getByRole("status").filter({ hasText: "A freeform crop still works, but detection might be worse." })).toBeVisible();
+  await editor.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(shape).toBeHidden();
+});
+
 test("a feed that has no size yet leaves the crop square where it can be dragged", async ({ page }) => {
   await dashboard(page);
   await page.evaluate(() => (window as any).__pg.getState().openDialog("cameras", "c1"));

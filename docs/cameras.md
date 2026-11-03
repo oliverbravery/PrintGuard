@@ -132,7 +132,7 @@ computer's cameras.
 
 ## After a camera is added
 
-Rename it from **Edit**, then set it up for the model. Rotation, the square crop, brightness,
+Rename it from **Edit**, then set it up for the model. Rotation, the crop, brightness,
 contrast, sharpness and the detection rate are all in
 [tuning the camera](monitoring.md#tuning-the-camera). Then bind it to a monitor.
 

@@ -46,7 +46,7 @@ from .registry import (
     TokenRegistry,
 )
 from .reviews import Review, ReviewLibrary, frame_key, stored_review
-from .scheduler import Scheduler
+from .scheduler import Scheduler, infer_squares
 from .settings import CHECKS, require_broker
 from .sockets import SocketBroker, SocketRefused
 from .tokens import new_token, stored_token
@@ -758,11 +758,13 @@ class Engine:
         Decodes the image on the platform and runs the same inference the scheduler
         uses - the stateless equivalent of a camera's latest per-frame result, for a
         frame the caller already holds rather than one PrintGuard pulls itself.
+        The whole image is watched, as a cropped camera's frame is, so a wide one
+        is scored square by square.
         """
         rgb = await self.platform.decode_jpeg(data)
         if rgb is None:
             raise RuntimeError("could not decode image")
-        result = await self.platform.infer(rgb)
+        result = await infer_squares(self.platform, vision.squares(rgb))
         return {**result, "defect_score": vision.defect_score(result)}
 
     def save(self) -> None:
