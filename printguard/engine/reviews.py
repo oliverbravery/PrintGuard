@@ -369,7 +369,7 @@ class ReviewLibrary:
         if not jpeg or not await self._make_room(len(jpeg), review.id):
             return
         offset = await self._platform.files.append(recording_key(review.id), jpeg)
-        if self._recordings.get(review.id) is not recording:
+        if self._recordings.get(review.id) is not recording or self._reviews.get(review.id) is not review:
             await self._remove_recording(review.id)
             return
         await self._platform.files.append(index_key(review.id), INDEX_ENTRY.pack(ts, score, offset, len(jpeg)))
@@ -526,7 +526,7 @@ class ReviewLibrary:
         review.submission, review.status = None, "skipped"
 
     async def stop_asking(self) -> None:
-        """Dismisses every print waiting to be reviewed or sent, and keeps only alert frames.
+        """Dismisses every print waiting to be reviewed or sent, keeps only alert frames and deletes every recording.
 
         The alert frames stay because the risk history shows them. A print
         still running loses the frames kept so far and is dismissed when it
@@ -541,7 +541,13 @@ class ReviewLibrary:
         for review in reviews:
             if review.status in ("ready", "queued"):
                 review.submission, review.status = None, "dismissed"
-        outcomes = await asyncio.gather(*(self._drop(review, [frame for frame in review.frames if frame["kind"] != "alert"]) for review in reviews), return_exceptions=True)
+        recorded = list(self._recordings)
+        self._recordings.clear()
+        outcomes = await asyncio.gather(
+            *(self._drop(review, [frame for frame in review.frames if frame["kind"] != "alert"]) for review in reviews),
+            *(self._remove_recording(review_id) for review_id in recorded),
+            return_exceptions=True,
+        )
         _raise_first(outcomes)
 
     def due(self, now: float) -> list[Review]:
@@ -549,7 +555,7 @@ class ReviewLibrary:
         return [review for review in self._reviews.values() if review.status == "queued" and (review.submission["retry_at"] or 0.0) <= now]
 
     async def forget(self, monitor_id: str) -> None:
-        """Deletes every review of a monitor, with their frames.
+        """Deletes every review of a monitor, with their frames and recordings.
 
         Every review is forgotten and every file is tried even when one cannot be deleted.
 
@@ -559,7 +565,7 @@ class ReviewLibrary:
         reviews = [review for review in self._reviews.values() if review.monitor_id == monitor_id]
         for review in reviews:
             self._reviews.pop(review.id)
-        outcomes = await asyncio.gather(*(self._drop(review, list(review.frames)) for review in reviews), return_exceptions=True)
+        outcomes = await asyncio.gather(*(self._discard(review) for review in reviews), return_exceptions=True)
         _raise_first(outcomes)
 
     def _running(self, monitor_id: str) -> Review | None:
@@ -613,6 +619,12 @@ class ReviewLibrary:
         _raise_first(outcomes)
 
     async def _discard(self, review: Review) -> None:
-        """Forgets a review before deleting its files, so two prints that begin together cannot both evict it."""
+        """Forgets a review and its recording before deleting their files, so two prints that begin together cannot both evict it.
+
+        Raises:
+            OSError: If a file could not be deleted, once the rest were tried.
+        """
         self._reviews.pop(review.id, None)
-        await self._drop(review, list(review.frames))
+        self._recordings.pop(review.id, None)
+        outcomes = await asyncio.gather(self._drop(review, list(review.frames)), self._remove_recording(review.id), return_exceptions=True)
+        _raise_first(outcomes)
