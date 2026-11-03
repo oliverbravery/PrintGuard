@@ -401,7 +401,10 @@ sequenceDiagram
 applies the camera's settings in a fixed order, so rotation, then the crop in the rotated
 frame's coordinates, then brightness, contrast and sharpness. `preprocess` resizes the
 shortest edge to 256 with Pillow's bilinear filter, converts to luminance, centre-crops to 224
-and normalises. `classify` picks the nearest class prototype by Euclidean distance, and an embedding that
+and normalises. `squares` splits a cropped frame wider than a square into squares the height of
+the frame, overlapping by at least `SQUARE_OVERLAP`, 0.2, up to `LONGEST_RATIO` times as wide,
+and `scheduler.infer_squares` scores each and keeps the riskiest result. An uncropped camera is
+scored once on its middle square, and `/classify` scores the whole image square by square. `classify` picks the nearest class prototype by Euclidean distance, and an embedding that
 isn't finite raises, so the scheduler reports an inference error for it instead of scoring the frame.
 
 `defect_score` maps the two distances to `0.5 * (1 + tanh((success² - failure²) / 2))`, the

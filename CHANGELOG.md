@@ -12,6 +12,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 ### Added
 
 - Starting a print from the print library shows the printer's camera first, so you can check the build plate is on and the bed is clear.
+- A camera crop can be freeform, up to 4 to 1, so the model watches the whole bed of a wide camera. A wide crop is scored as overlapping squares and takes that many times the work. Crops stay square by default, since square ones tend to detect better. Thanks to @advgiraffe.
 
 ### Changed
 

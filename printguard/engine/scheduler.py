@@ -6,7 +6,9 @@ yields the sustainable total rate, which is water-filled across cameras so no
 camera is allocated beyond its effective rate (its native frame rate, held to
 the cap its user set) and spare capacity flows to cameras that can use it.
 Frames are grabbed at dispatch time and identified by sequence, so a frame is
-never inferred twice and results always describe the present.
+never inferred twice and results always describe the present. A camera cropped
+wider than a square is scored square by square, which the latency estimate
+takes in like any other cost.
 """
 
 from __future__ import annotations
@@ -16,6 +18,8 @@ import functools
 import logging
 import time
 from typing import Any, Awaitable, Callable
+
+import numpy as np
 
 from . import logs, vision
 from .platform import Frame, Platform
@@ -30,6 +34,24 @@ ERROR_THROTTLE_S = 30.0
 
 ResultSink = Callable[[Camera, Frame, dict[str, Any]], Awaitable[None]]
 ErrorSink = Callable[[str], None]
+
+
+async def infer_squares(platform: Platform, frames: list[np.ndarray]) -> dict[str, Any]:
+    """Scores each square of a frame and answers with the riskiest.
+
+    A defect anywhere in the frame is a defect, so the frame is as risky as
+    its worst square.
+
+    Args:
+        platform: Runs the model.
+        frames: The squares, as ``vision.squares`` gives them, or the whole
+            frame when only its middle square is watched.
+
+    Returns:
+        The classify() result of the square with the highest defect score.
+    """
+    results = [await platform.infer(frame) for frame in frames]
+    return max(results, key=vision.defect_score)
 
 
 def _interval(camera: Camera) -> float:
@@ -180,7 +202,7 @@ class Scheduler:
                 contrast=camera.contrast,
                 sharpness=camera.sharpness,
             )
-            result = await self._platform.infer(rgb)
+            result = await infer_squares(self._platform, vision.squares(rgb) if camera.crop else [rgb])
             elapsed_ms = (time.monotonic() - started) * 1000.0
             self.infer_ms = (
                 elapsed_ms

@@ -161,7 +161,7 @@ unaffected.
 | `GET` | `/cameras` | List cameras with rate, health and latest classification |
 | `GET` | `/cameras/{id}` | One camera |
 | `GET` | `/cameras/{id}/frame` | Freshest frame as `image/jpeg`. `404` while the camera is on standby or offline, since it has no current frame |
-| `POST` | `/classify` | Classify a supplied frame, a JPEG or PNG body of up to 32 MB and 50 megapixels. No registered camera needed. A file over 32 MB is a `413`, and one over 50 megapixels or that isn't a JPEG or PNG is a `400`. Two are read and scored at a time, here and through the MCP tool together. Eight more wait without their body being read, and one past that is a `503` |
+| `POST` | `/classify` | Classify a supplied frame, a JPEG or PNG body of up to 32 MB and 50 megapixels. No registered camera needed. A frame wider than a square is scored as overlapping squares and answered with the riskiest, as a cropped camera is. A file over 32 MB is a `413`, and one over 50 megapixels or that isn't a JPEG or PNG is a `400`. Two are read and scored at a time, here and through the MCP tool together. Eight more wait without their body being read, and one past that is a `503` |
 | `GET` | `/prints` | List the print library, each file with its format, size, tags and what the slicer wrote into it |
 | `GET` | `/prints/{id}` | One print file |
 | `GET` | `/prints/{id}/file` | Download a print file as the library keeps it |
