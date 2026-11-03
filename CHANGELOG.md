@@ -9,6 +9,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [2.6.5] - 2026-11-03
 
+### Security
+
+- Authlib and joserfc, which the MCP server depends on, are updated past 11 advisories in how they check signed tokens, one of them critical.
+- dnspython is updated to 2.9.1 for an advisory that let a crafted DNS name use excessive CPU.
+
 ## [2.6.4] - 2026-10-27
 
 ### Added
