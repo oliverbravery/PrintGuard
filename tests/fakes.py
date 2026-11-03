@@ -94,6 +94,14 @@ class FakeFileStore:
             raise FileNotFoundError(key)
         return self.blobs[key]
 
+    async def append(self, key: str, data: bytes) -> int:
+        offset = len(self.blobs.get(key, b""))
+        self.blobs[key] = self.blobs.get(key, b"") + data
+        return offset
+
+    async def read_range(self, key: str, offset: int, size: int) -> bytes:
+        return (await self.read(key))[offset : offset + size]
+
     async def remove(self, key: str) -> None:
         await asyncio.sleep(0)
         self.blobs.pop(key, None)

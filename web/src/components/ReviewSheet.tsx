@@ -1,10 +1,11 @@
 import { Maximize2 } from "lucide-react";
 import { useEffect, useId, useState } from "react";
-import { clock, framesLabel, isDailyLimit, LIMIT_REASON, sending, waitingMessage } from "../review";
+import { clock, day, framesLabel, FRAMES_PER_DAY, isDailyLimit, LIMIT_REASON, megabytes, reviewable, sending, waitingMessage } from "../review";
 import { useLazySnapshot } from "../snapshot";
 import { useStore } from "../store";
 import type { Monitor, ReviewFrame, ReviewSummary } from "../types";
 import { Sheet } from "./Dialog";
+import { RecordingScrubber } from "./RecordingScrubber";
 import { SnapshotLightbox } from "./SnapshotLightbox";
 
 type Outcome = "fine" | "failed";
@@ -55,6 +56,7 @@ function FrameCard({
         <span className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-2 py-1.5">
           <span className={`chip ${failure ? "chip-bad" : "chip-ok"}`}>{label}</span>
           <span className="label ml-auto">
+            {frame.kind === "added" && "added · "}
             {clock(frame.ts)} · {(frame.score * 100).toFixed(0)}%
           </span>
         </span>
@@ -120,19 +122,26 @@ function Progress({ review, onClose }: { review: ReviewSummary; onClose: () => v
 }
 
 export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monitor: Monitor }) {
-  const { engine, send, isPending, openReview, fetchReview, reviewData, reconnecting } = useStore();
+  const { engine, send, isPending, openReview, openSettings, fetchReview, reviewData, reconnecting } = useStore();
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [relabelled, setRelabelled] = useState<Set<string>>(new Set());
   const [removed, setRemoved] = useState<Set<string>>(new Set());
   const [printer, setPrinter] = useState("");
   const [enlarged, setEnlarged] = useState<ReviewFrame | null>(null);
-  const loaded = reviewData[review.id]?.frames;
+  const detail = reviewData[review.id];
+  const loaded = detail?.frames;
   const frames = loaded ?? [];
   const switchedOff = engine?.settings.feedback === "off";
   const kept = frames.filter((frame) => !removed.has(frame.id));
   const allLeftOut = frames.length > 0 && kept.length === 0;
-  const showsFailure = (frame: ReviewFrame) => (outcome === "failed" && frame.kind === "alert") !== relabelled.has(frame.id);
+  const over = kept.length - FRAMES_PER_DAY;
+  const pickedByDefault = (frame: ReviewFrame) => (frame.kind === "added" ? frame.label === "failure" : outcome === "failed" && frame.kind === "alert");
+  const showsFailure = (frame: ReviewFrame) => pickedByDefault(frame) !== relabelled.has(frame.id);
   const close = () => openReview(null);
+  const manageStorage = () => {
+    close();
+    openSettings("storage");
+  };
   const outcomeLabelId = useId();
 
   useEffect(() => {
@@ -157,7 +166,7 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
     <Sheet title={`${monitor.name} · review`} onClose={close} closeLabel="Close print review" width="sm:w-[680px]">
       {review.status === "running" && <p className="px-5 py-4 text-sm text-text-1">This print is still running. You can review it once it ends.</p>}
       {(review.status === "queued" || review.status === "sent") && <Progress review={review} onClose={close} />}
-      {(review.status === "ready" || review.status === "dismissed") && (
+      {reviewable(review) && (
         <div className="space-y-4 px-5 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <p className="text-sm text-text-1">
             PrintGuard kept {framesLabel(review.frames)} from this print. Label them and send them to me, and I'll use them to train the detection model.
@@ -179,16 +188,40 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
             <>
               <div className="flex items-start gap-3">
                 <p className="flex-1 text-[0.7rem] leading-relaxed text-text-2">
+                  PrintGuard picked these frames.{" "}
                   {outcome === "failed"
                     ? "Alert frames are marked as real failures. Press a frame to change its label. Use the × to leave one out, and Undo to put it back."
-                    : "Every frame is marked good. Press one to change it, or use the × to leave it out and Undo to put it back."}
+                    : "Every frame it picked is marked good. Press one to change it, or use the × to leave it out and Undo to put it back."}
                 </p>
                 {frames.length > 1 && (
-                  <button className="btn shrink-0" onClick={() => setRemoved(new Set(allLeftOut ? [] : frames.map((frame) => frame.id)))}>
+                  <button
+                    className="btn shrink-0"
+                    onClick={() => setRemoved(new Set((allLeftOut ? frames.filter((frame) => frame.kind === "added") : frames).map((frame) => frame.id)))}
+                  >
                     {allLeftOut ? "Put all back" : "Leave all out"}
                   </button>
                 )}
               </div>
+              {loaded && (
+                <div className="space-y-1.5">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="label">Frames to send</span>
+                    <span className={`mono text-[0.72rem] ${over > 0 ? "text-warn" : "text-text-0"}`}>
+                      {kept.length} of {FRAMES_PER_DAY}
+                    </span>
+                  </div>
+                  <div aria-hidden className="h-1 overflow-hidden rounded-sm bg-line-1">
+                    <div className={`h-full ${over > 0 ? "bg-warn" : "bg-accent"}`} style={{ width: `${Math.min(100, (kept.length / FRAMES_PER_DAY) * 100)}%` }} />
+                  </div>
+                  {over >= 0 && (
+                    <p role="status" className="text-[0.7rem] leading-relaxed text-warn">
+                      {over > 0
+                        ? `You can send ${FRAMES_PER_DAY} frames a day. Leave ${over} out to send this print.`
+                        : `You can send ${FRAMES_PER_DAY} frames a day. Leave one out to add another.`}
+                    </p>
+                  )}
+                </div>
+              )}
               {!loaded && (
                 <p role="status" className="mono text-[0.7rem] text-text-2">
                   loading the frames
@@ -209,6 +242,13 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
                   />
                 ))}
               </div>
+              {detail && detail.timeline.length > 1 && !switchedOff && (
+                <RecordingScrubber
+                  review={detail}
+                  full={over >= 0}
+                  onAdd={(index, label) => send({ cmd: "review.add", id: review.id, index, label })}
+                />
+              )}
               <input
                 className="field"
                 aria-label="Printer model"
@@ -231,13 +271,23 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
             </>
           )}
           {switchedOff && <p className="text-[0.7rem] leading-relaxed text-text-2">The end-of-print review is switched off in Settings, so nothing can be sent.</p>}
+          {review.recording && review.recording.expires !== null && (
+            <p className="flex flex-wrap items-baseline gap-x-2 text-[0.7rem] leading-relaxed text-text-2">
+              <span className="flex-1">
+                This print's recording is {megabytes(review.recording.bytes)} and is deleted on {day(review.recording.expires)}, or once you send or skip it.
+              </span>
+              <button type="button" className="text-accent underline hover:opacity-80" onClick={manageStorage}>
+                Manage storage
+              </button>
+            </p>
+          )}
           <div className="flex gap-2">
             {review.status === "ready" && (
               <button className="btn flex-1" onClick={() => (send({ cmd: "review.dismiss", id: review.id }), close())}>
                 Not this print
               </button>
             )}
-            <button className="btn btn-primary flex-1" disabled={switchedOff || !outcome || kept.length === 0 || isPending("review.send")} onClick={submit}>
+            <button className="btn btn-primary flex-1" disabled={switchedOff || !outcome || kept.length === 0 || over > 0 || isPending("review.send")} onClick={submit}>
               Send {framesLabel(loaded ? kept.length : review.frames)}
             </button>
           </div>

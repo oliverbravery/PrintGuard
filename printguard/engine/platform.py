@@ -101,7 +101,7 @@ async def as_chunks(data: bytes) -> AsyncIterator[bytes]:
 
 
 class FileStore(Protocol):
-    """Where uploaded print files, their previews and kept frames live.
+    """Where uploaded print files, their previews, kept frames and print recordings live.
 
     A sliced file or a JPEG is far too large for the state the engine persists
     as JSON, so the bytes are kept here under a key the engine chooses and the
@@ -122,6 +122,27 @@ class FileStore(Protocol):
 
     async def read(self, key: str) -> bytes:
         """Returns a stored file's bytes.
+
+        Raises:
+            FileNotFoundError: If nothing is stored under the key.
+        """
+        ...
+
+    async def append(self, key: str, data: bytes) -> int:
+        """Adds bytes to the end of a file, creating it if there is none.
+
+        Returns:
+            Where in the file the bytes begin.
+        """
+        ...
+
+    async def read_range(self, key: str, offset: int, size: int) -> bytes:
+        """Returns part of a stored file's bytes.
+
+        Args:
+            key: The file's name.
+            offset: Where the part begins.
+            size: How many bytes it runs to.
 
         Raises:
             FileNotFoundError: If nothing is stored under the key.

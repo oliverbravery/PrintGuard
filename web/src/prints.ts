@@ -1,6 +1,6 @@
 import type { HeaterName } from "./components/PrinterControls";
 import { tooLargeToDraw, type ToolpathSource } from "./toolpath";
-import type { EngineState, PrintFile, PrintMeta, Printer } from "./types";
+import type { Camera, EngineState, PrintFile, PrintMeta, Printer } from "./types";
 
 export const FORMATS = ["gcode", "gco", "g", "bgcode", "3mf"];
 export const ACCEPT = [...FORMATS.map((format) => `.${format}`), "application/octet-stream"].join(",");
@@ -47,6 +47,11 @@ export function eligiblePrinters(engine: EngineState, print: PrintFile): Printer
   return engine.printers.filter(
     (p) => (print.printer_ids.length ? print.printer_ids.includes(p.id) : true) && printerAccepts(engine, p, print.ext),
   );
+}
+
+export function bedCamera(engine: EngineState, printerId: string): Camera | undefined {
+  const monitored = engine.monitors.find((m) => m.printer_id === printerId)?.camera_id;
+  return engine.cameras.find((c) => c.id === monitored) ?? engine.cameras.find((c) => c.printer_id === printerId);
 }
 
 export function formatDuration(seconds: number): string {

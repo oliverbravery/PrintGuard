@@ -169,6 +169,12 @@ describe("uploading a frame", () => {
     expect(stored!.customMetadata).toMatchObject({ label: "failure", kind: "alert", score: "0.12", printer: "Prusa MK4", version: "2.6.0" });
   });
 
+  it("takes a frame the reviewer added from the print's recording", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    expect((await upload(token, "203.0.113.16", frameId(9), JPEG, { label: "failure", kind: "added" })).status).toBe(201);
+    expect((await upload(token, "203.0.113.16", frameId(10), JPEG, { kind: "scrubbed" })).status).toBe(400);
+  });
+
   it("turns away a made-up token, an oversized body, a file that is not a JPEG and unknown labels", async () => {
     const token = await issueToken(env.TOKEN_SECRET);
     const forged = `${"0".repeat(32)}.${"0".repeat(64)}`;

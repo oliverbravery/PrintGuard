@@ -140,8 +140,8 @@ export const GUIDE: GuideSection[] = [
       <>
         A camera is any video source PrintGuard can read, so a USB device, an RTSP, RTMP, MJPEG or
         WebRTC (WHEP) stream URL, or a camera published from this device. Printers that expose a
-        webcam register theirs automatically. The model only watches a square of each view, shown
-        in the camera's crop editor, so crop it tightly around the print.
+        webcam register theirs automatically. The model watches the part of each view shown in the
+        camera's crop editor, so crop it tightly around the part of the bed you print on.
       </>
     ),
     action: { label: "Open cameras", dialog: "cameras" },
@@ -172,7 +172,8 @@ export const GUIDE: GuideSection[] = [
       <>
         Drop sliced files onto the hub to preview their toolpath, name them and correct their temperatures before
         they're uploaded. Each keeps the preview, print time and filament the slicer wrote into it. Tag a file with the printers it was sliced for and it can only ever start on those. Send it
-        to an idle printer from the library or from the 3D viewer, which lets you orbit the toolpath layer by layer.
+        to an idle printer from the library or from the 3D viewer, which lets you orbit the toolpath layer by layer. The
+        printer's camera comes up first so you can check the bed is clear.
       </>
     ),
     action: { label: "Open the library", dialog: "prints" },

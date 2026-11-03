@@ -22,7 +22,6 @@ from ..engine import gcode
 from ..engine.engine import Engine
 from ..engine.prints import FORMATS, extension
 from ..engine.registry import PrintFile
-from ..engine.reviews import frame_key
 from .platform import DiskFileStore
 
 logger = logging.getLogger(__name__)
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 MAX_PRINT_BYTES = 512 * 1024 * 1024
 MAX_SAMPLE_BYTES = gcode.HEAD_BYTES + gcode.TAIL_BYTES + 1
 ADD_TIMEOUT_S = 120.0
-GENERATED_NAME = re.compile(rf"^(?:[0-9a-f]{{8}}\.(?:{'|'.join(FORMATS)}|thumb)|review-[0-9a-f]+-[0-9a-f]+\.jpg)$")
+GENERATED_NAME = re.compile(rf"^(?:[0-9a-f]{{8}}\.(?:{'|'.join(FORMATS)}|thumb)|review-[0-9a-f]+-[0-9a-f]+\.jpg|recording-[0-9a-f]+\.(?:frames|index))$")
 THUMBNAIL_CACHE_CONTROL = "private, max-age=31536000, immutable"
 
 
@@ -147,7 +146,7 @@ async def sweep_orphans(engine: Engine, *, unnamed: bool) -> None:
             state file, since one restored later may name it too.
     """
     named = {key for record in engine.prints.values() for key in (record.file_key, record.thumbnail_key)}
-    named |= {frame_key(review["id"], frame["id"]) for review in engine.reviews.persisted() for frame in review["frames"]}
+    named |= engine.reviews.stored_keys()
     orphans = [
         path
         for path in store_of(engine).root.iterdir()

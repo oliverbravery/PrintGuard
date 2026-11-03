@@ -136,8 +136,15 @@ export interface Snapshot {
 
 export interface ReviewFrame extends Omit<Snapshot, "action"> {
   action?: string;
-  kind: "alert" | "near" | "spaced";
+  kind: "alert" | "near" | "spaced" | "added";
+  label?: "good" | "failure";
   size: number;
+}
+
+export interface RecordingSummary {
+  frames: number;
+  bytes: number;
+  expires: number | null;
 }
 
 export interface ReviewSummary {
@@ -145,9 +152,11 @@ export interface ReviewSummary {
   monitor_id: string;
   started: number;
   ended: number | null;
-  status: "running" | "ready" | "dismissed" | "queued" | "sent";
+  status: "running" | "ready" | "dismissed" | "skipped" | "queued" | "sent";
   frames: number;
+  bytes: number;
   alerts: number;
+  recording: RecordingSummary | null;
   chosen: number;
   sent: number;
   code: string | null;
@@ -156,6 +165,7 @@ export interface ReviewSummary {
 
 export interface Review extends Omit<ReviewSummary, "frames"> {
   frames: ReviewFrame[];
+  timeline: [number, number][];
 }
 
 export interface HistoryAlert {
@@ -413,6 +423,7 @@ export interface EngineState {
     fault_grace_s: number;
     preheat: PreheatPreset[];
     feedback: "ask" | "off";
+    recording_days: 0 | 3 | 7 | 14;
   };
   secrets_set?: { notifiers: Record<string, string[]>; mqtt: string[] };
   tokens: ApiToken[];
