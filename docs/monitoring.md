@@ -82,7 +82,7 @@ the frames the [API](api.md) returns.
 | Setting | Default | Range | What it does |
 |---|---|---|---|
 | **Rotation** | 0° | 0°, 90°, 180°, 270° | Sets a camera mounted sideways or upside down upright |
-| **Crop region** | The middle square | Any region up to 4 times as wide as it is tall | The part of the view the model watches |
+| **Crop region** | The middle square | A square, or a freeform region up to 4 times as wide as it is tall | The part of the view the model watches |
 | **Brightness** | 1 | 0.25 to 2 | Lifts a dim chamber or tames a bright one |
 | **Contrast** | 1 | 0.25 to 2 | Separates the print from a background of a similar shade |
 | **Sharpness** | 0 | 0 to 2 | Brings out strands on a soft camera. The live view sharpens the picture at the size it's shown, so it looks stronger there than in the frame the model gets |
@@ -91,7 +91,9 @@ the frames the [API](api.md) returns.
 The model is trained on squares. Until you crop a camera it only watches the middle square of the
 frame, so on a wide camera the sides of the bed go unwatched. Crop it to the part of the bed you
 print on, leaving a little room, since the model trims a sixteenth off each edge of a square
-before it scores it. A crop wider than a square is scored as overlapping squares the height of
+before it scores it. A crop is square unless you choose **Freeform**. Square crops tend to do
+better at spotting defects, so the editor warns you when you switch. A crop wider than a square is
+scored as overlapping squares the height of
 the crop, each overlapping the next by at least a fifth, and a frame is as risky as its worst
 square. The crop editor draws the squares, and each one adds the cost of scoring a frame, so a
 crop twice as wide as it is tall halves the detection rate your hardware can sustain. Past 4 to 1
