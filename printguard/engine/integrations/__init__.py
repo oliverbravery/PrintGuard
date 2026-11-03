@@ -16,10 +16,11 @@ from .elegoo import ElegooAdapter
 from .klipper import KlipperAdapter
 from .octoprint import OctoPrintAdapter
 from .prusa import PrusaAdapter
+from .ultimaker import UltimakerAdapter
 
 INTEGRATIONS: dict[str, IntegrationAdapter] = {
     adapter.id: adapter
-    for adapter in (OctoPrintAdapter(), KlipperAdapter(), PrusaAdapter(), BambuAdapter(), ElegooAdapter())
+    for adapter in (OctoPrintAdapter(), KlipperAdapter(), PrusaAdapter(), BambuAdapter(), ElegooAdapter(), UltimakerAdapter())
 }
 
 
