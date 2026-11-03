@@ -110,7 +110,7 @@ Four smaller protocols hang off it:
 | Protocol | Members | On the hub |
 |---|---|---|
 | `FrameSource` | `fps`, `online`, `standby`, `grab()`, `set_monitoring(active)`, `close()` | A PyAV reader thread per camera |
-| `FileStore` | `store(key, chunks)`, `read(key)`, `remove(key)` | Print files, their previews and the frames kept from each print, on disk under `data/prints/` and written readable only by the hub's user |
+| `FileStore` | `store(key, chunks)`, `read(key)`, `append(key, data)`, `read_range(key, offset, size)`, `remove(key)` | Print files, their previews, the frames kept from each print and each print's recording, on disk under `data/prints/` and written readable only by the hub's user |
 | `PluginRuntime` | `attach()`, `on_event()`, `reload()`, `serve()`, `authorise()`, `gate_paths()`, `close()` | QuickJS in WebAssembly, under wasmtime |
 | `Socket`, in [`engine/sockets.py`](../printguard/engine/sockets.py) | `send(text)`, `close()` | One `websockets` connection and the task reading it |
 
@@ -152,17 +152,17 @@ Commands, UI to engine. The table is the engine's `_handlers` map:
 | Printers | `printer.add`, `printer.update`, `printer.remove`, `printer.action`, `printer.heat`, `printer.test`, `printer.cameras.refresh` |
 | Prints | `print.add`, `print.update`, `print.remove`, `print.start` |
 | Monitors | `monitor.add`, `monitor.update`, `monitor.remove` |
-| History | `history.get`, `snapshot.get`, `review.get`, `review.send`, `review.retry`, `review.dismiss` |
+| History | `history.get`, `snapshot.get`, `review.get`, `review.add`, `review.send`, `review.retry`, `review.dismiss`, `recording.frame`, `recording.delete` |
 | Plugins | `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.code`, `plugin.catalogue`, `plugin.page`, `plugin.http`, `plugin.socket`, `plugin.call`, `plugin.answer`, `plugin.publish`, `plugin.secrets`, `plugin.oauth`, `plugin.effect` |
 | System | `settings.update`, `notify.test`, `notify.send`, `token.create`, `token.remove`, `update.check`, `update.releases`, `report.send`, `report.bundle` |
 
 Every command may carry a `req_id`, echoed on the responding event so the UI can resolve
 pending requests. A command that succeeds ends with a `state` event carrying that `req_id`,
-or with its own event for the four that only read, and one that fails ends with an `error`,
+or with its own event for the five that only read, and one that fails ends with an `error`,
 an unknown command included. `camera.remove`, `printer.update`, `printer.remove`, `printer.cameras.refresh`,
 `monitor.remove`, `print.remove`, `settings.update`, `plugin.install`, `plugin.remove`, `plugin.update` and `plugin.secrets` are `FINISHING_COMMANDS`. Each runs as a task `Engine._background`
 holds, so it finishes when the socket that sent it closes or its request times out. An id nothing matches fails a remove as it does an update, and a monitor or camera patch is refused for a setting it doesn't have or
-a value its setting doesn't take, where a number out of range is clamped. `camera.add` refuses a source whose device, path or address isn't text. `settings.update` takes `notifiers`, `update_check`, `mqtt`, `theme`, `themes`, `glass`, `layout`, `inference_runtime`, `catalogue_url`, `fault_grace_s`, `preheat` and `feedback`, and refuses any other key. A printer's config, a notifier's config and `mqtt` are refused for a value that isn't of the type its field declares, and `mqtt` for a field it doesn't have. A heater target is the
+a value its setting doesn't take, where a number out of range is clamped. `camera.add` refuses a source whose device, path or address isn't text. `settings.update` takes `notifiers`, `update_check`, `mqtt`, `theme`, `themes`, `glass`, `layout`, `inference_runtime`, `catalogue_url`, `fault_grace_s`, `preheat`, `feedback` and `recording_days`, which is 0, 3, 7 or 14, and refuses any other key. A printer's config, a notifier's config and `mqtt` are refused for a value that isn't of the type its field declares, and `mqtt` for a field it doesn't have. A heater target is the
 exception, and `printer.heat` refuses one outside 0 to 350 for the nozzle or 0 to 150 for the bed. An error that carries
 no text of its own, as a timeout does, is reported by its type.
 
@@ -176,14 +176,14 @@ Events, engine to UI:
 
 | Event | Carries |
 |---|---|
-| `state` | Full snapshot, on connect, after every command that can change it, after an update check or a plugin's sign-in, and on a 1 s ticker. `history.get`, `snapshot.get`, `review.get` and `camera.snapshot` only read, so they save nothing and answer with their own event alone. The commands in `UNSAVED_COMMANDS`, such as `discover`, `printer.test`, `notify.test`, `update.check`, `report.bundle` and a plugin's requests, change nothing that is stored, so they save nothing either and their closing `state` goes only to the transport that sent them. The fields are listed below |
+| `state` | Full snapshot, on connect, after every command that can change it, after an update check or a plugin's sign-in, and on a 1 s ticker. `history.get`, `snapshot.get`, `review.get`, `recording.frame` and `camera.snapshot` only read, so they save nothing and answer with their own event alone. The commands in `UNSAVED_COMMANDS`, such as `discover`, `printer.test`, `notify.test`, `update.check`, `report.bundle` and a plugin's requests, change nothing that is stored, so they save nothing either and their closing `state` goes only to the transport that sent them. The fields are listed below |
 | `result` | One monitor's score, with the verdict at its threshold, the margin and `ms`, the scheduler's smoothed inference latency, sampled at up to 5 Hz per monitor |
 | `alert` | A sustained defect, with its score and the action taken: `none`, `pause`, `cancel` or `failed` |
 | `warning` | Watchdog conditions and their recovery, an MQTT broker the bridge cannot reach, once when the outage starts or its cause changes and once when it ends, what the platform reports through `take_notices()`, a printer whose cameras could not be listed or opened, an alert whose frame could not be encoded, which went without a picture, and a transport sink that raised and was unsubscribed. `recovered` says which way it goes |
 | `device` | A printer's status, progress, job, time left and heaters, when a read finds them changed and after a command sent to the printer |
 | `print_started` | A file from the library has been sent to a printer and started |
 | `discovered` | A command response |
-| `printer_test`, `notify_test`, `history`, `snapshot`, `review` | A connection test's outcome, risk history buckets, a kept frame's JPEG, and the frames kept from one print, each delivered only to the transport that asked |
+| `printer_test`, `notify_test`, `history`, `snapshot`, `review`, `recording_frame` | A connection test's outcome, risk history buckets, a kept frame's JPEG, the frames kept from one print with the time and score of every recorded frame, and one recorded frame's JPEG, each delivered only to the transport that asked |
 | `review_sent` | How far a reviewed print's upload got, with the refusal code and retry time when it is queued |
 | `frame` | A camera's current picture as a JPEG, the answer to `camera.snapshot`. A camera on standby or offline has none, and the command fails |
 | `releases` | The changelog history the update dialog browses |
@@ -202,7 +202,7 @@ Events, engine to UI:
 | `host`, `version`, `update` | The deployment, the running version and the release status, which is `null` until a check has answered |
 | `cameras`, `printers`, `prints`, `tokens`, `plugins` | The public record of everything in each registry. A token's is its id, name, scope, hint and creation time, never its hash, and a plugin's leaves out its code and the values of its credentials. A printer's `config` goes without its secret fields, which its `secrets_set` names where one is stored, and a camera's `source` without a Bambu access code. Every address in either is scrubbed of its login |
 | `monitors` | Each monitor's settings with `watching`, its latest `result` and, once it has alerted, its `alert` |
-| `reviews`, `feedback_hub` | A count of the frames kept from each print with its review status, and the public half of the hub's training inbox token |
+| `reviews`, `feedback_hub` | A count and size of the frames kept from each print with its review status and its recording's frame count, size and expiry, and the public half of the hub's training inbox token |
 | `startup_warnings` | Strings for what start found wrong: a GPU skipped, a setting reset to its default, a record dropped with its reason, one a past version accepted that this one refuses. They are kept until the hub restarts, since nobody is connected to hear the `warning` event, and the dashboard toasts each once per page load |
 | `settings` | Notifier configs without their secret fields, MQTT without its password, theme, custom themes, glass, layout, inference runtime, catalogue URL, grace period, preheat presets, and whether to check for updates and ask for print reviews |
 | `secrets_set` | The names of the stored secret fields of each notifier and of MQTT, as `{"notifiers": {provider: [...]}, "mqtt": [...]}`. A form reads it to say a field is saved |
@@ -459,12 +459,25 @@ printer has not been read yet, as after its connection is edited, is watched but
 | `alert` | The last 40 | The frame that fired each alert, which is what the risk history gallery shows |
 | `near` | The top 5 | The highest scores under the threshold, at least a minute apart |
 | `spaced` | Up to 19 | One per interval, and every other one is dropped and the interval doubled at 20, so a long print keeps no more than a short one |
+| `added` | Up to 60 | Frames the reviewer added from the print's recording |
 
 The hub holds the last 20 prints or 200 MB and drops the oldest finished print first, so
 prints still running never push out every finished one. A `queued` print is never dropped and
 isn't counted in the 20. A print that ends with no frames kept
 is `dismissed`, since there is nothing to review, and is dropped before any print that has frames. The
 `state` snapshot carries only a count per print, and `review.get` returns one print's frames.
+
+While `settings.recording_days` is above 0, a running print is also recorded, one frame every
+5 seconds, for scrubbing in its review. A recording is two files in the `files` store, the JPEGs
+written end to end with `append` and an index of fixed 24-byte entries holding each frame's time,
+score, offset and size, so a frame is read back with `read_range` and an index cut short when the
+hub stopped loses only its last entry. Indexes are read back at start. The ticker deletes a
+recording once its print is no longer `running` or `ready`, `recording_days` after the print
+ended, when recording is switched off or when `recording.delete` names it, which also stops a
+running print being recorded further. Recordings are capped at 2 GB together, and the oldest
+prints' recordings go first to make room. `review.add` copies one recorded frame into the
+print's kept frames as kind `added`, with the label the reviewer added it as, and `review.send`
+refuses more than 60 frames, the inbox's daily limit for one hub.
 
 A finished print can be [sent as training data](feedback.md). `review.send` records which
 frames show a failure and which were left out, and

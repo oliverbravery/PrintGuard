@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { type ReactNode, useId } from "react";
 
 export function Slider({
   label,
@@ -8,6 +8,7 @@ export function Slider({
   step,
   hint,
   format = (v) => v.toFixed(2),
+  marks,
   onChange,
 }: {
   label: string;
@@ -17,6 +18,7 @@ export function Slider({
   step: number;
   hint?: string;
   format?: (v: number) => string;
+  marks?: ReactNode;
   onChange: (v: number) => void;
 }) {
   const labelId = useId();
@@ -27,6 +29,11 @@ export function Slider({
         <span id={labelId} className="label">{label}</span>
         <span className="mono text-[0.72rem] text-text-0">{format(value)}</span>
       </div>
+      {marks && (
+        <span aria-hidden className="relative mx-[7px] block h-2 pointer-coarse:mx-3">
+          {marks}
+        </span>
+      )}
       <input
         type="range"
         min={min}

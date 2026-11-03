@@ -3213,6 +3213,14 @@ async def _review(engine: Engine, review_id: str) -> dict:
     return next(e for e in await engine.request({"cmd": "review.get", "id": review_id}) if e["event"] == "review")
 
 
+def _recording_files(platform: FakePlatform) -> list[str]:
+    return sorted(key for key in platform.files.blobs if key.startswith("recording-"))
+
+
+def _kept_files(platform: FakePlatform) -> list[str]:
+    return sorted(key for key in platform.files.blobs if key.startswith("review-"))
+
+
 async def test_alert_snapshots_survive_a_restart() -> None:
     platform = FakePlatform(infer_s=0.02, failing=True)
     async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
@@ -3248,7 +3256,7 @@ async def test_a_print_keeps_a_thinned_spread_of_frames_and_its_near_misses(monk
     assert min(gaps) > 0.05, "thinning should have widened the gap between spaced frames"
     assert 1 <= len(near) <= reviews.NEAR_MAX and all(frame["score"] < 0.5 for frame in near), "near misses score under the threshold"
     assert not [frame for frame in frames if frame["kind"] == "alert"], "a clean print has no alert frames"
-    assert len(platform.files.blobs) == len(frames), "every kept frame has its JPEG stored, and thinned ones are deleted"
+    assert len(_kept_files(platform)) == len(frames), "every kept frame has its JPEG stored, and thinned ones are deleted"
 
 
 async def test_a_review_ends_when_the_printer_goes_idle_and_not_on_a_pause(monkeypatch) -> None:
@@ -3295,7 +3303,7 @@ async def test_the_oldest_finished_reviews_make_room_for_new_prints(monkeypatch)
 
     assert len(set(seen)) == 3, "switching a monitor off ends its print"
     assert len(kept) == 2 and seen[0] not in [review["id"] for review in kept], "the oldest finished review is dropped first"
-    assert len(platform.files.blobs) == frames, "a dropped review's frames are deleted with it"
+    assert len(_kept_files(platform)) == frames, "a dropped review's frames are deleted with it"
 
 
 async def test_prints_still_running_do_not_push_out_finished_ones(monkeypatch) -> None:
@@ -3319,14 +3327,14 @@ async def test_prints_queued_to_send_do_not_push_out_the_print_that_just_ended(m
     frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
     monitor = {"id": "m", "threshold": 0.75, "printer_id": "", "enabled": False}
     for started in (0.0, 100.0, 200.0):
-        await library.sample(monitor, frame, 0.1, started)
+        await library.sample(monitor, frame, 0.1, started, recording=False)
         library.settle({"m": monitor}, {}, set(), True)
         if started < 200.0:
-            library.submit(library.public()[-1]["id"], set(), set(), "")
+            library.submit(library.public(0)[-1]["id"], set(), set(), "")
 
-    await library.sample(monitor, frame, 0.1, 300.0)
+    await library.sample(monitor, frame, 0.1, 300.0, recording=False)
 
-    assert [review["status"] for review in library.public()] == ["queued", "queued", "ready", "running"], "the print waiting for its review was deleted"
+    assert [review["status"] for review in library.public(0)] == ["queued", "queued", "ready", "running"], "the print waiting for its review was deleted"
 
 
 async def test_a_print_left_with_no_frames_is_dropped_before_one_with_alert_frames(monkeypatch) -> None:
@@ -3337,14 +3345,14 @@ async def test_a_print_left_with_no_frames_is_dropped_before_one_with_alert_fram
     await library.keep_alert("m", {"ts": 0.0, "score": 0.9, "action": "none"}, frame)
     library.settle({"m": monitor}, {}, set(), True)
     for started in (100.0, 200.0):
-        await library.sample(monitor, frame, 0.1, started)
+        await library.sample(monitor, frame, 0.1, started, recording=False)
         library.settle({"m": monitor}, {}, set(), True)
     await library.stop_asking()
 
     await library.keep_alert("m", {"ts": 300.0, "score": 0.9, "action": "none"}, frame)
 
     assert [frame["ts"] for frame in library.alert_frames("m")] == [0.0, 300.0], "an empty print outlasted one the risk history shows"
-    assert [review["frames"] for review in library.public()] == [1, 0, 1]
+    assert [review["frames"] for review in library.public(0)] == [1, 0, 1]
 
 
 async def test_removing_a_monitor_forgets_every_print_even_when_a_frame_cannot_be_deleted(monkeypatch) -> None:
@@ -3353,7 +3361,7 @@ async def test_removing_a_monitor_forgets_every_print_even_when_a_frame_cannot_b
     frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
     monitor = {"id": "m", "threshold": 0.75, "printer_id": "", "enabled": False}
     for started in (0.0, 100.0, 200.0):
-        await library.sample(monitor, frame, 0.1, started)
+        await library.sample(monitor, frame, 0.1, started, recording=False)
         library.settle({"m": monitor}, {}, set(), True)
     remove = platform.files.remove
     stuck = next(iter(platform.files.blobs))
@@ -3367,7 +3375,7 @@ async def test_removing_a_monitor_forgets_every_print_even_when_a_frame_cannot_b
     with pytest.raises(PermissionError):
         await library.forget("m")
 
-    assert library.public() == [], "a print of the removed monitor stayed in the state"
+    assert library.public(0) == [], "a print of the removed monitor stayed in the state"
     assert list(platform.files.blobs) == [stuck], "one frame that cannot go left the others behind"
 
 
@@ -3378,15 +3386,15 @@ async def test_two_prints_beginning_at_the_cap_do_not_evict_the_same_review(monk
     frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
     first, second = ({"id": name, "threshold": 0.75, "printer_id": "", "enabled": False} for name in ("first", "second"))
     for monitor in (first, second):
-        await library.sample(monitor, frame, 0.1, 0.0)
+        await library.sample(monitor, frame, 0.1, 0.0, recording=False)
     library.settle({"first": first, "second": second}, {}, set(), True)
 
-    kept = await asyncio.gather(library.sample(first, frame, 0.1, 10.0), library.sample(second, frame, 0.1, 10.0), return_exceptions=True)
+    kept = await asyncio.gather(library.sample(first, frame, 0.1, 10.0, recording=False), library.sample(second, frame, 0.1, 10.0, recording=False), return_exceptions=True)
 
     assert kept == [True, True], "one of the two prints lost its frame"
-    running = [review["frames"] for review in library.public() if review["status"] == "running"]
+    running = [review["frames"] for review in library.public(0) if review["status"] == "running"]
     assert running == [1, 1], "each new print keeps its first frame"
-    assert len(platform.files.blobs) == sum(review["frames"] for review in library.public()), "an evicted review's frame was left behind"
+    assert len(platform.files.blobs) == sum(review["frames"] for review in library.public(0)), "an evicted review's frame was left behind"
 
 
 async def test_a_print_beginning_while_the_review_is_switched_off_keeps_no_frame(monkeypatch) -> None:
@@ -3395,7 +3403,7 @@ async def test_a_print_beginning_while_the_review_is_switched_off_keeps_no_frame
     library = reviews.ReviewLibrary(platform)
     frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
     monitor = {"id": "m", "threshold": 0.75, "printer_id": "", "enabled": False}
-    await library.sample(monitor, frame, 0.1, 0.0)
+    await library.sample(monitor, frame, 0.1, 0.0, recording=False)
     library.settle({"m": monitor}, {}, set(), True)
     remove = platform.files.remove
     evicting = asyncio.Event()
@@ -3406,12 +3414,12 @@ async def test_a_print_beginning_while_the_review_is_switched_off_keeps_no_frame
         await remove(key)
 
     monkeypatch.setattr(platform.files, "remove", slow_remove)
-    sampling = asyncio.create_task(library.sample(monitor, frame, 0.1, 100.0))
+    sampling = asyncio.create_task(library.sample(monitor, frame, 0.1, 100.0, recording=False))
     await evicting.wait()
     await library.stop_asking()
     await sampling
 
-    assert [review["frames"] for review in library.public()] == [0], "a frame was kept after the review was switched off"
+    assert [review["frames"] for review in library.public(0)] == [0], "a frame was kept after the review was switched off"
     assert not platform.files.blobs, "the frame's file stayed on disk"
 
 
@@ -3542,6 +3550,133 @@ async def test_a_refused_print_waits_and_sends_the_rest_after_the_limit_resets(m
     assert sorted(upload["frame"] for upload in uploads) == sorted(frame["id"] for frame in review["frames"]), "no frame is uploaded twice"
 
 
+async def test_a_reviewer_adds_a_frame_from_the_print_recording_and_it_is_sent_as_added(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "RECORD_EVERY_S", 0.1)
+    platform = FakePlatform(infer_s=0.02)
+    uploads = _inbox(platform, monkeypatch)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        review = await _finished_review(engine)
+        summary = engine.state_event()["reviews"][0]
+        frame = next(e for e in await engine.request({"cmd": "recording.frame", "id": review["id"], "index": 2}) if e["event"] == "recording_frame")
+        added = next(e for e in await engine.request({"cmd": "review.add", "id": review["id"], "index": 2, "label": "failure"}) if e["event"] == "review")
+        with pytest.raises(RuntimeError, match="already added"):
+            await engine.request({"cmd": "review.add", "id": review["id"], "index": 2, "label": "good"})
+        new = next(kept for kept in added["frames"] if kept["kind"] == "added")
+        await engine.handle({"cmd": "review.send", "id": review["id"], "failures": [new["id"]]})
+        await _sent(events)
+        await asyncio.sleep(1.2)
+        left = _recording_files(platform)
+        after = engine.state_event()["reviews"][0]
+
+    timeline = review["timeline"]
+    assert len(timeline) >= 5 and all(later[0] - earlier[0] > 0.05 for earlier, later in zip(timeline, timeline[1:])), "the print was not recorded at its interval"
+    assert summary["recording"]["frames"] == len(timeline) and summary["recording"]["bytes"] == len(timeline) * len(b"\xff\xd8fake")
+    assert base64.b64decode(frame["jpeg"]) == b"\xff\xd8fake" and [round(frame["ts"], 1), frame["score"]] == timeline[2]
+    assert (new["ts"], new["label"]) == (frame["ts"], "failure") and new in added["frames"]
+    assert {(upload["kind"], upload["label"]) for upload in uploads if upload["frame"] == new["id"]} == {("added", "failure")}
+    assert not left and after["recording"] is None, "a sent print's recording was kept"
+
+
+async def test_recording_off_records_nothing_and_deletes_what_was_recorded(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "RECORD_EVERY_S", 0.1)
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        await asyncio.sleep(0.5)
+        recorded = _recording_files(platform)
+        await engine.handle({"cmd": "settings.update", "patch": {"recording_days": 0}})
+        await asyncio.sleep(1.5)
+        left = _recording_files(platform)
+        summary = engine.state_event()["reviews"][0]
+        with pytest.raises(RuntimeError, match="0, 3, 7 or 14"):
+            await engine.request({"cmd": "settings.update", "patch": {"recording_days": 5}})
+
+    assert len(recorded) == 2, "a running print was not recorded"
+    assert not left and summary["recording"] is None and summary["frames"] > 0, "switching recording off kept the recording, or the review with it"
+
+
+async def test_a_recording_is_deleted_once_its_days_are_up_or_its_print_is_skipped(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "RECORD_EVERY_S", 0.1)
+    monkeypatch.setattr(reviews, "DAY_S", 0.2)
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0, 9.0]) as (engine, _):
+        first, second = list(engine.monitors)
+        await asyncio.sleep(0.5)
+        await engine.handle({"cmd": "settings.update", "patch": {"recording_days": 14}})
+        for monitor_id in (first, second):
+            await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": False}})
+        ended = {review["monitor_id"]: review for review in engine.state_event()["reviews"]}
+        await engine.handle({"cmd": "review.dismiss", "id": ended[first]["id"]})
+        await asyncio.sleep(1.5)
+        kept = {review["monitor_id"]: review for review in engine.state_event()["reviews"]}
+        await engine.handle({"cmd": "settings.update", "patch": {"recording_days": 3}})
+        await asyncio.sleep(1.5)
+        expired = engine.state_event()["reviews"]
+
+    assert ended[second]["recording"]["expires"] == ended[second]["ended"] + 14 * 0.2
+    assert kept[first]["recording"] is None and kept[second]["recording"] is not None, "skipping a print kept its recording"
+    assert all(review["recording"] is None for review in expired) and not _recording_files(platform), "a recording outlived its days"
+
+
+async def test_deleting_a_running_print_recording_stops_it_being_recorded_further(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "RECORD_EVERY_S", 0.1)
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        await asyncio.sleep(0.5)
+        running = engine.state_event()["reviews"][0]
+        await engine.handle({"cmd": "recording.delete", "ids": [running["id"]]})
+        await asyncio.sleep(0.5)
+        after = engine.state_event()["reviews"][0]
+
+    assert running["recording"]["frames"] > 0 and running["status"] == "running"
+    assert after["recording"] is None and not _recording_files(platform), "the deleted recording came back"
+
+
+async def test_the_oldest_recordings_make_room_under_the_cap(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "RECORD_EVERY_S", 0.1)
+    monkeypatch.setattr(reviews, "RECORDINGS_BYTES_MAX", 30 * len(b"\xff\xd8fake"))
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0, 9.0]) as (engine, _):
+        await asyncio.sleep(2.5)
+        recordings = [review["recording"] for review in engine.state_event()["reviews"]]
+
+    total = sum(recording["bytes"] for recording in recordings if recording)
+    assert total <= reviews.RECORDINGS_BYTES_MAX, "recordings grew past their cap"
+    assert any(recording and recording["frames"] for recording in recordings), "the cap stopped every recording"
+
+
+async def test_a_print_recording_survives_a_restart(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "RECORD_EVERY_S", 0.1)
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        review = await _finished_review(engine, wait_s=0.6)
+    platform.files.blobs[reviews.index_key(review["id"])] += b"\x00" * 5
+
+    restarted = Engine(platform)
+    await restarted.start()
+    try:
+        again = await _review(restarted, review["id"])
+        frame = next(e for e in await restarted.request({"cmd": "recording.frame", "id": review["id"], "index": len(again["timeline"]) - 1}) if e["event"] == "recording_frame")
+    finally:
+        await restarted.stop()
+    assert again["timeline"] == review["timeline"] and len(review["timeline"]) >= 3, "an entry cut short when the hub stopped was read as a frame"
+    assert base64.b64decode(frame["jpeg"]) == b"\xff\xd8fake"
+
+
+async def test_a_print_sends_at_most_a_day_of_frames(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.05)
+    monkeypatch.setattr(reviews, "FRAMES_PER_DAY", 2)
+    platform = FakePlatform(infer_s=0.02)
+    _inbox(platform, monkeypatch)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        review = await _finished_review(engine, wait_s=0.6)
+        with pytest.raises(RuntimeError, match="at most 2 frames"):
+            await engine.request({"cmd": "review.send", "id": review["id"]})
+        await engine.request({"cmd": "review.send", "id": review["id"], "removed": [frame["id"] for frame in review["frames"][2:]]})
+        queued = engine.state_event()["reviews"][0]
+
+    assert len(review["frames"]) > 2 and queued["chosen"] == 2
+
+
 async def test_a_print_dismissed_before_its_upload_begins_sends_nothing_and_leaves_no_send_behind(monkeypatch) -> None:
     monkeypatch.setattr(reviews, "SPACED_START_S", 0.2)
     platform = FakePlatform(infer_s=0.02, failing=True)
@@ -3664,7 +3799,7 @@ async def test_an_unreachable_inbox_keeps_the_frames_and_tries_again_later(monke
         monkeypatch.setattr(platform, "http", unreachable)
         await engine.handle({"cmd": "review.send", "id": review["id"]})
         outcome = await _sent(events)
-        stored = len(platform.files.blobs)
+        stored = len(_kept_files(platform))
         monkeypatch.setattr(platform, "http", reachable)
         _inbox(platform, monkeypatch)
         events.clear()
@@ -6242,7 +6377,7 @@ async def test_a_stored_value_of_the_wrong_kind_is_dropped_with_a_warning_and_th
     try:
         assert len(engine.startup_warnings) == 1, engine.startup_warnings
         json.dumps(engine.state_event(), allow_nan=False)
-        assert engine.reviews.public() == []
+        assert engine.state_event()["reviews"] == []
         await engine.request({"cmd": "settings.update", "patch": {"theme": "dark"}})
     finally:
         await engine.stop()
@@ -6255,7 +6390,7 @@ async def test_a_queued_review_and_a_token_as_saved_are_restored() -> None:
     await engine.start()
     try:
         assert engine.startup_warnings == []
-        assert [(review["status"], review["retry_at"]) for review in engine.reviews.public()] == [("queued", 9e9)]
+        assert [(review["status"], review["retry_at"]) for review in engine.state_event()["reviews"]] == [("queued", 9e9)]
         assert engine.token_scopes() == {"0" * 64: "read"}
     finally:
         await engine.stop()
@@ -6863,11 +6998,11 @@ async def test_a_monitor_edited_while_another_keeps_its_frame_is_scored_as_it_no
         await asyncio.sleep(0.3)
         sample, keeping, edited = engine.reviews.sample, asyncio.Event(), asyncio.Event()
 
-        async def slow_sample(monitor, frame, score, ts):
+        async def slow_sample(monitor, frame, score, ts, recording):
             if monitor["id"] == first and platform.failing and not edited.is_set():
                 keeping.set()
                 await edited.wait()
-            return await sample(monitor, frame, score, ts)
+            return await sample(monitor, frame, score, ts, recording)
 
         engine.reviews.sample = slow_sample
         platform.failing = True

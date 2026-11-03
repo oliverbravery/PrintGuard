@@ -103,7 +103,7 @@ FINISHING_COMMANDS = frozenset(
         "plugin.secrets",
     }
 )
-READ_ONLY_COMMANDS = frozenset({"history.get", "snapshot.get", "review.get", "camera.snapshot"})
+READ_ONLY_COMMANDS = frozenset({"history.get", "snapshot.get", "review.get", "recording.frame", "camera.snapshot"})
 UNSAVED_COMMANDS = frozenset(
     {
         "discover",
@@ -139,6 +139,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "fault_grace_s": GRACE_DEFAULT_S,
     "preheat": PREHEAT_DEFAULTS,
     "feedback": "ask",
+    "recording_days": 7,
 }
 
 
@@ -229,6 +230,9 @@ class Engine:
             "review.send": self._cmd_review_send,
             "review.retry": self._cmd_review_retry,
             "review.dismiss": self._cmd_review_dismiss,
+            "review.add": self._cmd_review_add,
+            "recording.frame": self._cmd_recording_frame,
+            "recording.delete": self._cmd_recording_delete,
             "snapshot.get": self._cmd_snapshot_get,
             "camera.snapshot": self._cmd_camera_snapshot,
             "notify.test": self._cmd_notify_test,
@@ -316,6 +320,10 @@ class Engine:
             if monitor["printer_id"] and self.printers.get(monitor["printer_id"]) is None:
                 monitor["printer_id"] = ""
                 self._warn_at_start(f"Monitor '{monitor['name']}' was bound to a printer that could not be read, so it is no longer linked to one and no longer pauses or cancels a print")
+        try:
+            await self.reviews.load_recordings()
+        except OSError as exc:
+            self._warn_at_start(f"The recordings of prints waiting for review could not be read: {logs.describe(exc)}")
         await self.reconcile_declared_cameras()
         self.cameras.sync_in_use(self.monitors, self.printers)
         self.watchdog.reconcile_cameras_once_read(self.printers.items)
@@ -520,7 +528,7 @@ class Engine:
             "cameras": [c.public() for c in self.cameras.values()],
             "printers": [p.public() for p in self.printers.values()],
             "prints": [p.public() for p in self.prints.values()],
-            "reviews": self.reviews.public(),
+            "reviews": self.reviews.public(self.settings["recording_days"]),
             "feedback_hub": self.feedback_token.split(".")[0] if self.feedback_token else None,
             "startup_warnings": self.startup_warnings,
             "monitors": [
@@ -891,6 +899,7 @@ class Engine:
                 camera.max_fps = camera.frame_source.fps
         if self.settle_reviews() or self._stores_unsaved:
             self.save()
+        await self._tidy_up("delete a print's recording", self.reviews.tidy_recordings(time.time(), self.settings["recording_days"]))
         if self.settings["feedback"] == "ask":
             for review in self.reviews.due(time.time()):
                 if review.id not in self._sends:
@@ -970,7 +979,7 @@ class Engine:
             monitor = self._watching_through(monitor_id, camera)
             if monitor is not None and self.settings["feedback"] == "ask" and self._print_known(monitor):
                 try:
-                    if await self.reviews.sample(monitor, frame, score, ts):
+                    if await self.reviews.sample(monitor, frame, score, ts, recording=self.settings["recording_days"] > 0):
                         self.save()
                 except Exception as exc:
                     self.report_failure(f"keeping a frame of '{monitor['name']}' for review", exc)
@@ -1811,7 +1820,7 @@ class Engine:
         review = self.reviews.get(message["id"])
         if review is None:
             raise LookupError(f"no review {message['id']}")
-        self._reply({"event": "review", **review.public(), "frames": review.frames, "req_id": message.get("req_id")})
+        self._reply({"event": "review", **review.public(), "frames": review.frames, "timeline": self.reviews.timeline(review.id), "req_id": message.get("req_id")})
 
     async def _cmd_review_send(self, message: dict[str, Any]) -> None:
         """Records the frames a reviewer chose and starts uploading them.
@@ -1843,6 +1852,36 @@ class Engine:
 
     async def _cmd_review_dismiss(self, message: dict[str, Any]) -> None:
         self.reviews.dismiss(message["id"])
+
+    async def _cmd_review_add(self, message: dict[str, Any]) -> None:
+        """Keeps a frame from a finished print's recording and answers with the print's frames.
+
+        Raises:
+            LookupError: If there is no such review or recorded frame.
+            ValueError: If feedback is switched off or the frame cannot be added.
+        """
+        self._require_feedback_on()
+        await self.reviews.add(message["id"], message["index"], message["label"])
+        await self._cmd_review_get(message)
+
+    async def _cmd_recording_frame(self, message: dict[str, Any]) -> None:
+        ts, score, jpeg = await self.reviews.recorded_frame(message["id"], message["index"])
+        self._reply(
+            {
+                "event": "recording_frame",
+                "id": message["id"],
+                "index": message["index"],
+                "ts": ts,
+                "score": round(score, 4),
+                "jpeg": base64.b64encode(jpeg).decode(),
+                "req_id": message.get("req_id"),
+            }
+        )
+
+    async def _cmd_recording_delete(self, message: dict[str, Any]) -> None:
+        """Deletes the recordings of the prints named, stopping any still running from being recorded further."""
+        self.reviews.stop_recording(message["ids"])
+        await self._tidy_up("delete a print's recording", self.reviews.tidy_recordings(time.time(), self.settings["recording_days"]))
 
     async def _cmd_camera_snapshot(self, message: dict[str, Any]) -> None:
         """Hands back a still of a camera as it looks now.

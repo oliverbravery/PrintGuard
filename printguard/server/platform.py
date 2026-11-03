@@ -674,7 +674,7 @@ class WebSocket:
 
 
 class DiskFileStore:
-    """Print files and their previews on disk, under the data directory.
+    """Print files, their previews, kept frames and print recordings on disk, under the data directory.
 
     A file is written beside its final name and renamed into place once it is
     complete, so a read never sees a partial upload and an upload that fails
@@ -722,6 +722,27 @@ class DiskFileStore:
     async def read(self, key: str) -> bytes:
         """Returns a stored file's bytes."""
         return await asyncio.to_thread(self.path(key).read_bytes)
+
+    async def append(self, key: str, data: bytes) -> int:
+        """Adds bytes to the end of a file nobody but the hub's user may read, returning where they begin."""
+
+        def write() -> int:
+            with os.fdopen(os.open(self.path(key), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), "ab") as handle:
+                offset = handle.seek(0, os.SEEK_END)
+                handle.write(data)
+                return offset
+
+        return await asyncio.to_thread(write)
+
+    async def read_range(self, key: str, offset: int, size: int) -> bytes:
+        """Returns part of a stored file's bytes."""
+
+        def read() -> bytes:
+            with self.path(key).open("rb") as handle:
+                handle.seek(offset)
+                return handle.read(size)
+
+        return await asyncio.to_thread(read)
 
     async def remove(self, key: str) -> None:
         """Deletes a stored file, if there is one."""
