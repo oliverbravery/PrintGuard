@@ -68,6 +68,7 @@ watched and warns you. See [failing safely](architecture.md#failing-safely).
 | [Elegoo](https://github.com/ELEGOO-3D/elegoo-link) | Access code on a Centauri Carbon 2, or an optional Moonraker API key | Centauri chamber camera, or Moonraker's configured webcams |
 | [Prusa (PrusaLink)](https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293) | HTTP Digest, user `maker` unless you set another | No local stream |
 | [Bambu Lab](https://github.com/Doridian/OpenBambuAPI) | Access code and serial | Chamber camera |
+| [Ultimaker](https://github.com/Ultimaker/Cura/tree/main/plugins/UM3NetworkPrinting) | None, so keep it on a trusted LAN | Yes, its MJPEG stream on port 8080 |
 
 <details>
 <summary><b>Bambu Lab</b>: LAN Only Mode and Developer Mode</summary>
@@ -136,6 +137,24 @@ last knew while one is up. With no job running the printer's own state is used, 
 PrusaConnect is not used, so no frames or job data leave hardware you own. PrusaLink's
 webcam feature pushes snapshots to PrusaConnect rather than serving a local video stream, so
 if the printer has a camera, add it separately as a [stream URL](cameras.md#stream-urls).
+
+</details>
+
+<details>
+<summary><b>Ultimaker</b>: the local API Cura prints through</summary>
+
+Ultimaker printers connect over the local API Cura uses to print over your network, on the
+Ultimaker 3 and 3 Extended, S3, S5, S7 and Factor 4. It has no password, so keep the printer on a
+network you trust.
+
+1. Find the printer's IP address on its screen under Preferences, then Network.
+2. Register each printer by its own address, such as `http://192.168.1.60`.
+
+A finished or aborted print waiting for you to clear the bed shows as idle. While the printer
+boots, runs maintenance or waits for you mid-print, PrintGuard shows its state as unknown and a
+monitor stays as it was.
+
+The integration is experimental until it has been tried on more of these models.
 
 </details>
 
@@ -213,6 +232,9 @@ needs Developer Mode, as a pause or cancel does. A project exported without its
 gcode is refused at upload. A Bambu printer keeps reporting a cancelled or failed job as failed until
 the next one starts, which PrintGuard shows as idle, so clear the bed before you press **Print**.
 
+An Ultimaker takes gcode, not a ufp, and queues it. A printer still holding its last print starts the
+new one once you confirm on its screen that the bed is clear.
+
 Files live in the data directory under `prints/`, so they survive a restart and travel with the
 `/data` volume. When the hub starts it deletes the files there that no print names and that carry a name
 it generated, and keeps the files of a print it could not read, saying so in the startup warning.
@@ -232,6 +254,7 @@ heater off.
 | Elegoo | Yes | Yes, on both families |
 | Prusa (PrusaLink) | Yes | No, PrusaLink has no endpoint for it |
 | Bambu Lab | Yes | Yes, as the `M104` and `M140` lines Bambu Studio sends |
+| Ultimaker | Yes, for the first nozzle | No, it needs a key approved on the printer's screen |
 
 A target above 350 °C for the nozzle or 150 °C for the bed, or one that isn't a number, is
 refused. The dashboard moves what you type, and each preheat preset, to the limit instead, and the
