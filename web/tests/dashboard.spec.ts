@@ -1348,6 +1348,7 @@ test("removing or sending one file leaves the other rows' buttons alone", async 
   await dashboard(page, library([printFile(), printFile({ id: "f2", name: "Vase", uploaded: 0, meta: { time_s: 7190 } })]));
   await expect(page.getByText("2h 0m")).toBeVisible();
   await page.getByRole("button", { name: "Print", exact: true }).first().click();
+  await page.getByRole("button", { name: "Start print" }).click();
   await page.getByRole("button", { name: "Remove", exact: true }).first().click();
   await pastDoublePress(page);
   await page.getByRole("button", { name: "Confirm" }).click();
@@ -1356,6 +1357,24 @@ test("removing or sending one file leaves the other rows' buttons alone", async 
   await expect(page.getByRole("button", { name: "Removing…" })).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Print", exact: true })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Remove", exact: true })).toBeEnabled();
+});
+
+test("a print only starts after the bed has been checked on the printer's camera", async ({ page }) => {
+  const { engine: state } = library([printFile()]);
+  await dashboard(page, { dialog: "prints", engine: { ...state, monitors: [monitor({ printer_id: "p1" })] } });
+  await page.getByRole("button", { name: "Print", exact: true }).click();
+  const check = page.getByRole("dialog", { name: "Print Benchy on MK4" });
+  await expect(check.getByText("Is the build plate on and the bed clear?")).toBeVisible();
+  await expect(check.locator("video")).toHaveCount(1);
+
+  await check.getByRole("button", { name: "Cancel" }).click();
+  await expect(check).toBeHidden();
+  expect(await sent(page, "print.start")).toBeUndefined();
+
+  await page.getByRole("button", { name: "Print", exact: true }).click();
+  await check.getByRole("button", { name: "Start print" }).click();
+  await expect(check).toBeHidden();
+  expect(await sent(page, "print.start")).toMatchObject({ id: "f1", printer_id: "p1" });
 });
 
 test("a file uploaded seconds ago reads just now and an older one counts minutes", async ({ page }) => {

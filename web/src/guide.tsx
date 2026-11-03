@@ -172,7 +172,8 @@ export const GUIDE: GuideSection[] = [
       <>
         Drop sliced files onto the hub to preview their toolpath, name them and correct their temperatures before
         they're uploaded. Each keeps the preview, print time and filament the slicer wrote into it. Tag a file with the printers it was sliced for and it can only ever start on those. Send it
-        to an idle printer from the library or from the 3D viewer, which lets you orbit the toolpath layer by layer.
+        to an idle printer from the library or from the 3D viewer, which lets you orbit the toolpath layer by layer. The
+        printer's camera comes up first so you can check the bed is clear.
       </>
     ),
     action: { label: "Open the library", dialog: "prints" },
