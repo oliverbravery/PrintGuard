@@ -10,7 +10,7 @@ Start at the [README](../README.md) to install PrintGuard. These pages cover eve
 
 | Page | Read it when you want to |
 |---|---|
-| [Printers](printers.md) | Connect OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab, send it a print or set its temperatures |
+| [Printers](printers.md) | Connect OctoPrint, Klipper, Elegoo, Prusa, Bambu Lab or Ultimaker, send it a print or set its temperatures |
 | [Cameras](cameras.md) | Add a printer webcam, a stream URL, a USB camera or a phone |
 | [Monitoring](monitoring.md) | Tune a monitor's thresholds, frame its camera and read its risk history |
 | [Notifications](notifications.md) | Set up an alert channel, or quieten a camera that keeps dropping out |

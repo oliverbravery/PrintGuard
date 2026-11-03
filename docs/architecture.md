@@ -53,7 +53,7 @@ flowchart LR
     engine -- "Platform protocol" --> server["server/platform.py<br/>LiteRT / ONNX Runtime · PyAV · httpx · QuickJS"]
 
     server --- mediamtx["MediaMTX<br/>RTSP / RTMP / WHEP / HLS"]
-    integrations --- printersvc["OctoPrint / Moonraker / Elegoo / PrusaLink / Bambu Lab"]
+    integrations --- printersvc["OctoPrint / Moonraker / Elegoo / PrusaLink / Bambu Lab / Ultimaker"]
     notifiers --- push["ntfy / Pushover / Telegram / Discord / native"]
 ```
 
@@ -265,7 +265,7 @@ A camera's `detect_fps` caps its inference rate. It defaults to 60 and is clampe
 
 A printer integration that exposes a webcam registers it automatically as a camera owned by
 that printer through `Camera.printer_id`, covering the OctoPrint and Moonraker stream URLs, the
-Elegoo Centauri chamber camera, and the Bambu chamber camera, over RTSP on the X1 and H2
+Elegoo Centauri chamber camera, the Ultimaker's MJPEG stream on port 8080, and the Bambu chamber camera, over RTSP on the X1 and H2
 series or the proprietary port 6000 protocol on the A1 and P1. The adapter's optional
 `cameras()` declares them, and the engine reconciles them in the background after a printer is
 added or updated, so neither command waits on a camera opening, and on demand through
@@ -858,7 +858,7 @@ printguard/
     oauth.py         a plugin's sign-in to a service, by authorisation code with PKCE
     sockets.py       WebSockets held open for plugins
     urls.py          URL match patterns, the scope of a plugin's network grant
-    integrations/    printer service adapters (OctoPrint, Klipper, Elegoo, PrusaLink, Bambu Lab)
+    integrations/    printer service adapters (OctoPrint, Klipper, Elegoo, PrusaLink, Bambu Lab, Ultimaker)
     notifiers/       alert channel adapters (ntfy, Pushover, Telegram, Discord, native desktop)
     adapters.py      shared adapter contract (id, label, docs_url, JSON-schema config)
   server/            hub platform: FastAPI, bundled MediaMTX (child process), LiteRT / ONNX Runtime, PyAV
