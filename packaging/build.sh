@@ -7,7 +7,7 @@
 # then notarises the disk image, so the notarisation key is never in this script's environment.
 set -euo pipefail
 
-MEDIAMTX_VERSION=1.21.2
+MEDIAMTX_VERSION=1.21.3
 CREATE_DMG_COMMIT=a2b71d0fda6d0df2a86dc7f67082d4d73e84c59f # v1.3.0
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -28,9 +28,9 @@ esac
 
 mtx="mediamtx_v${MEDIAMTX_VERSION}_${OS}_${ARCH}.${MTX_EXT}"
 case "$mtx" in
-  mediamtx_v1.21.2_darwin_arm64.tar.gz) MTX_SHA256=7d0d0c5c11527cbd10bde1c3d728864eb0334a9b653566cd73c0259750cbf093 ;;
-  mediamtx_v1.21.2_darwin_amd64.tar.gz) MTX_SHA256=87a00062b6a588aa1158f875504a3b56c80d62e2611dc450b83d0534e1b49198 ;;
-  mediamtx_v1.21.2_windows_amd64.zip) MTX_SHA256=a84224f5a490855684e62ba6fb71e80ea2a5e16aed61883bb58380290e93e467 ;;
+  mediamtx_v1.21.3_darwin_arm64.tar.gz) MTX_SHA256=bc1a0762fd18ffb413bcd81dcb9a072ac159fbd1f27e79ac6f14598aaac5ed3f ;;
+  mediamtx_v1.21.3_darwin_amd64.tar.gz) MTX_SHA256=8a8416ee2ff5d17d9366498b6d88b76ab6d3afcda50b6d7321ccddb349bdbaf2 ;;
+  mediamtx_v1.21.3_windows_amd64.zip) MTX_SHA256=b2f5246b07cb72961df03b8d5e8cad43dc657bcf3f49a87bb031bdf22721af74 ;;
   *) echo "no pinned checksum for ${mtx}, add it from the release's checksums.sha256" >&2; exit 1 ;;
 esac
 curl -fsSL -o "build/desktop/${mtx}" \
