@@ -15,6 +15,7 @@ from PIL import Image
 INPUT_SIZE = 224
 RESIZE_SHORTEST = 256
 LONGEST_RATIO = 4
+SQUARE_OVERLAP = 0.2
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,47 @@ def preprocess(rgb: np.ndarray, assets: Assets) -> np.ndarray:
     grey = np.asarray(image, dtype=np.float32) / 255.0
     chans = np.stack([(grey - m) / s for m, s in zip(assets.mean, assets.std)], axis=0)
     return chans[np.newaxis, ...].astype(np.float32)
+
+
+def square_starts(long: int, short: int) -> list[int]:
+    """Where each square the model scores begins along a frame's long side.
+
+    The model is trained on squares, so a wide frame is scored as squares the
+    height of the frame that overlap by at least ``SQUARE_OVERLAP``, the
+    sliding-window overlap common to tiled inference, so a defect on the seam
+    is whole in one of them. A frame no more than that overlap wider than it
+    is tall is one centred square. Beyond ``LONGEST_RATIO`` times the short
+    side only the middle is covered, as ``preprocess`` does.
+
+    Args:
+        long: The frame's longer side in pixels.
+        short: The frame's shorter side in pixels.
+
+    Returns:
+        The offset of each square along the long side, in order.
+    """
+    span = min(long, short * LONGEST_RATIO)
+    ratio = span / short
+    if ratio <= 1 + SQUARE_OVERLAP:
+        return [(long - short) // 2]
+    count = math.ceil((ratio - SQUARE_OVERLAP) / (1 - SQUARE_OVERLAP))
+    margin, step = (long - span) // 2, (span - short) / (count - 1)
+    return [margin + round(index * step) for index in range(count)]
+
+
+def squares(rgb: np.ndarray) -> list[np.ndarray]:
+    """Splits a frame into the overlapping squares the model scores, laid along its long side.
+
+    Args:
+        rgb: HxWx3 frame.
+
+    Returns:
+        The squares, each a view into ``rgb``.
+    """
+    height, width = rgb.shape[:2]
+    if width >= height:
+        return [rgb[:, start : start + height] for start in square_starts(width, height)]
+    return [rgb[start : start + width] for start in square_starts(height, width)]
 
 
 def classify(embedding: np.ndarray, assets: Assets) -> dict[str, Any]:

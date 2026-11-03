@@ -82,16 +82,20 @@ the frames the [API](api.md) returns.
 | Setting | Default | Range | What it does |
 |---|---|---|---|
 | **Rotation** | 0° | 0°, 90°, 180°, 270° | Sets a camera mounted sideways or upside down upright |
-| **Crop region** | The middle square | Any square | The square of the view the model is given |
+| **Crop region** | The middle square | Any region up to 4 times as wide as it is tall | The part of the view the model watches |
 | **Brightness** | 1 | 0.25 to 2 | Lifts a dim chamber or tames a bright one |
 | **Contrast** | 1 | 0.25 to 2 | Separates the print from a background of a similar shade |
 | **Sharpness** | 0 | 0 to 2 | Brings out strands on a soft camera. The live view sharpens the picture at the size it's shown, so it looks stronger there than in the frame the model gets |
 | **Detection rate** | 60 a second | 0.5 up to the camera's own frame rate, never above 60, or from 0.1 over the API | The most frames a second the model scores from this camera |
 
-The model only watches a square of each camera's view. Until you crop a camera that square is the
-middle of the frame, so on a wide camera the sides of the bed go unwatched. Crop it to a square
-the print fills, leaving a little room: the model trims a sixteenth off each edge of the square
-before it scores it. Rotation is applied first, so you draw the crop on the picture as you see it.
+The model is trained on squares. Until you crop a camera it only watches the middle square of the
+frame, so on a wide camera the sides of the bed go unwatched. Crop it to the part of the bed you
+print on, leaving a little room, since the model trims a sixteenth off each edge of a square
+before it scores it. A crop wider than a square is scored as overlapping squares the height of
+the crop, each overlapping the next by at least a fifth, and a frame is as risky as its worst
+square. The crop editor draws the squares, and each one adds the cost of scoring a frame, so a
+crop twice as wide as it is tall halves the detection rate your hardware can sustain. Past 4 to 1
+only the middle is watched. Rotation is applied first, so you draw the crop on the picture as you see it.
 A crop that runs off the frame is cut back to the part inside it.
 
 Detection normally runs as often as the hardware and the camera allow. Lower **Detection rate**
@@ -140,7 +144,7 @@ Start with the defaults and one real print, then read the history.
 |---|---|
 | Alerts on a good print | Raise the threshold, or raise the consecutive count so brief blips are ridden out |
 | A failure caught late | Lower the threshold or the consecutive count |
-| A failure that barely moves the score | Crop the camera so the print fills the square, then check the lighting with brightness and contrast |
+| A failure that barely moves the score | Crop the camera tightly around the part of the bed you print on, then check the lighting with brightness and contrast |
 | A score that sits high on an empty bed | Crop out whatever the model is reacting to, such as cables or a cluttered background |
 | The same failure alerting again and again | Raise the cooldown |
 | A busy processor on a shared host | Lower the camera's detection rate |

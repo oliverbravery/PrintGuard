@@ -141,7 +141,7 @@ train the model.
 
 ![A monitor's panel: live risk, pause, resume and cancel, temperatures, preheat presets and the monitoring settings](docs/assets/printer-detail.png)
 
-Each camera can be rotated, cropped to the square the model watches and adjusted for brightness,
+Each camera can be rotated, cropped to the part of the bed the model watches and adjusted for brightness,
 contrast and sharpness. Its detection rate can be lowered to cut the load on a shared host.
 [docs/monitoring.md](docs/monitoring.md) covers what each setting does and how to choose values.
 

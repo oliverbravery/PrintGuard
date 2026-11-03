@@ -23,7 +23,7 @@ import pytest
 from fakes import FakePlatform
 
 from printguard.engine import engine as engine_module
-from printguard.engine import credentials, feedback, logs, oauth, plugins, reports, reviews, vision, watchdog
+from printguard.engine import credentials, feedback, logs, oauth, plugins, reports, reviews, scheduler, vision, watchdog
 from printguard.engine.engine import EVENT_LOG_LEVELS, Engine
 from printguard.engine.integrations import INTEGRATIONS, DeviceState, DeviceStatus
 from printguard.engine.notifiers import NOTIFIERS
@@ -2913,6 +2913,63 @@ def test_rotate_frame_and_transform_compose() -> None:
 
     cropped = vision.transform(frame, rotation=90, crop={"x": 0.0, "y": 0.0, "w": 0.5, "h": 1.0})
     assert cropped.shape == (64, 24, 3), "crop is applied on the rotated frame"
+
+
+@pytest.mark.parametrize("height, width", [(1080, 1920), (480, 640), (1000, 1150), (1920, 1080), (300, 1500), (1000, 9000)])
+def test_a_wide_frame_is_scored_as_overlapping_squares_that_cover_it(height: int, width: int) -> None:
+    frame = np.zeros((height, width, 3), dtype=np.uint8)
+    short, long = min(height, width), max(height, width)
+    starts = vision.square_starts(long, short)
+    span = min(long, short * vision.LONGEST_RATIO)
+
+    assert all(square.shape[:2] == (short, short) for square in vision.squares(frame))
+    if long <= short * (1 + vision.SQUARE_OVERLAP):
+        assert starts == [(long - short) // 2], "a frame close to square is its middle square"
+    else:
+        assert starts[0] == (long - span) // 2 and starts[-1] + short == (long - span) // 2 + span, "the squares reach both ends"
+        assert all(later - earlier <= short * (1 - vision.SQUARE_OVERLAP) for earlier, later in zip(starts, starts[1:])), "a seam is whole in one square"
+    assert len(starts) <= 5, "a frame past 4:1 is covered only in its middle"
+
+
+async def test_a_frame_is_as_risky_as_its_worst_square() -> None:
+    platform = FakePlatform()
+    seen: list[tuple[int, ...]] = []
+
+    async def infer(rgb: np.ndarray) -> dict:
+        seen.append(rgb.shape[:2])
+        failing = bool(rgb[0, -1, 0])
+        return {"prediction": "failure" if failing else "success", "distances": {"success": 9.0, "failure": 1.0} if failing else {"success": 1.0, "failure": 9.0}, "margin": 8.0}
+
+    platform.infer = infer
+    frame = np.zeros((100, 300, 3), dtype=np.uint8)
+    frame[:, -1] = 255
+    result = await scheduler.infer_squares(platform, vision.squares(frame))
+
+    assert result["prediction"] == "failure", "a defect at the edge of a wide crop was averaged away"
+    assert seen == [(100, 100)] * len(vision.square_starts(300, 100)) and len(seen) > 1
+
+
+async def test_a_camera_cropped_wide_is_scored_square_by_square_and_an_uncropped_one_once() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    shapes: list[tuple[int, ...]] = []
+    infer = platform.infer
+
+    async def counted(rgb: np.ndarray) -> dict:
+        shapes.append(rgb.shape[:2])
+        return await infer(rgb)
+
+    platform.infer = counted
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        camera_id = engine.cameras.values()[0].id
+        await asyncio.sleep(0.3)
+        uncropped = set(shapes)
+        await engine.handle({"cmd": "camera.update", "id": camera_id, "patch": {"crop": {"x": 0, "y": 0, "w": 1, "h": 0.5}}})
+        shapes.clear()
+        await asyncio.sleep(0.3)
+
+    assert uncropped == {(48, 64)}, "an uncropped camera is watched in its middle square, scored once"
+    squares = len(vision.square_starts(64, 24))
+    assert set(shapes) == {(24, 24)} and squares > 1 and len(shapes) % squares == 0, "every square of a wide crop is scored"
 
 
 def test_preprocess_averages_sensor_noise_on_a_still_scene() -> None:
