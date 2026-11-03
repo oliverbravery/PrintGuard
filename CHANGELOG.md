@@ -16,6 +16,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Changed
 
+- A print you skip with Not this print is listed as reviewed, not sent. Thanks to @jsbrich.
 - The bundled MediaMTX is updated to 1.21.3, which handles H.264 cameras that send recovery points instead of keyframes.
 
 ### Security

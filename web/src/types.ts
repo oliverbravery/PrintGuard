@@ -145,7 +145,7 @@ export interface ReviewSummary {
   monitor_id: string;
   started: number;
   ended: number | null;
-  status: "running" | "ready" | "dismissed" | "queued" | "sent";
+  status: "running" | "ready" | "dismissed" | "skipped" | "queued" | "sent";
   frames: number;
   alerts: number;
   chosen: number;

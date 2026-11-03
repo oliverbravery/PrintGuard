@@ -33,11 +33,16 @@ export function sending(review: ReviewSummary): boolean {
   return review.status === "queued" && review.code === null;
 }
 
+export function reviewable(review: ReviewSummary): boolean {
+  return review.status === "ready" || review.status === "dismissed" || review.status === "skipped";
+}
+
 export function statusText(review: ReviewSummary): string {
   if (review.status === "sent") return `sent ${framesLabel(review.sent)}`;
   if (sending(review)) return `sending ${review.sent} of ${review.chosen}`;
   if (review.status === "queued") return review.retry_at ? `queued, sends after ${clock(review.retry_at)}` : "queued";
   if (review.status === "running") return "printing";
+  if (review.status === "skipped") return "reviewed, not sent";
   return review.status === "ready" ? "waiting for review" : "not reviewed";
 }
 

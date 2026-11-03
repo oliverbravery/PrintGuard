@@ -2107,6 +2107,17 @@ test("a long toast stays inside a phone screen", async ({ page }) => {
   expect(box.x + box.width).toBeLessThanOrEqual(393 - 16);
 });
 
+test("a print the reviewer chose not to send reads as reviewed and can still be opened", async ({ page }) => {
+  const reviews = [review({ status: "dismissed" }), review({ id: "r2", status: "skipped" })];
+  await dashboard(page, { engine: engine({ reviews }), statsMonitorId: "m1" });
+  const prints = page.getByRole("dialog", { name: "Prusa · history" }).getByRole("listitem");
+  await expect(prints.filter({ hasText: /^.*framesnot reviewed/ })).toHaveCount(1);
+  const skipped = prints.filter({ hasText: "reviewed, not sent" });
+  await expect(skipped).toHaveCount(1);
+  await skipped.getByRole("button", { name: "Review" }).click();
+  expect(await page.evaluate(() => (window as any).__pg.getState().reviewId)).toBe("r2");
+});
+
 test("a print that kept no frames is not offered for review, and a snapshot is opened and closed on its own", async ({ page }) => {
   const reviews = [review({ status: "dismissed", frames: 0 }), review({ id: "r2", frames: 4 })];
   await dashboard(page, { engine: engine({ reviews }), statsMonitorId: "m1" });

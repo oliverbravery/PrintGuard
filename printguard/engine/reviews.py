@@ -34,7 +34,7 @@ REVIEW_MAX = 20
 BYTES_MAX = 200 * 1024 * 1024
 UNLINKED_PRINT_S = 24 * 3600.0
 ENDED_STATUSES = ("idle", "error")
-STATUSES = ("running", "ready", "dismissed", "queued", "sent")
+STATUSES = ("running", "ready", "dismissed", "skipped", "queued", "sent")
 FRAME_KINDS = ("alert", "near", "spaced")
 LABELS = ("failure", "good")
 
@@ -49,7 +49,8 @@ class Review:
         spacing_s: The gap between spaced frames, doubled each time they are thinned.
         ended: When the print finished, or None while it runs.
         status: ``running`` while the print runs, ``ready`` once it waits to be
-            reviewed, ``dismissed`` when no review is wanted, ``queued`` while
+            reviewed, ``dismissed`` when no review is wanted, ``skipped`` when
+            the reviewer chose not to send it, ``queued`` while
             frames wait on the inbox and ``sent`` when all of them are in.
         submission: What the reviewer chose once they pressed Send: the label
             of every frame they kept, the printer model they typed, the frames
@@ -298,7 +299,7 @@ class ReviewLibrary:
         return review
 
     def dismiss(self, review_id: str) -> None:
-        """Stops a finished print waiting to be reviewed, keeping its frames.
+        """Marks a finished print as one the reviewer chose not to send, keeping its frames.
 
         Raises:
             LookupError: If there is no such review.
@@ -309,7 +310,7 @@ class ReviewLibrary:
             raise LookupError(f"no review {review_id}")
         if review.status in ("running", "sent"):
             raise ValueError("only a finished, unsent print can be dismissed")
-        review.submission, review.status = None, "dismissed"
+        review.submission, review.status = None, "skipped"
 
     async def stop_asking(self) -> None:
         """Dismisses every print waiting to be reviewed or sent, and keeps only alert frames.
