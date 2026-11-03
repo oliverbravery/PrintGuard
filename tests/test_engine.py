@@ -3498,7 +3498,7 @@ async def test_a_print_dismissed_before_its_upload_begins_sends_nothing_and_leav
         await asyncio.sleep(0.2)
         status = engine.state_event()["reviews"][0]["status"]
 
-    assert not uploads and status == "dismissed"
+    assert not uploads and status == "skipped"
     assert not engine._sends, "a send that stopped before it began was never cleared"
     assert not _of(events, "error")
 
@@ -3710,7 +3710,7 @@ async def test_a_print_is_reviewed_once_and_only_after_it_ends(monkeypatch) -> N
         await engine.handle({"cmd": "review.send", "id": running["id"], "req_id": 3})
 
     errors = {event.get("req_id") for event in events if event["event"] == "error"}
-    assert running["status"] == "running" and dismissed == "dismissed", "a dismissed print keeps its frames and can still be sent"
+    assert running["status"] == "running" and dismissed == "skipped", "a dismissed print keeps its frames and can still be sent"
     assert errors == {1, 2, 3}, "a running print, an empty selection and a second send are all refused"
 
 
@@ -3823,7 +3823,7 @@ async def test_cancelling_a_send_stops_after_the_frame_in_flight(monkeypatch) ->
 
     assert len(review["frames"]) >= 4
     assert len(uploads) == 2, f"only the frame in flight should finish, but {len(uploads)} of {len(review['frames'])} went"
-    assert not outcome["ok"] and cancelled["status"] == "dismissed" and cancelled["chosen"] == 0, "a cancelled print ended up sent"
+    assert not outcome["ok"] and cancelled["status"] == "skipped" and cancelled["chosen"] == 0, "a cancelled print ended up sent"
 
 
 async def test_a_second_send_during_an_upload_replaces_the_choices_and_repeats_no_frame(monkeypatch) -> None:

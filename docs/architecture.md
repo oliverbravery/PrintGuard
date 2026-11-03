@@ -476,6 +476,7 @@ so training frames only leave the hub when a person presses Send in the dashboar
 | `running` | The print is still being watched |
 | `ready` | It has ended and waits to be reviewed |
 | `dismissed` | Nobody wants to review it, or `settings.feedback` is `off` |
+| `skipped` | The reviewer pressed **Not this print** or cancelled its upload |
 | `queued` | It was reviewed and frames are uploading, or wait on a refusal's `retry_at` |
 | `sent` | Every chosen frame is in the inbox |
 

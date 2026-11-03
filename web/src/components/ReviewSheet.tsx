@@ -1,6 +1,6 @@
 import { Maximize2 } from "lucide-react";
 import { useEffect, useId, useState } from "react";
-import { clock, framesLabel, isDailyLimit, LIMIT_REASON, sending, waitingMessage } from "../review";
+import { clock, framesLabel, isDailyLimit, LIMIT_REASON, reviewable, sending, waitingMessage } from "../review";
 import { useLazySnapshot } from "../snapshot";
 import { useStore } from "../store";
 import type { Monitor, ReviewFrame, ReviewSummary } from "../types";
@@ -157,7 +157,7 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
     <Sheet title={`${monitor.name} · review`} onClose={close} closeLabel="Close print review" width="sm:w-[680px]">
       {review.status === "running" && <p className="px-5 py-4 text-sm text-text-1">This print is still running. You can review it once it ends.</p>}
       {(review.status === "queued" || review.status === "sent") && <Progress review={review} onClose={close} />}
-      {(review.status === "ready" || review.status === "dismissed") && (
+      {reviewable(review) && (
         <div className="space-y-4 px-5 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <p className="text-sm text-text-1">
             PrintGuard kept {framesLabel(review.frames)} from this print. Label them and send them to me, and I'll use them to train the detection model.
