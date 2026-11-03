@@ -11,6 +11,7 @@ import { published, resumePublishers, stopPublishing } from "./stream";
 import { applyTheme, measureCover } from "./theme";
 import { openIn } from "./urls";
 import { extOf, FORMATS, sendPrint, type PrintDraft } from "./prints";
+import { recordedFrameKey } from "./review";
 import { withPreview, type ParsedToolpath } from "./toolpath";
 import type { AdapterConfig, Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, PrintFile, Review, ScorePoint, UpdateRelease } from "./types";
 
@@ -112,7 +113,7 @@ export interface StagedPrint {
   id: number;
   file: File;
 }
-export type SettingsTabId = "appearance" | "alerts" | "plugins" | "mqtt" | "updates" | "api" | "advanced";
+export type SettingsTabId = "appearance" | "alerts" | "plugins" | "mqtt" | "updates" | "api" | "storage" | "advanced";
 
 interface PgStore {
   phase: "booting" | "ready";
@@ -186,6 +187,7 @@ interface PgStore {
   unstage(id: number): void;
   uploadPrint(draft: PrintDraft, thumbnailFrom: ParsedToolpath | null, signal: AbortSignal): Promise<void>;
   fetchSnapshot(monitorId: string, id: string): void;
+  fetchRecordedFrame(reviewId: string, index: number): void;
   clearCreatedToken(): void;
   testPrinter(target: string, provider: string, config: AdapterConfig, id?: string): void;
   addPublishedCamera(name: string, path: string): void;
@@ -668,6 +670,10 @@ export const useStore = create<PgStore>((set, get) => {
         clearPending(event.req_id);
         set((s) => ({ snapshotCache: { ...s.snapshotCache, [event.id]: `data:image/jpeg;base64,${event.jpeg}` } }));
         break;
+      case "recording_frame":
+        clearPending(event.req_id);
+        set((s) => ({ snapshotCache: { ...s.snapshotCache, [recordedFrameKey(event.id, event.index)]: `data:image/jpeg;base64,${event.jpeg}` } }));
+        break;
       case "print_started": {
         clearPending(event.req_id);
         const engine = get().engine;
@@ -983,6 +989,11 @@ export const useStore = create<PgStore>((set, get) => {
     fetchSnapshot(monitorId, id) {
       if (get().snapshotCache[id]) return;
       sendSilent({ cmd: "snapshot.get", monitor_id: monitorId, id });
+    },
+
+    fetchRecordedFrame(reviewId, index) {
+      if (get().snapshotCache[recordedFrameKey(reviewId, index)]) return;
+      sendSilent({ cmd: "recording.frame", id: reviewId, index });
     },
 
     clearCreatedToken() {

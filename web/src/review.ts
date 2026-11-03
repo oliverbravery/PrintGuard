@@ -1,6 +1,26 @@
 import type { ReviewSummary } from "./types";
 
 export const LIMIT_REASON = "This runs on a free service with a fixed amount of room, so there's a daily limit.";
+export const FRAMES_PER_DAY = 60;
+
+export function recordedFrameKey(reviewId: string, index: number): string {
+  return `${reviewId}:${index}`;
+}
+
+export function megabytes(bytes: number): string {
+  const mb = bytes / 1024 / 1024;
+  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+}
+
+export function day(ts: number): string {
+  return new Date(ts * 1000).toLocaleDateString([], { day: "numeric", month: "short" });
+}
+
+export function elapsed(seconds: number): string {
+  const whole = Math.max(0, Math.round(seconds));
+  const minutes = String(Math.floor((whole % 3600) / 60)).padStart(2, "0");
+  return `${Math.floor(whole / 3600)}:${minutes}:${String(whole % 60).padStart(2, "0")}`;
+}
 
 const DAILY_LIMITS: Record<string, string> = {
   hub_daily: "You've sent as many frames as one PrintGuard can in a day.",

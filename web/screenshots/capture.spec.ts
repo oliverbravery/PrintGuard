@@ -79,7 +79,7 @@ function engine(): EngineState {
       monitor("m2", "Ender 3 V3", "c2", "p2", true),
       monitor("m3", "Bambu X1C", "c3", ""),
     ],
-    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], glass: { opacity: 0, tone: 0 }, inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT, feedback: "ask" },
+    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], glass: { opacity: 0, tone: 0 }, inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT, feedback: "ask", recording_days: 7 },
     tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: INTEGRATIONS, notifiers: [],
     plugins: [], plugin_permissions: PERMISSIONS, plugin_events: {}, plugin_platforms: PLATFORMS,
     plugin_event_permissions: { state: "state:read", frame: "camera:frames", history: "history:read" },
@@ -232,21 +232,27 @@ const REVIEW_FRAMES = [
   ...[0.58, 0.66].map((score, index) => ({ id: `n${index}`, kind: "near" as const, score, ts: NOW / 1000 - 1500 + index * 300, action: "none", size: 43_000 })),
   { id: "a0", kind: "alert" as const, score: 0.91, ts: NOW / 1000 - 600, action: "pause", size: 44_000 },
 ];
+const RECORDED = 1020;
+const REVIEW_TIMELINE = Array.from({ length: RECORDED }, (_, index) => [NOW / 1000 - 5400 + index * 5, index > RECORDED - 140 ? 0.62 + (index % 7) / 30 : 0.05 + (index % 11) / 100]);
 const REVIEW = {
   id: "r1", monitor_id: "m2", started: NOW / 1000 - 5400, ended: NOW / 1000 - 300, status: "ready" as const,
-  frames: REVIEW_FRAMES.length, alerts: 1, chosen: 0, sent: 0, code: null, retry_at: null,
+  frames: REVIEW_FRAMES.length, bytes: 373_000, alerts: 1, chosen: 0, sent: 0, code: null, retry_at: null,
+  recording: { frames: RECORDED, bytes: 17_400 * RECORDED, expires: NOW / 1000 - 300 + 7 * 86_400 },
 };
 
 async function openReview(page: Page): Promise<void> {
   await page.evaluate(
-    ({ review, frames, pictures }) => {
+    ({ review, frames, timeline, pictures }) => {
       (window as unknown as { __pg: { setState: (s: unknown) => void } }).__pg.setState({
         reviewId: review.id,
-        reviewData: { [review.id]: { ...review, frames } },
-        snapshotCache: Object.fromEntries(frames.map((frame) => [frame.id, frame.score > 0.5 ? pictures.defect : pictures.healthy])),
+        reviewData: { [review.id]: { ...review, frames, timeline } },
+        snapshotCache: {
+          ...Object.fromEntries(frames.map((frame) => [frame.id, frame.score > 0.5 ? pictures.defect : pictures.healthy])),
+          [`${review.id}:${timeline.length - 1}`]: pictures.defect,
+        },
       });
     },
-    { review: REVIEW, frames: REVIEW_FRAMES, pictures: FRAMES },
+    { review: REVIEW, frames: REVIEW_FRAMES, timeline: REVIEW_TIMELINE, pictures: FRAMES },
   );
   await page.getByRole("button", { name: "No, something went wrong" }).click();
   await page.getByRole("button", { name: /^Frame \d+ of \d+ at .* marked Good/ }).last().click();
@@ -265,7 +271,7 @@ const HISTORY = {
   alerts: HISTORY_SNAPS.map(({ ts, score, action }) => ({ ts, score, action })),
   stats: { current: 0.86, avg: 0.21, max: 0.91, defect_pct: 6, inferences: 16_200, alerts: 3, watch_min: 54 },
 };
-const PRINTS_KEPT = [{ ...REVIEW, id: "r0", started: REVIEW.started - 172_800, ended: REVIEW.ended - 172_800, status: "sent" as const, frames: 12, sent: 12 }, REVIEW];
+const PRINTS_KEPT = [{ ...REVIEW, id: "r0", started: REVIEW.started - 172_800, ended: REVIEW.ended - 172_800, status: "sent" as const, frames: 12, sent: 12, recording: null }, REVIEW];
 
 async function openHistory(page: Page): Promise<void> {
   await page.evaluate(
@@ -291,6 +297,7 @@ const SCENES: Scene[] = [
   { name: "history", width: 1360, height: 860, theme: "dark", mutate: (e) => void (e.reviews = PRINTS_KEPT), prepare: openHistory },
   { name: "camera-editor", width: 1360, height: 680, theme: "dark", dialog: "cameras", prepare: openCameraEditor },
   { name: "settings-advanced", width: 1360, height: 860, theme: "dark", settingsTab: "advanced" },
+  { name: "settings-storage", width: 1360, height: 860, theme: "dark", settingsTab: "storage", mutate: (e) => void (e.reviews = PRINTS_KEPT) },
   { name: "dashboard", width: 1360, height: 620, theme: "dark" },
   { name: "dashboard-light", width: 1360, height: 620, theme: "light" },
   { name: "printer-detail", width: 1360, height: 860, theme: "dark", detailId: "m1" },

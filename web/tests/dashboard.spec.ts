@@ -241,7 +241,7 @@ test("a history or review sheet closes when what it shows is removed elsewhere",
 });
 
 const review = (over = {}) => ({
-  id: "r1", monitor_id: "m1", status: "ready", started: 1, ended: 2, frames: 3, alerts: 1, chosen: 0, sent: 0, code: null, retry_at: null, ...over,
+  id: "r1", monitor_id: "m1", status: "ready", started: 1, ended: 2, frames: 3, bytes: 0, alerts: 1, recording: null, timeline: [], chosen: 0, sent: 0, code: null, retry_at: null, ...over,
 });
 
 test("a tile asks about its last print only", async ({ page }) => {
@@ -323,6 +323,107 @@ test("every frame of a review can be left out at once and one put back to send i
   await expect(sheet.getByRole("button", { name: "Leave all out" })).toBeVisible();
   await sheet.getByRole("button", { name: "Send 1 frame" }).click();
   expect(await sent(page, "review.send")).toMatchObject({ id: "r1", failures: [], removed: ["s1", "s2"] });
+});
+
+const picked = [
+  { id: "a1", ts: 60, score: 0.9, kind: "alert", action: "pause", size: 1 },
+  { id: "s1", ts: 120, score: 0.1, kind: "spaced", size: 1 },
+  { id: "s2", ts: 180, score: 0.1, kind: "spaced", size: 1 },
+];
+const timeline = Array.from({ length: 40 }, (_, index) => [index * 5, index > 30 ? 0.8 : 0.1]);
+const recorded = (over = {}) => review({ recording: { frames: 40, bytes: 98 * 1024 * 1024, expires: 7 * 86_400 }, ...over });
+
+test("a reviewer scrubs through the print's recording and adds a frame PrintGuard didn't pick", async ({ page }) => {
+  const picture = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
+  await dashboard(page, { engine: engine({ reviews: [recorded()] }), reviewId: "r1", snapshotCache: { "r1:39": picture } });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  await sheet.getByRole("button", { name: "No, something went wrong" }).click();
+  await emit(page, { event: "review", ...recorded(), frames: picked, timeline });
+  await expect(sheet.getByText("PrintGuard picked these frames.")).toBeVisible();
+  await expect(sheet.getByText("3 of 60")).toBeVisible();
+
+  const scrubber = sheet.getByRole("slider", { name: "Whole print" });
+  await expect(scrubber).toHaveAttribute("aria-valuetext", "0:03:15 in · 80%");
+  await expect(sheet.getByRole("img", { name: "The print 0:03:15 in, scored 80%" })).toBeVisible();
+  await scrubber.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(() => lastSent(page, "recording.frame")).toMatchObject({ id: "r1", index: 38 });
+  await expect(sheet.getByRole("status").filter({ hasText: "loading" })).toBeVisible();
+  await sheet.getByRole("button", { name: "Previous frame" }).click();
+  await expect(scrubber).toHaveAttribute("aria-valuetext", "0:03:05 in · 80%");
+
+  await sheet.getByRole("button", { name: "Add as failure" }).click();
+  expect(await sent(page, "review.add")).toMatchObject({ id: "r1", index: 37, label: "failure" });
+  const added = { id: "d1", ts: 185, score: 0.8, kind: "added", label: "failure", size: 1 };
+  await emit(page, { event: "review", ...recorded({ frames: 4 }), frames: [...picked, added], timeline });
+  await expect(sheet.getByText("4 of 60")).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Add as failure" })).toBeDisabled();
+  await expect(sheet.getByRole("button", { name: /^Frame 4 of 4 at .* marked Failure/ })).toContainText("added ·");
+
+  await sheet.getByRole("button", { name: "Send 4 frames" }).click();
+  expect(await sent(page, "review.send")).toMatchObject({ id: "r1", failures: ["a1", "d1"], removed: [] });
+});
+
+test("put all back restores PrintGuard's picks and leaves out the frames you added", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [recorded()] }), reviewId: "r1" });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  await sheet.getByRole("button", { name: "Yes" }).click();
+  await emit(page, { event: "review", ...recorded({ frames: 4 }), frames: [...picked, { id: "d1", ts: 185, score: 0.8, kind: "added", label: "good", size: 1 }], timeline });
+
+  await sheet.getByRole("button", { name: "Leave all out" }).click();
+  await sheet.getByRole("button", { name: "Put all back" }).click();
+  await expect(sheet.getByRole("button", { name: "Send 3 frames" })).toBeEnabled();
+  await expect(sheet.getByRole("button", { name: /^Send frame 4 of 4 at/ })).toBeVisible();
+});
+
+test("a print holding more than a day's frames can't be sent until enough are left out", async ({ page }) => {
+  const frames = Array.from({ length: 61 }, (_, index) => ({ id: `s${index}`, ts: index, score: 0.1, kind: "spaced", size: 1 }));
+  await dashboard(page, { engine: engine({ reviews: [recorded({ frames: 61 })] }), reviewId: "r1" });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  await sheet.getByRole("button", { name: "Yes" }).click();
+  await emit(page, { event: "review", ...recorded({ frames: 61 }), frames, timeline });
+
+  await expect(sheet.getByText("61 of 60")).toBeVisible();
+  await expect(sheet.getByRole("status").filter({ hasText: "You can send 60 frames a day. Leave 1 out to send this print." })).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Send 61 frames" })).toBeDisabled();
+  await expect(sheet.getByRole("button", { name: "Add as good" })).toBeDisabled();
+  await sheet.getByRole("button", { name: /^Don't send/ }).first().click();
+  await expect(sheet.getByRole("status").filter({ hasText: "Leave one out to add another." })).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Send 60 frames" })).toBeEnabled();
+});
+
+test("the review says how big the print's recording is and when it goes, and leads to its storage settings", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [recorded()] }), reviewId: "r1" });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  await expect(sheet.getByText(/This print's recording is 98 MB and is deleted on/)).toBeVisible();
+  await sheet.getByRole("button", { name: "Manage storage" }).click();
+  await expect(sheet).toBeHidden();
+  await expect(page.getByRole("tab", { name: "Storage" })).toHaveAttribute("aria-selected", "true");
+});
+
+test("the storage tab lists each recording with its size and deletes one or all of them", async ({ page }) => {
+  const reviews = [recorded({ bytes: 2 * 1024 * 1024 }), recorded({ id: "r2", ended: null, status: "running", recording: { frames: 3, bytes: 1024 * 1024, expires: null } })];
+  await dashboard(page, { engine: engine({ reviews }), dialog: "settings", settingsTab: "storage" });
+  const list = page.getByRole("list", { name: "Recordings" });
+  await expect(list.getByRole("listitem")).toHaveCount(2);
+  await expect(list.getByRole("listitem").first()).toContainText("98 MB");
+  await expect(list.getByRole("listitem").first()).toContainText("waiting for review");
+  await expect(list.getByRole("listitem").nth(1)).toContainText("recording now");
+  await expect(page.getByText("99 MB")).toBeVisible();
+  await expect(page.getByText("2.0 MB")).toBeVisible();
+
+  await list.getByRole("listitem").nth(1).getByRole("button", { name: /^Delete the recording of Prusa/ }).click();
+  await pastDoublePress(page);
+  await list.getByRole("listitem").nth(1).getByRole("button", { name: /^Delete the recording of Prusa/ }).click();
+  await expect.poll(() => sent(page, "recording.delete")).toMatchObject({ ids: ["r2"] });
+  await page.getByRole("button", { name: "Delete all recordings" }).click();
+  await pastDoublePress(page);
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => lastSent(page, "recording.delete")).toMatchObject({ ids: ["r1", "r2"] });
+
+  await page.getByRole("combobox", { name: "Recordings" }).selectOption({ label: "Keep each print's recording for 14 days" });
+  await page.evaluate(() => (window as any).__pg.getState().flushUpdates());
+  await expect.poll(() => lastSent(page, "settings.update")).toMatchObject({ patch: { recording_days: 14 } });
 });
 
 test("a review frame shows whole whatever its shape and any frame opens full size", async ({ page }) => {
@@ -1773,7 +1874,7 @@ test("a settings tab shows saved only for what it saved itself", async ({ page }
   await acknowledge();
   await page.getByRole("tab", { name: "Updates" }).click();
   await expect(page.getByText(/saved ✓/)).toBeHidden();
-  await page.getByRole("tab", { name: "Advanced" }).click();
+  await page.getByRole("tab", { name: "Storage" }).click();
   await expect(page.getByText(/saved ✓/)).toBeHidden();
 
   await page.getByRole("switch", { name: "Ask me to review frames after a print" }).click();
@@ -2328,7 +2429,7 @@ test("a dialog the browser closes by itself stays in step with the dashboard", a
 });
 
 test("switching the review off says what it deletes, and asks twice while a print is waiting", async ({ page }) => {
-  await dashboard(page, { engine: engine({ reviews: [review()] }), dialog: "settings", settingsTab: "advanced" });
+  await dashboard(page, { engine: engine({ reviews: [review()] }), dialog: "settings", settingsTab: "storage" });
   const toggle = page.getByRole("switch", { name: "Ask me to review frames after a print" });
   await expect(page.getByText("Turning this off deletes the frames kept so far.")).toBeVisible();
 
@@ -2341,7 +2442,7 @@ test("switching the review off says what it deletes, and asks twice while a prin
   await expect(page.getByText("keeps only alert frames while this is off")).toBeVisible();
   await expect.poll(() => sent(page, "settings.update")).toMatchObject({ patch: { feedback: "off" } });
 
-  await dashboard(page, { dialog: "settings", settingsTab: "advanced" });
+  await dashboard(page, { dialog: "settings", settingsTab: "storage" });
   await toggle.click();
   await expect(toggle).not.toBeChecked();
 });
@@ -2606,7 +2707,7 @@ test("a printer's light, the chosen theme and links that leave the dashboard are
   const newTab = (link: string | RegExp) => page.getByRole("link", { name: link }).getByRole("img", { name: "opens in a new tab" });
   await page.evaluate(() => (window as any).__pg.getState().openDialog("update"));
   await expect(newTab(/Download v2\.0\.0/)).toBeVisible();
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("advanced"));
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("storage"));
   await expect(newTab(/What's sent/)).toBeVisible();
 
   await page.getByRole("tab", { name: "Appearance" }).click();
