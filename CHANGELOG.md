@@ -9,6 +9,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [2.6.5] - 2026-11-03
 
+### Added
+
+- Each print is recorded, one frame every 5 seconds, so you can scrub through it when you review it and add frames PrintGuard didn't pick. Recordings are deleted once you send or skip the print, or after 7 days, and the Storage tab in Settings lists them with their sizes. Thanks to @advgiraffe.
+- The review sheet counts the frames you have chosen against the 60 a day the training inbox takes.
+
 ### Changed
 
 - A print you skip with Not this print is listed as reviewed, not sent. Thanks to @jsbrich.

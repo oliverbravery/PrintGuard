@@ -234,6 +234,10 @@ class ReviewLibrary:
             for entry in INDEX_ENTRY.iter_unpack(index[: len(index) - len(index) % INDEX_ENTRY.size]):
                 recording.add(*entry)
 
+    def stored_keys(self) -> set[str]:
+        """Every file store key a review names, its kept frames and its recording."""
+        return {key for review_id, review in self._reviews.items() for key in (recording_key(review_id), index_key(review_id), *(frame_key(review_id, frame["id"]) for frame in review.frames))}
+
     def public(self, recording_days: int) -> list[dict[str, Any]]:
         """Summarises every review for the state event.
 

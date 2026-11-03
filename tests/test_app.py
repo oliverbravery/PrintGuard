@@ -792,7 +792,7 @@ async def test_a_starting_hub_clears_the_files_no_print_or_review_names(tmp_path
 
     from printguard.engine.engine import Engine
     from printguard.engine.platform import as_chunks
-    from printguard.engine.reviews import frame_key
+    from printguard.engine.reviews import frame_key, index_key, recording_key
     from printguard.server import prints
     from printguard.server.platform import DiskFileStore
 
@@ -803,9 +803,9 @@ async def test_a_starting_hub_clears_the_files_no_print_or_review_names(tmp_path
     try:
         record = await prints.receive_print(engine, prints.PrintUpload(filename="benchy.gcode"), as_chunks(PRUSA))
         engine.reviews.restore([{"id": "a1", "monitor_id": "m1", "started": 0.0, "spacing_s": 5.0, "frames": [{"id": "f1"}]}])
-        kept = {record.file_key, record.thumbnail_key, frame_key("a1", "f1"), "notes.txt", "my print.gcode", "0badf00d.stl", "@eaDir"}
-        orphans = {frame_key("a1", "f2"), "deadbeef.gcode.part", "0badf00d.gcode", "0badf00d.thumb"}
-        for name in {frame_key("a1", "f1")} | orphans | kept - {record.file_key, record.thumbnail_key, "@eaDir"}:
+        kept = {record.file_key, record.thumbnail_key, frame_key("a1", "f1"), recording_key("a1"), index_key("a1"), "notes.txt", "my print.gcode", "0badf00d.stl", "@eaDir"}
+        orphans = {frame_key("a1", "f2"), recording_key("b2"), index_key("b2"), "deadbeef.gcode.part", "0badf00d.gcode", "0badf00d.thumb"}
+        for name in orphans | kept - {record.file_key, record.thumbnail_key, "@eaDir"}:
             (tmp_path / name).write_bytes(b"x")
         (tmp_path / "@eaDir").mkdir()
 

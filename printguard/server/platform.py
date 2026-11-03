@@ -674,7 +674,7 @@ class WebSocket:
 
 
 class DiskFileStore:
-    """Print files and their previews on disk, under the data directory.
+    """Print files, their previews, kept frames and print recordings on disk, under the data directory.
 
     A file is written beside its final name and renamed into place once it is
     complete, so a read never sees a partial upload and an upload that fails

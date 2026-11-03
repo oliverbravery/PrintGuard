@@ -296,7 +296,6 @@ const SCENES: Scene[] = [
   { name: "review", width: 1360, height: 860, theme: "dark", mutate: (e) => void (e.reviews = [REVIEW]), prepare: openReview },
   { name: "history", width: 1360, height: 860, theme: "dark", mutate: (e) => void (e.reviews = PRINTS_KEPT), prepare: openHistory },
   { name: "camera-editor", width: 1360, height: 680, theme: "dark", dialog: "cameras", prepare: openCameraEditor },
-  { name: "settings-advanced", width: 1360, height: 860, theme: "dark", settingsTab: "advanced" },
   { name: "settings-storage", width: 1360, height: 860, theme: "dark", settingsTab: "storage", mutate: (e) => void (e.reviews = PRINTS_KEPT) },
   { name: "dashboard", width: 1360, height: 620, theme: "dark" },
   { name: "dashboard-light", width: 1360, height: 620, theme: "light" },

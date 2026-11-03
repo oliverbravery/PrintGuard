@@ -101,7 +101,7 @@ async def as_chunks(data: bytes) -> AsyncIterator[bytes]:
 
 
 class FileStore(Protocol):
-    """Where uploaded print files, their previews and kept frames live.
+    """Where uploaded print files, their previews, kept frames and print recordings live.
 
     A sliced file or a JPEG is far too large for the state the engine persists
     as JSON, so the bytes are kept here under a key the engine chooses and the

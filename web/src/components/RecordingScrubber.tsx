@@ -9,7 +9,7 @@ const SETTLE_MS = 80;
 
 function markColour(frame: ReviewFrame): string {
   if (frame.kind === "alert") return "bg-bad";
-  return frame.kind === "added" ? "bg-text-0" : "bg-accent";
+  return frame.kind === "added" ? "bg-accent" : "bg-text-2";
 }
 
 export function RecordingScrubber({ review, full, onAdd }: { review: Review; full: boolean; onAdd: (index: number, label: "good" | "failure") => void }) {
@@ -71,13 +71,14 @@ export function RecordingScrubber({ review, full, onAdd }: { review: Review; ful
         <button type="button" className="btn tap-target" aria-label="Next frame" disabled={index === last} onClick={() => step(1)}>
           <ChevronRight size={14} aria-hidden />
         </button>
-        <span className="flex-1" />
-        <button type="button" className="btn" disabled={full || added || adding} onClick={() => onAdd(index, "good")}>
-          Add as good
-        </button>
-        <button type="button" className="btn" disabled={full || added || adding} onClick={() => onAdd(index, "failure")}>
-          Add as failure
-        </button>
+        <div className="flex basis-full gap-2 sm:ml-auto sm:basis-auto">
+          <button type="button" className="btn flex-1" disabled={full || added || adding} onClick={() => onAdd(index, "good")}>
+            Add as good
+          </button>
+          <button type="button" className="btn flex-1" disabled={full || added || adding} onClick={() => onAdd(index, "failure")}>
+            Add as failure
+          </button>
+        </div>
       </div>
     </section>
   );
