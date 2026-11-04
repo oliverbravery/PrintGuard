@@ -4,16 +4,16 @@ import { savedChannels, type SettingsTabId, useStore } from "../store";
 import { useSubmit } from "../submit";
 import { applyTheme, beginPreview, endPreview, GLASS_DEFAULT, PALETTES } from "../theme";
 import type { AdapterConfig, AdapterMeta, ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
-import { ConfirmButton, useConfirm } from "./ConfirmButton";
+import { ConfirmButton } from "./ConfirmButton";
 import { CopyButton } from "./CopyButton";
 import { Dialog } from "./Dialog";
-import { NewTab } from "./NewTab";
 import { PluginsTab } from "./PluginsTab";
 import { SettingsFooter } from "./SettingsFooter";
 import { SaveStatus } from "./SaveStatus";
 import { addressMoved, retypeReason, SchemaForm, savedSecretTitles } from "./SchemaForm";
 import { SecretInput } from "./SecretInput";
 import { SchemePicker } from "./SchemePicker";
+import { StorageTab } from "./StorageTab";
 import { TestRow } from "./TestRow";
 import { Slider } from "./Slider";
 import { TabPanel, Tabs } from "./Tabs";
@@ -67,10 +67,6 @@ export function SettingsDialog() {
   const [tab, setTab] = useState<SettingsTabId>(settingsTab ?? "alerts");
   const close = () => openDialog(null);
   const tokens = engine?.tokens ?? [];
-  const reviewing = engine?.settings.feedback !== "off";
-  const waitingReviews = (engine?.reviews ?? []).filter((review) => review.status === "ready" || review.status === "queued").length;
-  const setReviewing = (on: boolean) => updateSettings({ feedback: on ? "ask" : "off" }, "advanced");
-  const stopReviewing = useConfirm(() => setReviewing(false));
 
   const theme = engine?.settings.theme ?? "system";
   const themes = engine?.settings.themes ?? [];
@@ -138,6 +134,7 @@ export function SettingsDialog() {
     { id: "mqtt", label: "Home Assistant" },
     { id: "updates", label: "Updates" },
     { id: "api", label: "API" },
+    { id: "storage", label: "Storage" },
     { id: "advanced", label: "Advanced" },
   ];
 
@@ -497,6 +494,12 @@ export function SettingsDialog() {
           </TabPanel>
         )}
 
+        {tab === "storage" && (
+          <TabPanel prefix="settings" id="storage">
+            <StorageTab />
+          </TabPanel>
+        )}
+
         {tab === "advanced" && (
           <TabPanel prefix="settings" id="advanced" className="space-y-3">
             <label className="label block" htmlFor="inference-runtime">
@@ -520,30 +523,6 @@ export function SettingsDialog() {
               <span className="text-xs text-text-1">Active compute</span>
               <span className="chip">{engine?.stats.inference_device ?? "initialising"}</span>
             </div>
-            <span className="label block pt-2">Training frames</span>
-            <Toggle
-              label="Ask me to review frames after a print"
-              on={reviewing}
-              onChange={(on) => (on || waitingReviews === 0 ? setReviewing(on) : stopReviewing.press())}
-            />
-            <span className="block text-[0.7rem] leading-relaxed text-text-2">
-              <span role="status" className="block text-warn">
-                {stopReviewing.armed &&
-                  `Press the switch again to turn it off. ${waitingReviews} ${waitingReviews === 1 ? "print" : "prints"} waiting for review will be dismissed.`}
-              </span>
-              {reviewing
-                ? "PrintGuard keeps a few frames from each print on this hub so you can label them and send them to help train the detection model. Nothing is sent unless you review a print and press Send. Turning this off deletes the frames kept so far."
-                : "PrintGuard keeps only alert frames while this is off, for the risk history. It doesn't ask you to review a print and nothing is sent."}{" "}
-              <a className="text-accent underline hover:opacity-80" href="https://github.com/oliverbravery/PrintGuard/blob/main/docs/feedback.md" target="_blank" rel="noreferrer">
-                What's sent <NewTab />
-              </a>
-            </span>
-            {engine?.feedback_hub && (
-              <div className="flex items-center justify-between gap-3 rounded border border-line-0 px-3 py-2">
-                <span className="text-xs text-text-1">Hub ID</span>
-                <span className="mono text-[0.65rem] break-all text-text-2">{engine.feedback_hub}</span>
-              </div>
-            )}
             <div className="flex justify-end">
               <SaveStatus scope="settings:advanced" />
             </div>

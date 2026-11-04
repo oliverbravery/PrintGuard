@@ -71,6 +71,12 @@ NTFY_PUBLISHED = {"id": "sPs71M8A2T", "time": 1735941767, "expires": 1735985967,
 MOONRAKER_OK = {"result": "ok"}
 OCTOPRINT_UPLOADED = {"files": {"local": {"name": "benchy.gcode"}}, "done": True, "effectiveSelect": True, "effectivePrint": True}
 OCTOPRINT_HEATERS = {"temperature": {"tool0": {"actual": 209.6, "target": 210.0, "offset": 0}, "bed": {"actual": 60.2, "target": 60.0, "offset": 0}}}
+ULTIMAKER_PRINTER = {
+    "status": "printing",
+    "heads": [{"extruders": [{"hotend": {"temperature": {"current": 214.9, "target": 215.0}}}, {"hotend": {"temperature": {"current": 25.0, "target": 0.0}}}]}],
+    "bed": {"temperature": {"current": 60.1, "target": 60.0}},
+}
+ULTIMAKER_JOB = {"uuid": "6d1f3c2a-7e0b-4a8e-9b51-0c4d2e8f1a37", "name": "benchy", "status": "printing", "time_elapsed": 900, "time_total": 3600}
 
 
 async def test_multipart_form_builds_a_well_formed_body() -> None:
@@ -488,6 +494,78 @@ async def test_octoprint_action_payloads() -> None:
     assert http.last["json"] == {"command": "cancel"}
     with pytest.raises(RuntimeError, match="409"):
         await INTEGRATIONS["octoprint"].send(RecordingHttp(status=409), {"base_url": "http://op"}, DeviceAction.PAUSE)
+
+
+@pytest.mark.parametrize(
+    ("job", "expected"),
+    [
+        ("pre_print", DeviceStatus.PRINTING),
+        ("printing", DeviceStatus.PRINTING),
+        ("pausing", DeviceStatus.PAUSED),
+        ("paused", DeviceStatus.PAUSED),
+        ("wait_cleanup", DeviceStatus.IDLE),
+        ("aborted_wait_cleanup", DeviceStatus.IDLE),
+        ("failed_post_print", DeviceStatus.IDLE),
+        ("wait_user_action", DeviceStatus.UNKNOWN),
+    ],
+)
+async def test_ultimaker_reads_the_active_job(job: str, expected: DeviceStatus) -> None:
+    http = RoutedHttp({"/api/v1/printer": (200, ULTIMAKER_PRINTER), "/print_jobs/printing": (200, [{**ULTIMAKER_JOB, "status": job}])})
+    state = await INTEGRATIONS["ultimaker"].fetch_state(http, {"base_url": "http://um.lan/"})
+    assert state.status is expected
+    assert (state.job, state.progress, state.remaining_s) == ("benchy", 25.0, 2700)
+    assert state.public()["nozzle"] == {"actual": 214.9, "target": 215.0}, "the first extruder is the nozzle"
+    assert state.public()["bed"] == {"actual": 60.1, "target": 60.0}
+    assert [call["url"] for call in http.calls] == ["http://um.lan/api/v1/printer", "http://um.lan/cluster-api/v1/print_jobs/printing"]
+
+
+@pytest.mark.parametrize(
+    ("printer", "expected"),
+    [("idle", DeviceStatus.IDLE), ("printing", DeviceStatus.PRINTING), ("error", DeviceStatus.ERROR), ("maintenance", DeviceStatus.UNKNOWN)],
+)
+async def test_ultimaker_without_a_job_reads_the_printer(printer: str, expected: DeviceStatus) -> None:
+    http = RoutedHttp({"/api/v1/printer": (200, {**ULTIMAKER_PRINTER, "status": printer}), "/print_jobs/printing": (200, [])})
+    state = await INTEGRATIONS["ultimaker"].fetch_state(http, {"base_url": "http://um.lan"})
+    assert (state.status, state.job, state.remaining_s) == (expected, None, None)
+
+
+@pytest.mark.parametrize("answer", [SIGN_IN_PAGE, (503, "unavailable")])
+async def test_ultimaker_that_answers_badly_says_why(answer: tuple[int, Any]) -> None:
+    with pytest.raises(RuntimeError, match=f"Ultimaker .*HTTP {answer[0]}"):
+        await INTEGRATIONS["ultimaker"].fetch_state(RecordingHttp(*answer), {"base_url": "http://um.lan"})
+
+
+async def test_ultimaker_actions_go_to_the_active_job() -> None:
+    http = RoutedHttp({"/print_jobs/printing": (200, [ULTIMAKER_JOB]), "/action": (204, None)})
+    for action, sent in ((DeviceAction.PAUSE, "pause"), (DeviceAction.RESUME, "print"), (DeviceAction.CANCEL, "abort")):
+        await INTEGRATIONS["ultimaker"].send(http, {"base_url": "http://um.lan"}, action)
+        assert (http.last["method"], http.last["url"], http.last["json"]) == (
+            "PUT",
+            f"http://um.lan/cluster-api/v1/print_jobs/{ULTIMAKER_JOB['uuid']}/action",
+            {"action": sent},
+        )
+    with pytest.raises(RuntimeError, match="no active job to pause"):
+        await INTEGRATIONS["ultimaker"].send(RecordingHttp(body=[]), {"base_url": "http://um.lan"}, DeviceAction.PAUSE)
+    refused = RoutedHttp({"/print_jobs/printing": (200, [ULTIMAKER_JOB]), "/action": (400, "bad action")})
+    with pytest.raises(RuntimeError, match="rejected pause: HTTP 400"):
+        await INTEGRATIONS["ultimaker"].send(refused, {"base_url": "http://um.lan"}, DeviceAction.PAUSE)
+
+
+async def test_ultimaker_queues_an_upload_on_the_cluster() -> None:
+    http = RecordingHttp(status=201, body={"uuid": "j1"})
+    await INTEGRATIONS["ultimaker"].print_file(http, {"base_url": "http://um.lan/"}, "benchy.gcode", b"G1 X1\n")
+    call = http.last
+    assert (call["method"], call["url"]) == ("POST", "http://um.lan/cluster-api/v1/print_jobs/")
+    assert call["headers"]["Content-Type"].startswith("multipart/form-data")
+    assert b'name="owner"\r\n\r\nPrintGuard\r\n' in call["data"]
+    assert b'name="file"; filename="benchy.gcode"\r\nContent-Type: application/octet-stream\r\n\r\nG1 X1\n' in call["data"]
+    with pytest.raises(RuntimeError, match="HTTP 415"):
+        await INTEGRATIONS["ultimaker"].print_file(RecordingHttp(status=415), {"base_url": "http://um.lan"}, "x.gcode", b"")
+
+
+async def test_ultimaker_camera_is_mjpeg_on_port_8080() -> None:
+    cams = await INTEGRATIONS["ultimaker"].cameras(RecordingHttp(), {"base_url": "http://192.168.1.60/"})
+    assert cams == [{"key": "camera", "name": "Ultimaker camera", "source": {"kind": "url", "url": "http://192.168.1.60:8080/?action=stream"}}]
 
 
 @pytest.mark.parametrize(
@@ -1887,6 +1965,7 @@ def test_print_formats_and_heater_control_travel_with_adapter_meta() -> None:
         "prusa": (["gcode", "bgcode"], False),
         "bambu": (["3mf"], True),
         "elegoo": (["gcode"], True),
+        "ultimaker": (["gcode"], False),
     }
 
 

@@ -16,7 +16,7 @@ Send.
 - [What's sent](#whats-sent)
 - [Limits](#limits)
 - [Having your frames deleted](#having-your-frames-deleted)
-- [Switching it off](#switching-it-off)
+- [Storage settings](#storage-settings)
 
 ## What's kept on your hub
 
@@ -32,6 +32,11 @@ directory, so they survive a restart. The hub keeps the last 20 prints or 200 MB
 monitor and drops the oldest finished print first, apart from one waiting to send, which stays until it is sent or dismissed and isn't counted in the 20. The alert frames are the ones the risk
 history shows under **Risky moments**. Deleting a monitor deletes every print kept from it,
 including ones waiting for a review or to send.
+
+Each print is also recorded, one frame every 5 seconds, so you can scrub through it when you
+review it. An 8 hour print's recording takes about 100 MB. A recording is deleted once you send
+or skip its print, or 7 days after the print ended, which you can change to 3 or 14 days or
+switch off. Recordings are capped at 2 GB together, and the oldest go first.
 
 A print ends when its printer reports idle or an error, or when you switch its monitor off, so a
 paused print stays open. A monitor
@@ -49,16 +54,20 @@ isn't offered for review.
    had one.
 2. Press any frame to change its label. An alert frame is a real failure or a false alarm, and
    any other frame is good or a failure.
-3. Use the × on a frame to leave it out, and **Undo** to put it back. **Leave all out** clears every frame, so you can put back just the ones you want to send.
-4. Add your printer model if you like, then press **Send**.
+3. Use the × on a frame to leave it out, and **Undo** to put it back. **Leave all out** clears every frame, so you can put back just the ones you want to send. **Put all back** brings back the frames PrintGuard picked but not ones you added.
+4. Scrub through the print with the slider under the frames and use **Add as good** or **Add as
+   failure** to send a frame PrintGuard didn't pick. Marks on the slider show where the alerts and
+   picked frames are.
+5. Add your printer model if you like, then press **Send**. You can send 60 frames a day, and
+   the count above the frames shows how many you have chosen.
 
-**Not this print** takes it off your list of prints to review. Its frames stay on the hub, so
-you can still open it from **Prints** later.
+**Not this print** takes it off your list of prints to review and marks it reviewed, not sent. Its
+frames stay on the hub, so you can still open it from **Prints** later.
 
 ## What's sent
 
 - The frames you kept, with the label you gave each one.
-- Each frame's risk score, time and which of the three kinds above it is.
+- Each frame's risk score, time and which of the three kinds above it is, or that you added it from the recording.
 - A random ID for the print and for each frame.
 - The monitor's alert threshold at the time you send.
 - The type of printer connection, such as `klipper` or `none`, and the printer model if you typed one.
@@ -113,19 +122,21 @@ Your frames wait on your hub until it resets.
 
 ## Having your frames deleted
 
-Your hub ID is in **Settings**, under **Advanced**, once you've sent a print. Ask by
+Your hub ID is in **Settings**, under **Storage**, once you've sent a print. Ask by
 [raising an issue on GitHub](https://github.com/oliverbravery/PrintGuard/issues/new) with that
 ID and I'll delete every frame sent under it. The ID is random and says nothing about you.
 
 Your hub gets a new ID if I ever replace the key the inbox signs IDs with. Frames sent under the
 old ID can't be traced to your hub after that, so I couldn't find them to delete.
 
-## Switching it off
+## Storage settings
 
-Turn off **Ask me to review frames after a print** in **Settings**, under **Advanced**. The hub
-then keeps only alert frames, for the risk history, and never prompts.
+Turn off **Ask me to review frames after a print** in **Settings**, under **Storage**. The hub
+then keeps only alert frames, for the risk history, and never prompts. The same tab lists each
+recording with its size and when it's deleted, so you can delete one or all of them, and sets how
+long recordings are kept.
 
-![The Advanced tab in Settings, with the switch that asks you to review frames after a print](assets/settings-advanced.png)
+![The Storage tab in Settings, with the review switch, how long recordings are kept and the recording of each print](assets/settings-storage.png)
 
 Switching it off also settles the prints the hub already holds. A print waiting for a review or
 waiting to send is dismissed, and every frame that isn't an alert is deleted from the hub. A

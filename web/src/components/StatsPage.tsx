@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { alertOutcome, GROUP_S, groupBuckets, HISTORY_BUCKET_MS, PERIODS, type Period } from "../history";
-import { clock, framesLabel, statusText } from "../review";
+import { clock, framesLabel, reviewable, statusText } from "../review";
 import { useLazySnapshot } from "../snapshot";
 import { useStore } from "../store";
 import type { Monitor, Snapshot } from "../types";
@@ -147,7 +147,7 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
                     openReview(print.id);
                   }}
                 >
-                  {print.status === "ready" || print.status === "dismissed" ? "Review" : "View"}
+                  {reviewable(print) ? "Review" : "View"}
                 </button>
               </li>
             ))}
