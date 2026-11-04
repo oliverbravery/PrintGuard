@@ -76,7 +76,7 @@ ULTIMAKER_PRINTER = {
     "heads": [{"extruders": [{"hotend": {"temperature": {"current": 214.9, "target": 215.0}}}, {"hotend": {"temperature": {"current": 25.0, "target": 0.0}}}]}],
     "bed": {"temperature": {"current": 60.1, "target": 60.0}},
 }
-ULTIMAKER_JOB = {"uuid": "6d1f3c2a-7e0b-4a8e-9b51-0c4d2e8f1a37", "name": "benchy", "status": "printing", "time_elapsed": 900, "time_total": 3600}
+ULTIMAKER_JOB = {"uuid": "6d1f3c2a-7e0b-4a8e-9b51-0c4d2e8f1a37", "name": "benchy", "state": "printing", "time_elapsed": 900, "time_total": 3600}
 
 
 async def test_multipart_form_builds_a_well_formed_body() -> None:
@@ -501,22 +501,23 @@ async def test_octoprint_action_payloads() -> None:
     [
         ("pre_print", DeviceStatus.PRINTING),
         ("printing", DeviceStatus.PRINTING),
+        ("resuming", DeviceStatus.PRINTING),
         ("pausing", DeviceStatus.PAUSED),
         ("paused", DeviceStatus.PAUSED),
+        ("wait_user_action", DeviceStatus.PAUSED),
+        ("post_print", DeviceStatus.IDLE),
         ("wait_cleanup", DeviceStatus.IDLE),
-        ("aborted_wait_cleanup", DeviceStatus.IDLE),
-        ("failed_post_print", DeviceStatus.IDLE),
-        ("wait_user_action", DeviceStatus.UNKNOWN),
+        ("something_new", DeviceStatus.UNKNOWN),
     ],
 )
-async def test_ultimaker_reads_the_active_job(job: str, expected: DeviceStatus) -> None:
-    http = RoutedHttp({"/api/v1/printer": (200, ULTIMAKER_PRINTER), "/print_jobs/printing": (200, [{**ULTIMAKER_JOB, "status": job}])})
+async def test_ultimaker_reads_the_printers_own_job(job: str, expected: DeviceStatus) -> None:
+    http = RoutedHttp({"/api/v1/printer": (200, ULTIMAKER_PRINTER), "/api/v1/print_job": (200, {**ULTIMAKER_JOB, "state": job})})
     state = await INTEGRATIONS["ultimaker"].fetch_state(http, {"base_url": "http://um.lan/"})
     assert state.status is expected
     assert (state.job, state.progress, state.remaining_s) == ("benchy", 25.0, 2700)
     assert state.public()["nozzle"] == {"actual": 214.9, "target": 215.0}, "the first extruder is the nozzle"
     assert state.public()["bed"] == {"actual": 60.1, "target": 60.0}
-    assert [call["url"] for call in http.calls] == ["http://um.lan/api/v1/printer", "http://um.lan/cluster-api/v1/print_jobs/printing"]
+    assert [call["url"] for call in http.calls] == ["http://um.lan/api/v1/printer", "http://um.lan/api/v1/print_job"]
 
 
 @pytest.mark.parametrize(
@@ -524,9 +525,15 @@ async def test_ultimaker_reads_the_active_job(job: str, expected: DeviceStatus) 
     [("idle", DeviceStatus.IDLE), ("printing", DeviceStatus.PRINTING), ("error", DeviceStatus.ERROR), ("maintenance", DeviceStatus.UNKNOWN)],
 )
 async def test_ultimaker_without_a_job_reads_the_printer(printer: str, expected: DeviceStatus) -> None:
-    http = RoutedHttp({"/api/v1/printer": (200, {**ULTIMAKER_PRINTER, "status": printer}), "/print_jobs/printing": (200, [])})
+    http = RoutedHttp({"/api/v1/printer": (200, {**ULTIMAKER_PRINTER, "status": printer}), "/api/v1/print_job": (404, {"message": "Not found"})})
     state = await INTEGRATIONS["ultimaker"].fetch_state(http, {"base_url": "http://um.lan"})
     assert (state.status, state.job, state.remaining_s) == (expected, None, None)
+
+
+async def test_ultimaker_print_job_that_answers_badly_says_why() -> None:
+    http = RoutedHttp({"/api/v1/printer": (200, ULTIMAKER_PRINTER), "/api/v1/print_job": (503, "unavailable")})
+    with pytest.raises(RuntimeError, match="Ultimaker .*print job.*HTTP 503"):
+        await INTEGRATIONS["ultimaker"].fetch_state(http, {"base_url": "http://um.lan"})
 
 
 @pytest.mark.parametrize("answer", [SIGN_IN_PAGE, (503, "unavailable")])
