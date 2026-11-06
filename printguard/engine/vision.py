@@ -16,6 +16,7 @@ INPUT_SIZE = 224
 RESIZE_SHORTEST = 256
 LONGEST_RATIO = 4
 SQUARE_OVERLAP = 0.2
+ADJUST_BLOCK_ROWS = 32
 
 
 @dataclass(frozen=True)
@@ -198,6 +199,9 @@ def crop_frame(rgb: np.ndarray, crop: dict[str, float] | None) -> np.ndarray:
 def adjust(rgb: np.ndarray, brightness: float = 1.0, contrast: float = 1.0, sharpness: float = 0.0) -> np.ndarray:
     """Applies brightness, contrast and sharpness to an RGB frame.
 
+    Finishes each row block before moving on, keeping float intermediates small.
+    One neighbouring row on each side preserves the sharpening kernel at seams.
+
     Args:
         rgb: HxWx3 uint8 frame in RGB channel order.
         brightness: Linear multiplier on pixel values (1.0 = unchanged).
@@ -209,6 +213,31 @@ def adjust(rgb: np.ndarray, brightness: float = 1.0, contrast: float = 1.0, shar
     """
     if brightness == 1.0 and contrast == 1.0 and sharpness <= 0.0:
         return rgb
+    height = rgb.shape[0]
+    if height <= ADJUST_BLOCK_ROWS:
+        return _adjust_block(rgb, brightness, contrast, sharpness)
+    result = np.empty_like(rgb)
+    halo = 1 if sharpness > 0.0 else 0
+    for top in range(0, height, ADJUST_BLOCK_ROWS):
+        bottom = min(height, top + ADJUST_BLOCK_ROWS)
+        lo, hi = max(0, top - halo), min(height, bottom + halo)
+        block = _adjust_block(rgb[lo:hi], brightness, contrast, sharpness)
+        result[top:bottom] = block[top - lo : bottom - lo]
+    return result
+
+
+def _adjust_block(rgb: np.ndarray, brightness: float, contrast: float, sharpness: float) -> np.ndarray:
+    """Applies the adjustment formula to a block and its neighbouring rows.
+
+    Args:
+        rgb: RGB rows, including neighbours when sharpening is enabled.
+        brightness: Linear multiplier on pixel values.
+        contrast: Scale around mid-grey.
+        sharpness: Unsharp-mask strength.
+
+    Returns:
+        Adjusted uint8 pixels, including the neighbouring rows.
+    """
     arr = rgb.astype(np.float32)
     if brightness != 1.0:
         arr *= brightness
