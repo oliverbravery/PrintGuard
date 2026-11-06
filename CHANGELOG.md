@@ -9,6 +9,10 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [2.6.6] - 2026-11-04
 
+### Fixed
+
+- An Ultimaker that has finished a print shows as idle while it waits for you to confirm the bed is clear, instead of printing at 0%. Thanks to @tsaman01.
+
 ## [2.6.5] - 2026-11-04
 
 ### Added

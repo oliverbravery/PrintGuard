@@ -2,7 +2,7 @@
 
 Every networked Ultimaker (Ultimaker 3 and 3 Extended, S3, S5, S7 and
 Factor 4) serves two APIs on port 80. ``/api/v1`` describes the printer
-itself, and its reads need no authentication. ``/cluster-api/v1`` is the one
+and its current job, and its reads need no authentication. ``/cluster-api/v1`` is the one
 Cura's LAN printing uses to queue, pause, resume and abort jobs, also without
 authentication. The ``/api/v1`` writes need a digest key the user approves on
 the printer's touchscreen, so this adapter uses none of them and leaves
@@ -33,27 +33,20 @@ _PRINTER_STATUS = {
 }
 """The printer's own status, read when it has no active job. Booting and maintenance say nothing about a print."""
 _JOB_STATUS = {
-    "sent_to_printer": DeviceStatus.PRINTING,
     "pre_print": DeviceStatus.PRINTING,
     "printing": DeviceStatus.PRINTING,
     "resuming": DeviceStatus.PRINTING,
     "pausing": DeviceStatus.PAUSED,
     "paused": DeviceStatus.PAUSED,
+    "wait_user_action": DeviceStatus.PAUSED,
     "post_print": DeviceStatus.IDLE,
     "wait_cleanup": DeviceStatus.IDLE,
-    "finished": DeviceStatus.IDLE,
 }
-"""The active job's status. A finished job waits on the printer until someone confirms the bed is clear."""
-_ENDED = ("aborted", "failed")
-"""Prefixes of a job that stopped early, such as ``aborted_wait_cleanup``, which also waits for the bed to be cleared."""
+"""The printer's own job state. An ended job sits in ``wait_cleanup`` until someone confirms on the printer that the bed is clear."""
 
 
 def _base(config: dict[str, Any]) -> str:
     return str(config["base_url"]).rstrip("/")
-
-
-def _job_status(text: str) -> DeviceStatus:
-    return _JOB_STATUS.get(text) or (DeviceStatus.IDLE if text.startswith(_ENDED) else DeviceStatus.UNKNOWN)
 
 
 class UltimakerAdapter(IntegrationAdapter):
@@ -79,28 +72,31 @@ class UltimakerAdapter(IntegrationAdapter):
     }
 
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
-        """Reads the printer and its heaters from /api/v1/printer and the active job from the cluster API.
+        """Reads the printer and its heaters from /api/v1/printer and its job from /api/v1/print_job.
 
-        A job's elapsed and total seconds give its progress and time left, as
-        Cura works them out.
+        The cluster stops listing a finished job while the printer still waits
+        for its bed to be cleared, so the job comes from the printer. A job's elapsed and total seconds give its
+        progress and time left, as Cura works them out.
 
         Raises:
-            RuntimeError: If either API answers with anything but its own reply.
+            RuntimeError: If the printer answers with anything but its own reply.
         """
         status, printer = await http("GET", f"{_base(config)}/api/v1/printer")
         require_reply("Ultimaker", "the printer's state", status, status == 200 and isinstance(printer, dict) and "heads" in printer)
-        job = await self._active_job(http, config)
+        status, job = await http("GET", f"{_base(config)}/api/v1/print_job")
+        if status != 404:
+            require_reply("Ultimaker", "its print job", status, status == 200 and isinstance(job, dict))
         hotend = printer["heads"][0]["extruders"][0]["hotend"]["temperature"]
         bed = printer["bed"]["temperature"]
         heaters = {
             "nozzle": Heater.reported(hotend.get("current"), hotend.get("target")),
             "bed": Heater.reported(bed.get("current"), bed.get("target")),
         }
-        if not job:
+        if status == 404:
             return DeviceState(_PRINTER_STATUS.get(str(printer.get("status")), DeviceStatus.UNKNOWN), **heaters)
         elapsed, total = float(job.get("time_elapsed") or 0), float(job.get("time_total") or 0)
         return DeviceState(
-            _job_status(str(job.get("status"))),
+            _JOB_STATUS.get(str(job.get("state")), DeviceStatus.UNKNOWN),
             min(elapsed / max(total, 1.0), 1.0) * 100,
             job.get("name"),
             remaining_s=int(max(total - elapsed, 0)) if total else None,
