@@ -446,9 +446,9 @@ frame. The adjustment formula uses several NumPy operations in sequence. Each op
 reads arrays and writes an intermediate result. One float32 RGB array at 2304 by 1296
 pixels occupies about 36 MB, so repeated full-frame operations put pressure on memory.
 
-`adjust` finishes one 32-row strip before moving to the next. The same calculation now
-works on temporary arrays of about 0.94 MB each at that width, including neighbouring
-rows. This keeps the working set smaller and makes reuse in CPU cache more likely.
+`adjust` finishes one strip of about 32,768 pixels before moving to the next, so each
+float32 temporary is about 400 KB and fits a Raspberry Pi 5 core's 512 KB L2 cache. The
+strip's row count follows the frame's width, 25 rows at 1280 and 14 at 2304.
 It is [cache blocking](https://www.intel.com/content/www/us/en/developer/articles/technical/cache-blocking-techniques.html).
 Cache misses and allocator costs have not been profiled separately, so their individual
 shares of the measured improvement are unknown.
@@ -459,13 +459,14 @@ shares of the measured improvement are unknown.
 | Large intermediate arrays between operations | Small intermediate arrays reused while processing the strip |
 
 Sharpening uses a 3 by 3 neighbourhood. A strip includes one extra input row above and
-below it, where available. Only the middle rows are copied into the result. A pixel at
-a strip boundary therefore has the same neighbours and floating-point operation order
-as before. Neutral settings still return the original array immediately.
+below it, where available, and only the middle rows are copied into the result, so a pixel
+at a strip boundary has the same neighbours as before. Neutral settings still return the
+original array immediately.
 
-This changes the working set, not the pixels. Image dimensions, adjustment strengths,
-rounding and clipping are unchanged. It does a little extra work on the overlapping
-rows; that overhead is why progressively smaller blocks need not be faster.
+Inside each strip brightness and contrast fold into one multiply and add, and the box blur
+is summed rows then columns, in place where it can be. The reordered float maths can leave
+a pixel one level from the unfused formula, which the model can't see after its downscale
+to a 224 pixel greyscale crop. Image dimensions and adjustment strengths are unchanged.
 
 #### Recorded investigation
 
@@ -511,11 +512,28 @@ The [raw results](benchmarks/vision-adjustments-2026-11-07.json) include every t
 | 3840 by 2160 | 1,807.155 | 157.743 | 106.825 | 103.282 | 181.325 |
 
 Every timed output matched the original pixels. The best size varied with resolution
-and conditions, with 64 rows ahead in several of these cases. The implementation keeps
+and conditions, with 64 rows ahead in several of these cases. The first version kept
 the 32-row size already checked in live monitoring; this rerun does not establish a
 universal optimum. It also does not reproduce the original snapshot's roughly 63-fold
 adjustment-stage speedup. At 2304 by 1296, the repeated 32-row comparison was about
 18-fold, which is a more useful indication of how much the measurement conditions matter.
+
+#### Pixel budget and fused maths
+
+On a Raspberry Pi 5 (8 GB) in the `python:3.14-slim-trixie` image the best row count
+followed the frame's width, so blocks are sized by pixels, and fusing the maths roughly
+halved the time again. These are median milliseconds from `tests/benchmark_vision.py`,
+with every block budget at most one level from the full-frame formula.
+
+| Frame size | Full frame | 8K pixels | 16K pixels | **32K pixels** | 64K pixels |
+|---|---:|---:|---:|---:|---:|
+| 1280 by 720 | 57.3 | 22.6 | 15.9 | **14.4** | 22.6 |
+| 1920 by 1080 | 137.2 | 52.1 | 37.1 | **31.6** | 47.2 |
+| 2304 by 1296 | 224.6 | 81.8 | 52.7 | **45.2** | 67.4 |
+| 3840 by 2160 | 641.7 | 250.3 | 173.4 | **145.7** | 205.1 |
+
+An Apple M1 Max showed little difference between any of them, since its caches and memory
+bandwidth already keep up with the full frame.
 
 #### Reproducing the comparison
 
@@ -526,16 +544,16 @@ uv run python tests/benchmark_vision.py
 uv run python tests/benchmark_vision.py --sizes 640x480 2304x1296 --repeats 15 --warmup 3
 ```
 
-It compares the original full-frame formula with the production path using all four
-block sizes. Each path receives the same seeded synthetic RGB pixels. Calls are warmed
-up and their order is shuffled each round. Equality checks run outside the timed region.
-JSON output includes every timing, the medians, dimensions, adjustment settings and
-Python/NumPy versions. It needs no camera, model inference or printer connection.
+It compares the original full-frame formula with the production path at four block
+budgets. Each path receives the same seeded synthetic RGB pixels. Calls are warmed
+up and their order is shuffled each round. Pixel comparisons run outside the timed region.
+JSON output includes every timing, the medians, the largest level difference, dimensions,
+adjustment settings and Python/NumPy versions. It needs no camera, model inference or printer connection.
 
 The default sizes range from 320 by 240 to 3840 by 2160. Compare on an otherwise idle
 machine where possible and report background load. Timings are intentionally not CI
 assertions. CPU cache sizes, NumPy builds, memory allocation and competing work can
-change both the gain and the best block size. Faster processing can reduce the wait
+change both the gain and the best block budget. Faster processing can reduce the wait
 between checks; it does not by itself establish better image quality or detection accuracy.
 
 ### Print reviews
