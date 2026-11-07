@@ -147,6 +147,8 @@ jobs:
           - name: macOS
             os: macos-26
             project: launch-webkit
+            # Current WebKit hangs playing the live view on GitHub's macOS VMs, so this takes the build Playwright keeps for macOS 14.
+            webkit_platform: mac14-arm64
           - name: Windows
             os: windows-2025
             project: launch
@@ -221,6 +223,8 @@ jobs:
       - name: Install WebKit
         if: matrix.name == 'macOS'
         working-directory: web
+        env:
+          PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: ${{ matrix.webkit_platform }}
         run: npx playwright install webkit
       - name: Register cameras and monitors, and catch a failing print
         working-directory: web
@@ -229,6 +233,7 @@ jobs:
           PRINTGUARD_CAMERA_HOST: ${{ matrix.camera_host }}
           PRINTGUARD_CDP: ${{ matrix.app_window }}
           PRINTGUARD_LOG: ${{ matrix.name != 'container' && format('{0}/printguard.log', runner.temp) || '' }}
+          PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: ${{ matrix.webkit_platform }}
         run: npx playwright test --project=${{ matrix.project }}
       - name: Keep the container log
         if: always() && matrix.name == 'container'
