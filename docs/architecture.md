@@ -407,6 +407,21 @@ and `scheduler.infer_squares` scores each and keeps the riskiest result. An uncr
 scored once on its middle square, and `/classify` scores the whole image square by square. `classify` picks the nearest class prototype by Euclidean distance, and an embedding that
 isn't finite raises, so the scheduler reports an inference error for it instead of scoring the frame.
 
+`adjust` works through a frame in blocks of `ADJUST_BLOCK_PIXELS`, 32,768 pixels, with one
+extra row above and below each for the sharpening kernel. Each float32 temporary is then about
+400 KB and stays in a Raspberry Pi 5 core's 512 KB L2 cache. Inside a block brightness and
+contrast fold into one multiply and add and the blur is summed rows then columns, which can
+leave a pixel one level from the unfused formula. These are median milliseconds on a Pi 5 at
+brightness 1.1, contrast 1.05 and sharpness 0.5. A desktop with large caches such as an Apple
+M1 Max sees little difference.
+
+| Frame | Whole frame | Blocks |
+|---|---:|---:|
+| 1280 by 720 | 57 | 14 |
+| 1920 by 1080 | 137 | 32 |
+| 2304 by 1296 | 225 | 45 |
+| 3840 by 2160 | 642 | 146 |
+
 `defect_score` maps the two distances to `0.5 * (1 + tanh((success² - failure²) / 2))`, the
 softmax over negative squared distances the model was trained with. 0.5 is the decision
 boundary, and a result with no distances scores 0.5.
@@ -438,123 +453,6 @@ scored and passed to the watchdog before it is considered for the review, and an
 pushed before its frame is stored, and the watchdog reports a state write that fails instead of
 letting it interrupt the response, so a full data volume raises an `error` event and costs
 only the kept frames.
-
-### Image adjustments in row blocks
-
-Brightness, contrast and sharpening can cost more than inference on a large camera
-frame. The adjustment formula uses several NumPy operations in sequence. Each operation
-reads arrays and writes an intermediate result. One float32 RGB array at 2304 by 1296
-pixels occupies about 36 MB, so repeated full-frame operations put pressure on memory.
-
-`adjust` finishes one strip of about 32,768 pixels before moving to the next, so each
-float32 temporary is about 400 KB and fits a Raspberry Pi 5 core's 512 KB L2 cache. The
-strip's row count follows the frame's width, 25 rows at 1280 and 14 at 2304.
-It is [cache blocking](https://www.intel.com/content/www/us/en/developer/articles/technical/cache-blocking-techniques.html).
-Cache misses and allocator costs have not been profiled separately, so their individual
-shares of the measured improvement are unknown.
-
-| Full-frame order | Blocked order |
-|---|---|
-| Brightness over the whole image, then contrast over the whole image, then each sharpening operation over the whole image | All those operations on the first strip, then all of them on the next strip |
-| Large intermediate arrays between operations | Small intermediate arrays reused while processing the strip |
-
-Sharpening uses a 3 by 3 neighbourhood. A strip includes one extra input row above and
-below it, where available, and only the middle rows are copied into the result, so a pixel
-at a strip boundary has the same neighbours as before. Neutral settings still return the
-original array immediately.
-
-Inside each strip brightness and contrast fold into one multiply and add, and the box blur
-is summed rows then columns, in place where it can be. The reordered float maths can leave
-a pixel one level from the unfused formula, which the model can't see after its downscale
-to a 224 pixel greyscale crop. Image dimensions and adjustment strengths are unchanged.
-
-#### Recorded investigation
-
-The initial investigation used a 2304 by 1296 camera snapshot with brightness 1.1,
-contrast 1.05 and sharpness 0.5, on PrintGuard 2.6.5 in Docker Desktop/WSL with three
-logical CPUs visible. Monitoring remained active. The full-frame timing was one call;
-each block timing below is the median of three subsequent calls on the same snapshot.
-They are exploratory observations, not a controlled or portable speedup claim.
-
-| Processing size | Adjustment time | Pixel comparison with full frame |
-|---|---:|---|
-| Full frame | 1,890.93 ms, one call | Reference |
-| 16 rows | 72.79 ms, median of three | Identical |
-| **32 rows** | **29.77 ms, median of three** | **Identical** |
-| 64 rows | 36.49 ms, median of three | Identical |
-| 128 rows | 43.82 ms, median of three | Identical |
-
-32 rows was the fastest size in that comparison. The earlier local regression checks
-also matched every pixel in 184 comparisons, including odd dimensions, reversed and
-rotated array views, crops, extreme settings and a full-resolution camera snapshot.
-The repository tests retain the original full-frame formula as an independent oracle
-and cover strip seams and image edges with synthetic inputs.
-
-Live completed-inference readings subsequently had a median of 10.96 per second
-(7.06 to 14.36 across 11 samples), compared with earlier readings around 0.5 to 0.86.
-Separate camera-relay changes and automatic runtime selection were also involved in
-that deployment. These end-to-end figures do not isolate the block optimisation.
-The relay's JPEG conversion and FPS-cap changes are outside this implementation.
-
-An offline synthetic-image rerun on 7 November 2026 used Python 3.12.13, NumPy 2.4.6,
-Linux x86-64 and three visible logical CPUs. Each implementation had two warmup calls
-and seven timed calls, with a shuffled order each round. The process ran at low priority
-on a shared WSL host while other work continued. These are median milliseconds per frame.
-The [raw results](benchmarks/vision-adjustments-2026-11-07.json) include every timed call.
-
-| Frame size | Full frame | 16 rows | 32 rows | 64 rows | 128 rows |
-|---|---:|---:|---:|---:|---:|
-| 320 by 240 | 2.960 | 1.782 | 1.295 | 1.363 | 2.596 |
-| 640 by 480 | 15.357 | 6.238 | 5.970 | 4.491 | 5.541 |
-| 1280 by 720 | 45.743 | 16.168 | 12.692 | 10.559 | 9.965 |
-| 1920 by 1080 | 121.829 | 22.974 | 18.906 | 17.270 | 18.821 |
-| 2304 by 1296 | 456.558 | 25.513 | 24.995 | 22.397 | 34.399 |
-| 3840 by 2160 | 1,807.155 | 157.743 | 106.825 | 103.282 | 181.325 |
-
-Every timed output matched the original pixels. The best size varied with resolution
-and conditions, with 64 rows ahead in several of these cases. The first version kept
-the 32-row size already checked in live monitoring; this rerun does not establish a
-universal optimum. It also does not reproduce the original snapshot's roughly 63-fold
-adjustment-stage speedup. At 2304 by 1296, the repeated 32-row comparison was about
-18-fold, which is a more useful indication of how much the measurement conditions matter.
-
-#### Pixel budget and fused maths
-
-On a Raspberry Pi 5 (8 GB) in the `python:3.14-slim-trixie` image the best row count
-followed the frame's width, so blocks are sized by pixels, and fusing the maths roughly
-halved the time again. These are median milliseconds from `tests/benchmark_vision.py`,
-with every block budget at most one level from the full-frame formula.
-
-| Frame size | Full frame | 8K pixels | 16K pixels | **32K pixels** | 64K pixels |
-|---|---:|---:|---:|---:|---:|
-| 1280 by 720 | 57.3 | 22.6 | 15.9 | **14.4** | 22.6 |
-| 1920 by 1080 | 137.2 | 52.1 | 37.1 | **31.6** | 47.2 |
-| 2304 by 1296 | 224.6 | 81.8 | 52.7 | **45.2** | 67.4 |
-| 3840 by 2160 | 641.7 | 250.3 | 173.4 | **145.7** | 205.1 |
-
-An Apple M1 Max showed little difference between any of them, since its caches and memory
-bandwidth already keep up with the full frame.
-
-#### Reproducing the comparison
-
-Run the offline benchmark from the repository root.
-
-```bash
-uv run python tests/benchmark_vision.py
-uv run python tests/benchmark_vision.py --sizes 640x480 2304x1296 --repeats 15 --warmup 3
-```
-
-It compares the original full-frame formula with the production path at four block
-budgets. Each path receives the same seeded synthetic RGB pixels. Calls are warmed
-up and their order is shuffled each round. Pixel comparisons run outside the timed region.
-JSON output includes every timing, the medians, the largest level difference, dimensions,
-adjustment settings and Python/NumPy versions. It needs no camera, model inference or printer connection.
-
-The default sizes range from 320 by 240 to 3840 by 2160. Compare on an otherwise idle
-machine where possible and report background load. Timings are intentionally not CI
-assertions. CPU cache sizes, NumPy builds, memory allocation and competing work can
-change both the gain and the best block budget. Faster processing can reduce the wait
-between checks; it does not by itself establish better image quality or detection accuracy.
 
 ### Print reviews
 
