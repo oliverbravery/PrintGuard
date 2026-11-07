@@ -23,7 +23,7 @@ export default defineConfig<LaunchOptions>({
     { name: "sandbox", testDir: "tests", use: { ...devices["Desktop Chrome"] } },
     { name: "sandbox-webkit", testDir: "tests", use: { ...devices["Desktop Safari"] } },
     { name: "launch", ...launch, use: { ...devices["Desktop Chrome"], channel: "chrome", ...launch.use } },
-    { name: "launch-webkit", ...launch, use: { ...devices["Desktop Safari"], ...launch.use } },
+    { name: "launch-webkit", ...launch, use: { ...devices["Desktop Safari"], ...launch.use, headless: false } },
   ],
   webServer: HUB
     ? { command: `node launch/camera.ts ${CAMERA_PORT}`, url: `http://127.0.0.1:${CAMERA_PORT}` }
