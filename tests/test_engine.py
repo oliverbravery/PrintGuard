@@ -2915,6 +2915,39 @@ def test_rotate_frame_and_transform_compose() -> None:
     assert cropped.shape == (64, 24, 3), "crop is applied on the rotated frame"
 
 
+def adjust_whole_frame(rgb: np.ndarray, brightness: float, contrast: float, sharpness: float) -> np.ndarray:
+    """The adjustment formula applied to the whole frame at once, unfused, for the blocks to match."""
+    arr = (rgb.astype(np.float32) * brightness - 128.0) * contrast + 128.0
+    if sharpness > 0.0:
+        padded = np.pad(arr, ((1, 1), (1, 1), (0, 0)), mode="edge")
+        blur = sum(padded[r : r + arr.shape[0], c : c + arr.shape[1]] for r in range(3) for c in range(3)) / 9.0
+        arr = arr + sharpness * (arr - blur)
+    return np.clip(arr, 0, 255).astype(np.uint8)
+
+
+@pytest.mark.parametrize("height, width", [(1, 1), (31, 37), (97, 104), (5, 2000), (720, 1280)])
+@pytest.mark.parametrize("brightness, contrast, sharpness", [(1.1, 1.05, 0.5), (0.25, 2.0, 2.0), (2.0, 0.25, 0.01), (2.0, 2.0, 0.0)])
+@pytest.mark.parametrize("layout", ["contiguous", "reversed", "rotated"])
+def test_adjusting_in_blocks_lands_within_a_level_of_the_whole_frame(
+    monkeypatch, height: int, width: int, brightness: float, contrast: float, sharpness: float, layout: str
+) -> None:
+    monkeypatch.setattr(vision, "ADJUST_BLOCK_PIXELS", 1024)
+    frame = np.random.default_rng(0).integers(0, 256, (height, width, 3), dtype=np.uint8)
+    frame = {"contiguous": frame, "reversed": frame[::-1, ::-1], "rotated": np.rot90(frame)}[layout]
+    untouched = frame.copy()
+
+    adjusted = vision.adjust(frame, brightness, contrast, sharpness)
+
+    assert adjusted.shape == frame.shape and adjusted.dtype == np.uint8
+    assert np.abs(adjusted.astype(np.int16) - adjust_whole_frame(frame, brightness, contrast, sharpness)).max() <= 1, "a block seam moved a pixel"
+    assert np.array_equal(frame, untouched), "adjusting wrote into the camera's frame"
+
+
+def test_neutral_adjustments_hand_back_the_same_frame() -> None:
+    frame = np.zeros((65, 83, 3), dtype=np.uint8)
+    assert vision.adjust(frame) is frame
+
+
 @pytest.mark.parametrize("height, width", [(1080, 1920), (480, 640), (1000, 1150), (1920, 1080), (300, 1500), (1000, 9000)])
 def test_a_wide_frame_is_scored_as_overlapping_squares_that_cover_it(height: int, width: int) -> None:
     frame = np.zeros((height, width, 3), dtype=np.uint8)

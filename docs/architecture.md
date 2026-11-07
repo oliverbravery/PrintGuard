@@ -407,6 +407,21 @@ and `scheduler.infer_squares` scores each and keeps the riskiest result. An uncr
 scored once on its middle square, and `/classify` scores the whole image square by square. `classify` picks the nearest class prototype by Euclidean distance, and an embedding that
 isn't finite raises, so the scheduler reports an inference error for it instead of scoring the frame.
 
+`adjust` works through a frame in blocks of `ADJUST_BLOCK_PIXELS`, 32,768 pixels, with one
+extra row above and below each for the sharpening kernel. Each float32 temporary is then about
+400 KB and stays in a Raspberry Pi 5 core's 512 KB L2 cache. Inside a block brightness and
+contrast fold into one multiply and add and the blur is summed rows then columns, which can
+leave a pixel one level from the unfused formula. These are median milliseconds on a Pi 5 at
+brightness 1.1, contrast 1.05 and sharpness 0.5. A desktop with large caches such as an Apple
+M1 Max sees little difference.
+
+| Frame | Whole frame | Blocks |
+|---|---:|---:|
+| 1280 by 720 | 57 | 14 |
+| 1920 by 1080 | 137 | 32 |
+| 2304 by 1296 | 225 | 45 |
+| 3840 by 2160 | 642 | 146 |
+
 `defect_score` maps the two distances to `0.5 * (1 + tanh((success² - failure²) / 2))`, the
 softmax over negative squared distances the model was trained with. 0.5 is the decision
 boundary, and a result with no distances scores 0.5.

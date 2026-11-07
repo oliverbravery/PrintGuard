@@ -10,6 +10,7 @@ const launch = {
   use: {
     cameraUrl: `http://${process.env.PRINTGUARD_CAMERA_HOST || "127.0.0.1"}:${CAMERA_PORT}`,
     screenshot: "only-on-failure",
+    trace: "retain-on-failure",
   },
 } as const;
 
