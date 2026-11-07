@@ -145,7 +145,7 @@ jobs:
             project: launch
             camera_host: host.docker.internal
           - name: macOS
-            os: macos-15
+            os: macos-26
             project: launch-webkit
           - name: Windows
             os: windows-2025
