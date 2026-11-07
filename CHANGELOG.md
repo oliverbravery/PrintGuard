@@ -11,6 +11,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Fixed
 
+- Brightness, contrast and sharpening take about a quarter of the time on a Raspberry Pi 5 with a high-resolution camera. Thanks to @JohnSt99.
 - An Ultimaker that has finished a print shows as idle while it waits for you to confirm the bed is clear, instead of printing at 0%. Thanks to @tsaman01.
 
 ## [2.6.5] - 2026-11-04
