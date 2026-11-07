@@ -200,10 +200,8 @@ def crop_frame(rgb: np.ndarray, crop: dict[str, float] | None) -> np.ndarray:
 def adjust(rgb: np.ndarray, brightness: float = 1.0, contrast: float = 1.0, sharpness: float = 0.0) -> np.ndarray:
     """Applies brightness, contrast and sharpness to an RGB frame.
 
-    Works through blocks of about ``ADJUST_BLOCK_PIXELS`` pixels so the float
-    intermediates stay in CPU cache, which more than halves the time on a
-    Raspberry Pi. One neighbouring row on each side preserves the sharpening
-    kernel at seams.
+    Works through blocks of about ``ADJUST_BLOCK_PIXELS`` pixels, each with one
+    neighbouring row on either side so sharpening is unbroken at the seams.
 
     Args:
         rgb: HxWx3 uint8 frame in RGB channel order.
