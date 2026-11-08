@@ -47,7 +47,7 @@ export function SchemaForm({
   const formId = useId();
   const required = meta.schema.required ?? [];
   const moved = stored !== undefined && addressMoved(value, stored);
-  const setField = (key: string, next: string | null | undefined) => {
+  const setField = (key: string, next: string | boolean | null | undefined) => {
     const { [key]: _previous, ...rest } = value;
     onChange(next === undefined ? rest : { ...value, [key]: next });
   };
@@ -61,8 +61,17 @@ export function SchemaForm({
             {prop.title}
             {required.includes(key) && <span className="text-accent"> *</span>}
           </label>
-          {prop.enum ? (
-            <select id={formId + key} className="field" value={value[key] ?? prop.default ?? ""} onChange={(e) => setField(key, e.target.value)}>
+          {prop.type === "boolean" ? (
+            <input
+              id={formId + key}
+              type="checkbox"
+              className="h-5 w-5 accent-accent"
+              aria-required={required.includes(key)}
+              checked={(value[key] ?? prop.default ?? false) === true}
+              onChange={(e) => setField(key, e.target.checked)}
+            />
+          ) : prop.enum ? (
+            <select id={formId + key} className="field" value={String(value[key] ?? prop.default ?? "")} onChange={(e) => setField(key, e.target.value)}>
               {prop.default === undefined && <option value="">Select…</option>}
               {prop.enum.map((option, index) => (
                 <option key={option} value={option}>
@@ -77,7 +86,7 @@ export function SchemaForm({
               saved={saved.includes(key)}
               aria-required={required.includes(key) && !saved.includes(key)}
               retype={moved}
-              value={value[key]}
+              value={value[key] === null ? null : shown(value, key)}
               placeholder={prop.placeholder}
               autoCapitalize="none"
               autoCorrect="off"
@@ -91,7 +100,7 @@ export function SchemaForm({
               type="text"
               aria-required={required.includes(key)}
               placeholder={prop.placeholder}
-              value={value[key] ?? ""}
+              value={shown(value, key)}
               autoComplete="off"
               autoCapitalize="none"
               autoCorrect="off"

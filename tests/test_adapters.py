@@ -1973,6 +1973,7 @@ def test_print_formats_and_heater_control_travel_with_adapter_meta() -> None:
         "bambu": (["3mf"], True),
         "elegoo": (["gcode"], True),
         "ultimaker": (["gcode"], False),
+        "creality_stock": (["gcode"], True),
     }
 
 

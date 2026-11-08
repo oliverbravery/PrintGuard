@@ -7,6 +7,12 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- I added stock Creality CR-10 SE support for status, pause, resume, cancel, heater targets and starting sliced G-code, with each control enabled separately.
+
 ## [2.6.6] - 2026-11-07
 
 ### Fixed
