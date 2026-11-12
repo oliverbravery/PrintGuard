@@ -207,8 +207,7 @@ Bambu and Elegoo tests do.
      `placeholder` hints at the expected value, `default` preselects an optional
      `enum`, so the form never offers an empty choice the adapter quietly fills in, and
      `required` names the fields the service can't be reached without. `Adapter.require()`
-     enforces it, so saving or testing with one blank fails naming the field. Boolean fields render
-     as checkboxes and save JSON booleans; a saved `false` overrides a `true` default.
+     enforces it, so saving or testing with one blank fails naming the field.
    - set `docs_url` to the official API reference. It is required for review. `setup_url` and
      `setup_hint` put a setup guide and a one-line note on the form, for steps taken on the
      printer itself.

@@ -11,19 +11,21 @@ from concurrent.futures import ThreadPoolExecutor
 from email.header import decode_header, make_header
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Container
+from typing import Any, AsyncIterator, Container
 
 import httpx
 import numpy as np
 import pytest
 from paho.mqtt.packettypes import PacketTypes
 from paho.mqtt.reasoncodes import ReasonCode
+from websockets.asyncio.server import serve
 
 from printguard.engine import vision
 from printguard.engine.cameras import webrtc_endpoint, whep_endpoint
 from printguard.engine.integrations import INTEGRATIONS, DeviceAction, DeviceState, DeviceStatus, IntegrationAdapter
-from printguard.engine.integrations import bambu, klipper, octoprint
+from printguard.engine.integrations import bambu, creality, klipper, octoprint
 from printguard.engine.integrations.bambu import BambuAdapter
+from printguard.engine.integrations.creality import CrealityAdapter
 from printguard.engine.integrations.base import webcam_url
 from printguard.engine.integrations.elegoo import ElegooAdapter
 from printguard.engine.monitors import MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor
@@ -1292,6 +1294,284 @@ async def test_bambu_without_a_camera_exposes_nothing(monkeypatch) -> None:
     assert await INTEGRATIONS["bambu"].cameras(None, BAMBU_CONFIG) == []
 
 
+CREALITY_CONFIG = {"host": "127.0.0.1"}
+CREALITY_GCODES = "/usr/data/printer_data/gcodes"
+CREALITY_REPORT = {
+    "model": "K1C",
+    "state": 1,
+    "printProgress": 14,
+    "printLeftTime": 1800,
+    "printFileName": f"{CREALITY_GCODES}/benchy.gcode",
+    "nozzleTemp": "219.6",
+    "targetNozzleTemp": 220,
+    "bedTemp0": "60.1",
+    "targetBedTemp0": 60,
+}
+
+
+class FakeCrealityPrinter:
+    """A stock-firmware printer's WebSocket on loopback, which pushes its whole state on connect and then what each request changes."""
+
+    def __init__(self) -> None:
+        self.report: dict[str, Any] = dict(CREALITY_REPORT)
+        self.requests: list[Any] = []
+        self.files: dict[str, int] = {}
+        self.sockets: list[Any] = []
+        self.takes_commands = True
+        self.legacy_file_list = False
+
+    async def serve(self, socket: Any) -> None:
+        self.sockets.append(socket)
+        await socket.send(jsonlib.dumps(self.report))
+        async for frame in socket:
+            self.requests.append(frame if frame == "ok" else jsonlib.loads(frame))
+            if frame != "ok" and self.takes_commands:
+                for change in self._changes(jsonlib.loads(frame)["params"]):
+                    await self.push(change)
+
+    async def received(self, count: int) -> None:
+        async with asyncio.timeout(1.0):
+            while len(self.requests) < count:
+                await asyncio.sleep(0.001)
+
+    async def push(self, change: dict[str, Any] | str) -> None:
+        if isinstance(change, dict):
+            self.report.update(change)
+        await self.sockets[-1].send(change if isinstance(change, str) else jsonlib.dumps(change))
+
+    def _changes(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        if "pause" in params:
+            return [{"state": 6}, {"state": 5}] if params["pause"] else [{"state": 8}, {"state": 1}]
+        if "stop" in params:
+            return [{"state": 7}, {"state": 4}]
+        if "nozzleTempControl" in params:
+            return [{"targetNozzleTemp": params["nozzleTempControl"]}]
+        if "bedTempControl" in params:
+            return [{"targetBedTemp0": params["bedTempControl"]["val"]}]
+        if "reqGcodeFile" in params and self.legacy_file_list:
+            return [{"retGcodeFileInfo": {"fileInfo": "".join(f"{CREALITY_GCODES}:{name}:{size}:0:1731400000;" for name, size in self.files.items())}}]
+        if "reqGcodeFile" in params:
+            return [{"retGcodeFileInfo2": [{"name": name, "file_size": size, "path": f"{CREALITY_GCODES}/{name}"} for name, size in self.files.items()]}]
+        if "opGcodeFile" in params:
+            return [{"state": 1, "printFileName": params["opGcodeFile"].removeprefix("printprt:")}]
+        if "ReqPrinterPara" in params:
+            return [{"curPosition": "X:0.00 Y:0.00 Z:0.00"}]
+        return []
+
+
+class CrealityUpload:
+    """The printer's upload endpoint, which stores the file part of the form it is sent."""
+
+    def __init__(self, printer: FakeCrealityPrinter, status: int = 200, bytes_lost: int = 0) -> None:
+        self.printer = printer
+        self.status = status
+        self.bytes_lost = bytes_lost
+        self.calls: list[dict[str, Any]] = []
+
+    async def __call__(self, method: str, url: str, *, headers: dict[str, str], data: Any, timeout: float) -> tuple[int, Any]:
+        body = b"".join([chunk async for chunk in data])
+        self.calls.append({"method": method, "url": url, "headers": headers, "data": body})
+        if self.status == 200:
+            stored = body.split(b"\r\n\r\n", 1)[1].rsplit(b"\r\n--", 1)[0]
+            self.printer.files[url.rsplit("/", 1)[1]] = len(stored) - self.bytes_lost
+        return self.status, {"code": self.status}
+
+
+@pytest.fixture
+async def creality_printer(monkeypatch) -> AsyncIterator[FakeCrealityPrinter]:
+    printer = FakeCrealityPrinter()
+    async with serve(printer.serve, "127.0.0.1", 0) as server:
+        monkeypatch.setattr(creality, "_PORT", server.sockets[0].getsockname()[1])
+        yield printer
+
+
+@pytest.fixture
+async def creality_adapter() -> AsyncIterator[CrealityAdapter]:
+    adapter = CrealityAdapter()
+    yield adapter
+    await adapter.close()
+
+
+async def creality_heard(adapter: CrealityAdapter, check: Any) -> None:
+    await adapter._sessions[CREALITY_CONFIG["host"]].until(check, 1.0)
+
+
+async def test_creality_holds_one_connection_and_merges_what_changed(creality_printer, creality_adapter) -> None:
+    state = await creality_adapter.fetch_state(None, CREALITY_CONFIG)
+    assert state.public() == {
+        "status": "printing",
+        "progress": 14.0,
+        "job": "benchy.gcode",
+        "remaining_s": 1800,
+        "nozzle": {"actual": 219.6, "target": 220.0},
+        "bed": {"actual": 60.1, "target": 60.0},
+    }
+    await creality_printer.push({"printProgress": 50})
+    await creality_heard(creality_adapter, lambda report: report["printProgress"] == 50)
+    state = await creality_adapter.fetch_state(None, CREALITY_CONFIG)
+    assert (state.status, state.progress, state.job) == (DeviceStatus.PRINTING, 50.0, "benchy.gcode"), "the printer sends only what changed"
+    await creality_adapter.send(None, CREALITY_CONFIG, DeviceAction.PAUSE)
+    assert len(creality_printer.sockets) == 1, "polls and commands share the connection"
+    await creality_adapter.close(CREALITY_CONFIG)
+    await creality_printer.sockets[0].wait_closed()
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        (0, DeviceStatus.IDLE),
+        (1, DeviceStatus.PRINTING),
+        (2, DeviceStatus.IDLE),
+        (3, DeviceStatus.IDLE),
+        (4, DeviceStatus.IDLE),
+        (5, DeviceStatus.PAUSED),
+        (6, DeviceStatus.UNKNOWN),
+        (7, DeviceStatus.UNKNOWN),
+        (8, DeviceStatus.UNKNOWN),
+        (9, DeviceStatus.UNKNOWN),
+    ],
+)
+async def test_creality_normalises_creality_prints_state_codes(creality_printer, creality_adapter, code: int, expected: DeviceStatus) -> None:
+    creality_printer.report["state"] = code
+    assert (await creality_adapter.fetch_state(None, CREALITY_CONFIG)).status is expected
+
+
+async def test_creality_skips_what_is_not_state_and_answers_the_heartbeat(creality_printer, creality_adapter) -> None:
+    await creality_adapter.fetch_state(None, CREALITY_CONFIG)
+    for frame in ("ok", "not json", "[1]", {"ModeCode": "heart_beat"}, {"printProgress": 60}):
+        await creality_printer.push(frame)
+    await creality_heard(creality_adapter, lambda report: report["printProgress"] == 60)
+    await creality_printer.received(1)
+    assert creality_printer.requests == ["ok"]
+    assert (await creality_adapter.fetch_state(None, CREALITY_CONFIG)).progress == 60.0
+
+
+@pytest.mark.parametrize(
+    ("action", "state", "params", "after"),
+    [
+        (DeviceAction.PAUSE, 1, {"pause": 1}, DeviceStatus.PAUSED),
+        (DeviceAction.RESUME, 5, {"pause": 0}, DeviceStatus.PRINTING),
+        (DeviceAction.CANCEL, 5, {"stop": 1}, DeviceStatus.IDLE),
+    ],
+)
+async def test_creality_action_waits_for_the_printer_to_take_it(
+    creality_printer, creality_adapter, action: DeviceAction, state: int, params: dict[str, int], after: DeviceStatus
+) -> None:
+    creality_printer.report["state"] = state
+    await creality_adapter.send(None, CREALITY_CONFIG, action)
+    assert creality_printer.requests == [{"method": "set", "params": params}]
+    await creality_heard(creality_adapter, lambda report: report["state"] in (1, 4, 5))
+    assert (await creality_adapter.fetch_state(None, CREALITY_CONFIG)).status is after
+
+
+async def test_creality_action_already_taken_or_with_no_print_sends_nothing(creality_printer, creality_adapter) -> None:
+    creality_printer.report["state"] = 5
+    await creality_adapter.send(None, CREALITY_CONFIG, DeviceAction.PAUSE)
+    await creality_printer.push({"state": 0})
+    await creality_heard(creality_adapter, lambda report: report["state"] == 0)
+    await creality_adapter.send(None, CREALITY_CONFIG, DeviceAction.CANCEL)
+    with pytest.raises(RuntimeError, match="no print to resume"):
+        await creality_adapter.send(None, CREALITY_CONFIG, DeviceAction.RESUME)
+    assert creality_printer.requests == []
+
+
+async def test_creality_action_the_printer_does_not_take_raises(creality_printer, creality_adapter, monkeypatch) -> None:
+    creality_printer.takes_commands = False
+    monkeypatch.setattr(creality, "_COMMAND_TIMEOUT_S", 0.05)
+    with pytest.raises(RuntimeError, match="did not take the pause within 0.05 s"):
+        await creality_adapter.send(None, CREALITY_CONFIG, DeviceAction.PAUSE)
+
+
+async def test_creality_heater_targets_are_sent_in_whole_degrees(creality_printer, creality_adapter) -> None:
+    await creality_adapter.heat(None, CREALITY_CONFIG, "nozzle", 215.4)
+    await creality_adapter.heat(None, CREALITY_CONFIG, "bed", 0.0)
+    await creality_adapter.heat(None, CREALITY_CONFIG, "nozzle", 215.0)
+    assert creality_printer.requests == [
+        {"method": "set", "params": {"nozzleTempControl": 215}},
+        {"method": "set", "params": {"bedTempControl": {"num": 0, "val": 0}}},
+    ], "a target the printer already holds is not sent again"
+    state = await creality_adapter.fetch_state(None, CREALITY_CONFIG)
+    assert (state.nozzle.target, state.bed.target) == (215.0, 0.0)
+
+
+@pytest.mark.parametrize("legacy_file_list", [False, True])
+async def test_creality_starts_an_upload_from_the_path_the_printer_lists(creality_printer, creality_adapter, legacy_file_list: bool) -> None:
+    creality_printer.report["state"] = 0
+    creality_printer.legacy_file_list = legacy_file_list
+    http = CrealityUpload(creality_printer)
+    await creality_adapter.print_file(http, CREALITY_CONFIG, "vase.gcode", b"G28\nG1 X10\n")
+    ((upload),) = http.calls
+    assert (upload["method"], upload["url"]) == ("POST", "http://127.0.0.1/upload/vase.gcode")
+    assert b'name="file"; filename="vase.gcode"' in upload["data"] and b"\r\n\r\nG28\nG1 X10\n\r\n--" in upload["data"]
+    assert creality_printer.requests == [
+        {"method": "get", "params": {"reqGcodeFile": 1}},
+        {"method": "set", "params": {"opGcodeFile": f"printprt:{CREALITY_GCODES}/vase.gcode", "enableSelfTest": 0}},
+    ]
+    state = await creality_adapter.fetch_state(None, CREALITY_CONFIG)
+    assert (state.status, state.job) == (DeviceStatus.PRINTING, "vase.gcode")
+
+
+async def test_creality_never_starts_a_file_listed_at_another_size(creality_printer, creality_adapter, monkeypatch) -> None:
+    creality_printer.report["state"] = 0
+    monkeypatch.setattr(creality, "_FILE_LIST_TIMEOUT_S", 0.05)
+    with pytest.raises(RuntimeError, match="did not list vase.gcode"):
+        await creality_adapter.print_file(CrealityUpload(creality_printer, bytes_lost=1), CREALITY_CONFIG, "vase.gcode", b"G28\n")
+    assert [request["params"] for request in creality_printer.requests] == [{"reqGcodeFile": 1}]
+
+
+async def test_creality_refused_upload_is_never_started(creality_printer, creality_adapter) -> None:
+    with pytest.raises(RuntimeError, match="rejected vase.gcode: HTTP 500"):
+        await creality_adapter.print_file(CrealityUpload(creality_printer, status=500), CREALITY_CONFIG, "vase.gcode", b"G28\n")
+    assert creality_printer.sockets == []
+
+
+async def test_creality_closed_or_silent_connection_is_reopened(creality_printer, creality_adapter, monkeypatch) -> None:
+    await creality_adapter.fetch_state(None, CREALITY_CONFIG)
+    await creality_printer.sockets[0].close()
+    with pytest.raises(ConnectionError):
+        await creality_heard(creality_adapter, lambda report: False)
+    await creality_adapter.fetch_state(None, CREALITY_CONFIG)
+    monkeypatch.setattr(creality, "_SILENCE_LIMIT_S", 0.0)
+    await creality_adapter.fetch_state(None, CREALITY_CONFIG)
+    assert len(creality_printer.sockets) == 3
+
+
+async def test_creality_quiet_printer_is_asked_for_a_frame(creality_printer, creality_adapter, monkeypatch) -> None:
+    await creality_adapter.fetch_state(None, CREALITY_CONFIG)
+    monkeypatch.setattr(creality, "_QUIET_S", 0.0)
+    await creality_adapter.fetch_state(None, CREALITY_CONFIG)
+    await creality_printer.received(1)
+    assert creality_printer.requests == [{"method": "get", "params": {"ReqPrinterPara": 1}}]
+
+
+async def test_creality_endpoint_that_sends_no_state_raises(creality_printer, creality_adapter, monkeypatch) -> None:
+    creality_printer.report = {"model": "K1C"}
+    monkeypatch.setattr(creality, "_CONNECT_TIMEOUT_S", 0.05)
+    with pytest.raises(RuntimeError, match="answered but sent no printer state"):
+        await creality_adapter.fetch_state(None, CREALITY_CONFIG)
+
+
+@pytest.mark.parametrize(
+    ("answer", "cameras"),
+    [
+        ((200, "/9j/"), [{"key": "camera", "name": "Creality camera", "source": {"kind": "url", "url": "http://10.0.0.7:8080/?action=stream"}}]),
+        ((404, "Not Found"), []),
+        (httpx.ConnectError("refused"), []),
+    ],
+)
+async def test_creality_exposes_the_mjpeg_camera_only_where_its_snapshot_answers(answer: Any, cameras: list[dict[str, Any]]) -> None:
+    asked: list[tuple[str, dict[str, Any]]] = []
+
+    async def http(method: str, url: str, **options: Any) -> tuple[int, Any]:
+        asked.append((url, options))
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    assert await CrealityAdapter().cameras(http, {"host": "10.0.0.7"}) == cameras
+    assert asked == [("http://10.0.0.7:8080/?action=snapshot", {"binary": True, "timeout": creality._CONNECT_TIMEOUT_S})]
+
+
 ELEGOO_CENTAURI_CONFIG = {"family": "centauri", "host": "192.168.1.90", "access_code": "Ab3dEf"}
 ELEGOO_MOONRAKER_CONFIG = {"family": "moonraker", "host": "192.168.1.91", "api_key": "secret"}
 
@@ -1973,7 +2253,7 @@ def test_print_formats_and_heater_control_travel_with_adapter_meta() -> None:
         "bambu": (["3mf"], True),
         "elegoo": (["gcode"], True),
         "ultimaker": (["gcode"], False),
-        "creality_stock": (["gcode"], True),
+        "creality": (["gcode"], True),
     }
 
 

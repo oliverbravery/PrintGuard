@@ -67,7 +67,7 @@ export interface Printer {
   id: string;
   name: string;
   provider: string;
-  config: AdapterConfig;
+  config: Record<string, string>;
   secrets_set?: string[];
   device_state?: DeviceState | null;
   online: boolean;
@@ -203,10 +203,10 @@ export interface SchemaProperty {
   placeholder?: string;
   enum?: string[];
   enum_labels?: string[];
-  default?: string | boolean;
+  default?: string;
 }
 
-export type AdapterConfig = Record<string, string | boolean | null>;
+export type AdapterConfig = Record<string, string | null>;
 
 export interface AdapterMeta {
   id: string;
