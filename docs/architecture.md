@@ -53,7 +53,7 @@ flowchart LR
     engine -- "Platform protocol" --> server["server/platform.py<br/>LiteRT / ONNX Runtime · PyAV · httpx · QuickJS"]
 
     server --- mediamtx["MediaMTX<br/>RTSP / RTMP / WHEP / HLS"]
-    integrations --- printersvc["OctoPrint / Moonraker / CR-10 SE / Elegoo / PrusaLink / Bambu Lab / Ultimaker"]
+    integrations --- printersvc["OctoPrint / Moonraker / Creality / Elegoo / PrusaLink / Bambu Lab / Ultimaker"]
     notifiers --- push["ntfy / Pushover / Telegram / Discord / native"]
 ```
 
@@ -135,7 +135,7 @@ built on a vendor's client library open their own connections:
 |---|---|
 | [`integrations/bambu.py`](../printguard/engine/integrations/bambu.py) | paho MQTT on one connection held per printer, `ftplib` over TLS and raw sockets |
 | [`integrations/elegoo.py`](../printguard/engine/integrations/elegoo.py) | pycentauri, which holds its own connection, a DNS lookup and a temporary file for an upload |
-| [`integrations/creality_stock.py`](../printguard/engine/integrations/creality_stock.py) | websockets for fresh stock CR-10 SE reports and confirmed controls; uploads use `platform.http` |
+| [`integrations/creality.py`](../printguard/engine/integrations/creality.py) | websockets on one connection held per printer |
 | [`integrations/prusa.py`](../printguard/engine/integrations/prusa.py) | pyprusalink with its own httpx client |
 | [`notifiers/native.py`](../printguard/engine/notifiers/native.py) | desktop-notifier and a temporary snapshot file |
 | [`logs.py`](../printguard/engine/logs.py) | The rotating log file |
@@ -874,7 +874,7 @@ printguard/
     oauth.py         a plugin's sign-in to a service, by authorisation code with PKCE
     sockets.py       WebSockets held open for plugins
     urls.py          URL match patterns, the scope of a plugin's network grant
-    integrations/    printer service adapters (OctoPrint, Klipper, CR-10 SE, Elegoo, PrusaLink, Bambu Lab, Ultimaker)
+    integrations/    printer service adapters (OctoPrint, Klipper, Creality, Elegoo, PrusaLink, Bambu Lab, Ultimaker)
     notifiers/       alert channel adapters (ntfy, Pushover, Telegram, Discord, native desktop)
     adapters.py      shared adapter contract (id, label, docs_url, JSON-schema config)
   server/            hub platform: FastAPI, bundled MediaMTX (child process), LiteRT / ONNX Runtime, PyAV

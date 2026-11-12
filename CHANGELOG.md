@@ -11,7 +11,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Added
 
-- I added stock Creality CR-10 SE support for status, pause, resume, cancel, heater targets and starting sliced G-code, with each control enabled separately.
+- Creality's K1, K2, Ender-3 V3, Hi and CR-10 SE connect on stock firmware over their local WebSocket, so a defect pauses the print and you can preheat them and send them G-code. Thanks to @JohnSt99.
 
 ## [2.6.6] - 2026-11-07
 
