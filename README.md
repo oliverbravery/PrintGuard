@@ -41,7 +41,7 @@ Obico's Spaghetti Detective, the only other open model, over the same four unsee
 | | |
 |---|---|
 | Detect | Scores every frame on your own CPU, GPU or NPU and shares one model across as many cameras as the hardware can sustain. Only watches while a linked printer is printing |
-| Act | Pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa, Bambu Lab or Ultimaker once a defect holds |
+| Act | Pauses or cancels the print through OctoPrint, Klipper, Creality, Elegoo, Prusa, Bambu Lab or Ultimaker once a defect holds |
 | Alert | Sends a snapshot over ntfy, Pushover, Telegram or Discord, and warns you when a camera drops, a feed freezes or a printer stops answering |
 | Control | Shows temperatures and progress, preheats with one tap, and keeps a library of sliced files you can preview in 3D and start on an idle printer |
 | Tune | Sets the threshold, how long a defect must hold and the cooldown for each monitor, against a history of its risk score and a snapshot of every alert |
@@ -121,11 +121,11 @@ as a camera for you.
 
 | | Supported |
 |---|---|
-| Print services | OctoPrint, Klipper (Moonraker), Elegoo, Prusa (PrusaLink), Bambu Lab, Ultimaker |
+| Print services | OctoPrint, Klipper (Moonraker), Creality, Elegoo, Prusa (PrusaLink), Bambu Lab, Ultimaker |
 | Cameras | Printer webcams, USB cameras plugged into the hub, RTSP, RTMP, HTTP/MJPEG, WHEP and a phone's or laptop's own camera |
 | Alerts | ntfy, Pushover, Telegram, Discord and Desktop notification in the desktop app |
 
-Bambu, Elegoo, Prusa and Ultimaker printers are reached over their local APIs and never their clouds. [docs/printers.md](docs/printers.md) has the setup for each service,
+Creality, Bambu, Elegoo, Prusa and Ultimaker printers are reached over their local APIs and never their clouds. [docs/printers.md](docs/printers.md) has the setup for each service,
 [docs/cameras.md](docs/cameras.md) each camera source and
 [docs/notifications.md](docs/notifications.md) each alert channel.
 
@@ -155,7 +155,7 @@ slicer wrote into it.
 ![A sliced vase in the 3D viewer with a layer slider, its print time, filament and temperatures](docs/assets/print-viewer.png)
 
 Tag a file with the printers it was sliced for and it can only start on those, and a printer has
-to be idle before a file is sent to it. OctoPrint, Klipper, Elegoo and Ultimaker take gcode, PrusaLink also
+to be idle before a file is sent to it. OctoPrint, Klipper, Creality, Elegoo and Ultimaker take gcode, PrusaLink also
 takes bgcode and Bambu Lab takes a sliced 3mf.
 [docs/printers.md](docs/printers.md#sending-prints) has the details.
 

@@ -12,6 +12,7 @@ from typing import Any
 
 from .bambu import BambuAdapter
 from .base import HEATERS, DeviceAction, DeviceState, DeviceStatus, Heater, IntegrationAdapter
+from .creality import CrealityAdapter
 from .elegoo import ElegooAdapter
 from .klipper import KlipperAdapter
 from .octoprint import OctoPrintAdapter
@@ -20,7 +21,7 @@ from .ultimaker import UltimakerAdapter
 
 INTEGRATIONS: dict[str, IntegrationAdapter] = {
     adapter.id: adapter
-    for adapter in (OctoPrintAdapter(), KlipperAdapter(), PrusaAdapter(), BambuAdapter(), ElegooAdapter(), UltimakerAdapter())
+    for adapter in (OctoPrintAdapter(), KlipperAdapter(), PrusaAdapter(), BambuAdapter(), ElegooAdapter(), UltimakerAdapter(), CrealityAdapter())
 }
 
 

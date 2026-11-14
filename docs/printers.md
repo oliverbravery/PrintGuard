@@ -65,6 +65,7 @@ watched and warns you. See [failing safely](architecture.md#failing-safely).
 |---|---|---|
 | [OctoPrint](https://octoprint.org) | An application key, from Settings then Application Keys in OctoPrint | Yes, its webcam stream |
 | [Klipper (Moonraker)](https://moonraker.readthedocs.io) | None on a trusted LAN. Otherwise add the hub's address to `trusted_clients` under `[authorization]` in `moonraker.conf`, or enter an API key | Yes, its configured webcams |
+| [Creality](https://github.com/CrealityOfficial/CrealityPrint/tree/v7.3.0/resources/web/deviceMgr) | None, so keep it on a trusted LAN | Its MJPEG stream on port 8080, on the models that serve one |
 | [Elegoo](https://github.com/ELEGOO-3D/elegoo-link) | Access code on a Centauri Carbon 2, or an optional Moonraker API key | Centauri chamber camera, or Moonraker's configured webcams |
 | [Prusa (PrusaLink)](https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293) | HTTP Digest, user `maker` unless you set another | No local stream |
 | [Bambu Lab](https://github.com/Doridian/OpenBambuAPI) | Access code and serial | Chamber camera |
@@ -93,6 +94,29 @@ PrintGuard holds one connection to the printer and reads the reports it pushes. 
 pushes nothing for a minute is reconnected and shown offline until it reports again. With
 Developer Mode off the printer still reports its state but rejects a pause, cancel, heater
 target or print start, and PrintGuard reports that command as failed.
+
+</details>
+
+<details>
+<summary><b>Creality</b>: the K1, K2, Ender-3 V3, Hi and CR-10 SE on stock firmware</summary>
+
+Creality's stock firmware on the K1, K2, Ender-3 V3 and Hi series and the CR-10 SE serves the
+WebSocket Creality Print talks to. Register the printer with its IP address or hostname. The hub
+reaches it on port `9999`, and on port `80` to upload a print. Neither has a password, so keep
+the printer on a network you trust. A rooted printer running Moonraker connects as
+**Klipper (Moonraker)** instead.
+
+PrintGuard holds one connection to the printer and reads the state it pushes. A printer that
+sends nothing for 20 seconds is reconnected. The printer doesn't answer a command, so a pause,
+resume, cancel or heater target counts as sent once the printer reports the state or target it
+leads to, within 10 seconds. While it pauses, stops, restores or starts a print its state shows
+as unknown and a monitor stays as it was.
+
+A K1 on firmware older than 1.3.5.22, and a K1 SE or Ender-3 V3 with Creality's camera fitted,
+serve an MJPEG stream on port `8080` that's registered as the printer's camera. The K2, the Hi
+and later K1 firmware stream WebRTC with Creality's own signalling, so put
+[go2rtc](https://github.com/AlexxIT/go2rtc) in front of the camera and add it as a
+[stream URL](cameras.md#stream-urls).
 
 </details>
 
@@ -199,6 +223,7 @@ starts straight away.
 |---|---|---|
 | OctoPrint | `.gcode`, `.gco`, `.g` | Uploaded to local storage, selected and printed |
 | Klipper (Moonraker) | `.gcode`, `.gco`, `.g` | Uploaded to the gcodes root and printed |
+| Creality | `.gcode` | Uploaded over HTTP and started from the path the printer lists it under, once it's listed at its full size |
 | Elegoo | `.gcode` | Centauri Carbon: uploaded to internal storage and started. Neptune and OrangeStorm: through Moonraker |
 | Prusa (PrusaLink) | `.gcode`, `.bgcode` | Sent as `text/x.gcode` onto the first writable storage, the USB stick or local storage on a Raspberry Pi, and printed after upload |
 | Bambu Lab | `.3mf` sliced by Bambu Studio or Orca | Uploaded to the printer's storage over FTPS, then the first plate is started over MQTT |
@@ -251,6 +276,7 @@ heater off.
 |---|---|---|
 | OctoPrint | Yes | Yes, through its tool and bed endpoints, for the first nozzle |
 | Klipper (Moonraker) | Yes | Yes, with `SET_HEATER_TEMPERATURE` |
+| Creality | Yes | Yes, in whole degrees |
 | Elegoo | Yes | Yes, on both families |
 | Prusa (PrusaLink) | Yes | No, PrusaLink has no endpoint for it |
 | Bambu Lab | Yes | Yes, as the `M104` and `M140` lines Bambu Studio sends |
