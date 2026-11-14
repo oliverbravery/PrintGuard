@@ -19,7 +19,7 @@ const UNRAID_URL = `${REPO_URL}/blob/main/templates/printguard.xml`;
 const ACCELERATION_URL = `${DOCS_URL}/hardware.md`;
 
 const DOCS: { title: string; page: string; body: string }[] = [
-  { title: "Printers", page: "printers.md", body: "Connect OctoPrint, Klipper, Elegoo, Prusa, Bambu Lab or Ultimaker, send a print and set temperatures." },
+  { title: "Printers", page: "printers.md", body: "Connect OctoPrint, Klipper, Creality, Elegoo, Prusa, Bambu Lab or Ultimaker, send a print and set temperatures." },
   { title: "Cameras", page: "cameras.md", body: "Add a printer webcam, a stream URL, a USB camera or a phone." },
   { title: "Monitoring", page: "monitoring.md", body: "Tune a monitor's thresholds, frame its camera and read its risk history." },
   { title: "Notifications", page: "notifications.md", body: "Set up ntfy, Pushover, Telegram, Discord or desktop notifications, and quieten a flaky camera." },
@@ -186,7 +186,7 @@ export function Home() {
         </h1>
         <p className="reveal mx-auto mb-8 max-w-2xl text-[0.95rem] text-text-1 sm:text-lg" style={{ "--i": 2 } as React.CSSProperties}>
           PrintGuard watches your printer cameras with an on-device vision model, pauses the printer through
-          OctoPrint, Klipper, Elegoo, Prusa, Bambu Lab or Ultimaker when a defect holds, and pushes a snapshot to your phone. No
+          OctoPrint, Klipper, Creality, Elegoo, Prusa, Bambu Lab or Ultimaker when a defect holds, and pushes a snapshot to your phone. No
           cloud and no subscription, and frames stay on your hardware. A defect snapshot goes to the alert channels and the
           MQTT broker you set up, and nothing else leaves unless you send it for training.
         </p>
@@ -210,7 +210,7 @@ export function Home() {
         <p className="label mb-8 text-center">WHAT IT DOES</p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Feature index={2} led="led-infer" title="Detect" body="A compact encoder scores every frame against failure prototypes, scheduled fairly across all your cameras." />
-          <Feature index={3} led="led-on" title="Act" body="A sustained defect pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa, Bambu Lab or Ultimaker, and inference rests while the printer is idle." />
+          <Feature index={3} led="led-on" title="Act" body="A sustained defect pauses or cancels the print through OctoPrint, Klipper, Creality, Elegoo, Prusa, Bambu Lab or Ultimaker, and inference rests while the printer is idle." />
           <Feature index={4} led="led-bad" title="Alert" body="The moment a defect holds, PrintGuard sends a snapshot to your phone over ntfy, Pushover, Telegram or Discord, or to your desktop from the app." />
           <Feature index={5} led="led-warn" title="Fail safe" body="A watchdog warns when a camera drops, a feed freezes or your printer stops answering for longer than the grace period, two minutes by default." />
           <Feature index={6} led="led-infer" title="Tune" body="Each monitor has its own threshold, consecutive detections and cooldown, set against a history of its risk score and a snapshot of every alert." />

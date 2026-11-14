@@ -153,7 +153,7 @@ export const GUIDE: GuideSection[] = [
     shot: "printers",
     body: (
       <>
-        Connect a printer, whether <strong>OctoPrint</strong>, <strong>Klipper (Moonraker)</strong>, <strong>Elegoo</strong>,{" "}
+        Connect a printer, whether <strong>OctoPrint</strong>, <strong>Klipper (Moonraker)</strong>, <strong>Creality</strong>, <strong>Elegoo</strong>,{" "}
         <strong>Prusa (PrusaLink)</strong>, <strong>Bambu Lab</strong> or <strong>Ultimaker</strong>, and PrintGuard can read its status, progress and temperatures,
         preheat it and pause or cancel a print on a defect. It's optional. Without one, a monitor still watches and alerts.{" "}
         <a className={link} href={docs("printers.md")} target="_blank" rel="noreferrer">

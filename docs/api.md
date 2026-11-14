@@ -127,7 +127,7 @@ the same:
 
 | Request | Waits up to |
 |---|---|
-| A printer action or heater target | 15 s, and 105 s on an Elegoo printer, since a Centauri Carbon 2 answers a resume only once it has reheated |
+| A printer action or heater target | 15 s, 25 s on a Creality printer and 105 s on an Elegoo printer, since a Centauri Carbon 2 answers a resume only once it has reheated |
 | Adding a camera | 40 s, for a first frame |
 | `/cameras/refresh-printers` | 115 s, since each printer's cameras open one at a time |
 | Switching `inference_runtime` in `PATCH /settings` | 85 s, while the frames in flight finish and the model loads |

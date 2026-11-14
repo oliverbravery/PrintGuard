@@ -9,6 +9,10 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [2.6.7] - 2026-11-12
 
+### Added
+
+- Creality's K1, K2, Ender-3 V3, Hi and CR-10 SE connect on stock firmware over their local WebSocket, so a defect pauses the print and you can preheat them and send them G-code. Thanks to @JohnSt99.
+
 ## [2.6.6] - 2026-11-07
 
 ### Fixed
