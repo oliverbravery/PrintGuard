@@ -13,6 +13,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 - Creality's K1, K2, Ender-3 V3, Hi and CR-10 SE connect on stock firmware over their local WebSocket, so a defect pauses the print and you can preheat them and send them G-code. Thanks to @JohnSt99.
 
+### Security
+
+- dnspython is updated to 2.9.2 for an advisory about excessive memory and CPU use.
+- OpenTelemetry, which the MCP server depends on, is updated to 1.45.2 for an advisory that let a crafted trace header take quadratic time to parse.
+
 ## [2.6.6] - 2026-11-07
 
 ### Fixed
