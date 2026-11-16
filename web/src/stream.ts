@@ -40,8 +40,14 @@ function holdPublisherLock(path: string): Promise<(() => void) | null> {
   });
 }
 
+export function socketUrl(path: string): string {
+  const url = new URL(path, document.baseURI);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.href;
+}
+
 export function hlsUrl(path: string): string {
-  return `/hls/${path}/index.m3u8`;
+  return `hls/${path}/index.m3u8`;
 }
 
 export function playHls(video: HTMLVideoElement, url: string, onRefused?: () => void): () => void {
@@ -126,7 +132,7 @@ export async function publishStream(
   };
 
   const connect = () => {
-    const sock = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/publish/${path}`);
+    const sock = new WebSocket(socketUrl(`api/publish/${path}`));
     socket = sock;
     sock.onopen = () => {
       const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 1_000_000 });
