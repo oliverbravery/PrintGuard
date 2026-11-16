@@ -198,6 +198,8 @@ address is refused too, with a `403` or by closing the WebSocket. An auth proxy 
 and the browser attaches that cookie to sockets opened by other sites too, so this is what stops
 a signed-in user's other tabs from driving the engine.
 
+The dashboard also works under a path, such as `https://example.com/printguard/` (with the trailing slash) or a Home Assistant Ingress panel, as long as your proxy forwards WebSockets and passes the `Origin` header through. List the address you open the proxy at in `PRINTGUARD_ORIGINS` if the table above says it needs one. A plugin's sign-in is the exception. The provider sends you back to `/oauth/callback` at the root of that address, so sign a plugin in at the hub's own address and use it under the path afterwards.
+
 The dashboard and its files carry `X-Frame-Options: SAMEORIGIN` and a `frame-ancestors 'self'` policy, so no other site can frame the hub and click through it. An origin listed in `PRINTGUARD_ORIGINS` can frame it too, such as a Home Assistant panel, and with one listed the hub sends the `frame-ancestors` policy alone, since `X-Frame-Options` can't name more than one origin.
 
 ## Plugins

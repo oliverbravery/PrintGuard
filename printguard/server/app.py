@@ -8,6 +8,7 @@ import ipaddress
 import json
 import logging
 import os
+import posixpath
 import re
 import secrets
 import time
@@ -16,7 +17,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from string import Template
 from typing import Annotated, Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 import idna
@@ -147,6 +148,28 @@ def origin_allowed(connection: HTTPConnection, allowed: set[str], *, required: b
         return requested == normalised_origin(f"{scheme}://{host}")
     except ValueError:
         return False
+
+
+def hls_relative_location(requested: str, location: str) -> str:
+    """Rewrites a MediaMTX redirect as a path relative to the one the browser asked for.
+
+    MediaMTX answers with a redirect from its own root, which the hub serves
+    under ``/hls/``. A relative redirect lands in the right place whatever
+    prefix a reverse proxy (Home Assistant Ingress, for example) serves the hub
+    under, where a root-absolute one would leave it.
+
+    Args:
+        requested: The stream path the browser asked for, after ``/hls/``.
+        location: The root-absolute ``Location`` MediaMTX answered with.
+
+    Returns:
+        The same target, relative to the requested path.
+    """
+    target = urlsplit(location)
+    relative = posixpath.relpath(target.path, posixpath.dirname(f"/{requested}"))
+    if target.path.endswith("/") and not relative.endswith("/"):
+        relative += "/"
+    return urlunsplit(("", "", relative, target.query, target.fragment))
 
 
 def parse_command(text: str | None) -> dict[str, Any] | None:
@@ -665,7 +688,7 @@ def create_app() -> FastAPI:
             k: v for k, v in upstream.headers.items() if k.lower() not in hop_by_hop and not k.lower().startswith("access-control-")
         }
         if headers.get("location", "").startswith("/"):
-            headers["location"] = f"/hls{headers['location']}"
+            headers["location"] = hls_relative_location(path, headers["location"])
         return StreamingResponse(
             upstream.aiter_raw(), status_code=upstream.status_code, headers=headers,
             background=BackgroundTask(upstream.aclose),

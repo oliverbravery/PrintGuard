@@ -7,7 +7,7 @@ import { PluginPanelHost } from "./panel";
 import { commandAllowed, LINK_ACTIONS, outboundLink, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget, type StoreChanges } from "./plugins";
 import { play, playFile } from "./sound";
 import { readStored, writeStored } from "./storage";
-import { published, resumePublishers, stopPublishing } from "./stream";
+import { published, resumePublishers, socketUrl, stopPublishing } from "./stream";
 import { applyTheme, measureCover } from "./theme";
 import { openIn } from "./urls";
 import { extOf, FORMATS, sendPrint, type PrintDraft } from "./prints";
@@ -208,7 +208,7 @@ const toastedStartupWarnings = new Set<string>();
 function connectHub(onEvent: (event: any) => void, onUp: () => void, onDown: (wasUp: boolean) => void): EngineLink {
   let socket: WebSocket;
   const open = () => {
-    const opening = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws`);
+    const opening = new WebSocket(socketUrl("api/ws"));
     socket = opening;
     let connected = false;
     let silence: ReturnType<typeof setTimeout>;
