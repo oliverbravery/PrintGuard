@@ -2379,15 +2379,14 @@ test("resetting the layout and removing a printer or a plugin each take a confir
   await confirm.click();
   expect(await pinned()).toBeUndefined();
 
-  await page.evaluate(() => (window as any).__pg.getState().openDialog("printers"));
+  await routeTo(page, "/printers/p1");
   await page.getByRole("button", { name: "Remove", exact: true }).click();
   expect(await sent(page, "printer.remove")).toBeUndefined();
   await pastDoublePress(page);
   await confirm.click();
   expect(await sent(page, "printer.remove")).toMatchObject({ id: "p1" });
 
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
-  await page.getByRole("button", { name: "Demo", exact: true }).click();
+  await routeTo(page, "/settings/plugins/demo");
   await page.getByRole("button", { name: "Remove", exact: true }).click();
   expect(await sent(page, "plugin.remove")).toBeUndefined();
   await pastDoublePress(page);
@@ -2407,6 +2406,8 @@ test("Escape closes the upload sheet only when pressed twice", async ({ page }) 
   await expect(sheet).toBeHidden();
 });
 
+const routeTo = (page: Page, route: string) => page.evaluate((route) => (location.hash = route), `#${route}`);
+
 test("a dialog the browser closes by itself stays in step with the dashboard", async ({ page }) => {
   await stagePrint(page);
   const sheet = page.getByRole("dialog", { name: "Upload cube.gcode" });
@@ -2424,15 +2425,15 @@ test("a dialog the browser closes by itself stays in step with the dashboard", a
   await expect(sheet).toBeHidden();
   expect(await pageScrollLocked()).toBe(false);
 
-  await page.evaluate(() => (window as any).__pg.getState().openDialog("settings"));
-  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  await page.evaluate(() => (window as any).__pg.getState().openDialog("guide"));
+  await expect(page.getByRole("dialog", { name: "Guide" })).toBeVisible();
   await page.evaluate(() => document.querySelector("dialog")!.close());
   await expect.poll(() => page.evaluate(() => (window as any).__pg.getState().dialog)).toBeNull();
   expect(await pageScrollLocked()).toBe(false);
 });
 
 test("switching the review off says what it deletes, and asks twice while a print is waiting", async ({ page }) => {
-  await dashboard(page, { engine: engine({ reviews: [review()] }), dialog: "settings", settingsTab: "storage" });
+  await dashboard(page, { engine: engine({ reviews: [review()] }) }, "/settings/storage");
   const toggle = page.getByRole("switch", { name: "Ask me to review frames after a print" });
   await expect(page.getByText("Turning this off deletes the frames kept so far.")).toBeVisible();
 
@@ -2445,7 +2446,8 @@ test("switching the review off says what it deletes, and asks twice while a prin
   await expect(page.getByText("keeps only alert frames while this is off")).toBeVisible();
   await expect.poll(() => sent(page, "settings.update")).toMatchObject({ patch: { feedback: "off" } });
 
-  await dashboard(page, { dialog: "settings", settingsTab: "storage" });
+  await page.reload();
+  await dashboard(page, {}, "/settings/storage");
   await toggle.click();
   await expect(toggle).not.toBeChecked();
 });
@@ -2461,8 +2463,7 @@ test("the toolpath leaves room to reach the fields on a phone held sideways, and
 
 test("the plugins tab lists what is installed before the catalogue arrives, and asks again for what a dropped hub never answered", async ({ page }) => {
   const zipped = demoPlugin({ enabled: false, granted: [], source: { kind: "file", filename: "demo.zip" } });
-  await dashboard(page, { engine: withPlugins([zipped]), reconnecting: true });
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
+  await dashboard(page, { engine: withPlugins([zipped]), reconnecting: true }, "/settings/plugins");
   await expect(page.getByText("Loading the catalogue…")).toBeVisible();
   await page.getByRole("switch", { name: "Enable Demo" }).click();
   await expect(page.getByText("Reading its code…")).toBeVisible();
@@ -2482,11 +2483,11 @@ test("the plugins tab lists what is installed before the catalogue arrives, and 
   await expect.poll(() => sent(page, "plugin.page")).toMatchObject({ id: "demo" });
 });
 
-test("a dashboard with every monitor hidden says so and opens customise", async ({ page }) => {
+test("a dashboard with every monitor hidden says so and opens the layout", async ({ page }) => {
   await dashboard(page, { engine: withLayout({ hidden: ["m1"] }) });
   await expect(page.getByText("1 monitor hidden")).toBeVisible();
 
-  await page.getByRole("main").getByRole("button", { name: "Customise" }).click();
+  await page.getByRole("main").getByRole("button", { name: "Layout" }).last().click();
   await expect(page.getByRole("button", { name: "Prusa · show" })).toBeVisible();
 });
 
@@ -2501,7 +2502,7 @@ test("hidden plugin panels are counted as panels, not as monitors", async ({ pag
 
 test("the library filter falls back to every printer when the one it names is removed", async ({ page }) => {
   const prints = [printFile({ printer_ids: ["p1"] }), printFile({ id: "f2", name: "bracket", printer_ids: [] })];
-  await dashboard(page, { engine: engine({ printers: [jobPrinter()], prints }), dialog: "prints" });
+  await dashboard(page, { engine: engine({ printers: [jobPrinter()], prints }) }, "/prints");
   const filter = page.getByRole("combobox", { name: "Filter by printer" });
   await filter.selectOption("p1");
   await expect(page.getByText("1 file", { exact: true })).toBeVisible();
@@ -2530,7 +2531,8 @@ test("focus moves to the next control when the one pressed goes away", async ({ 
   while (await next.isVisible()) await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: "Close", exact: true })).toBeFocused();
 
-  await page.evaluate(() => (window as any).__pg.getState().openDialog("cameras", "c1"));
+  await page.evaluate(() => (window as any).__pg.getState().openDialog(null));
+  await routeTo(page, "/cameras/c1");
   await pressed("Set crop");
   await expect(page.getByRole("button", { name: "Done", exact: true })).toBeFocused();
   await page.keyboard.press("Enter");
@@ -2543,12 +2545,15 @@ test("focus moves to the next control when the one pressed goes away", async ({ 
   await pressed("Remove shot.png");
   await expect(page.getByRole("button", { name: "Attach screenshots" })).toBeFocused();
 
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("api"));
+  await page.evaluate(() => (window as any).__pg.getState().openDialog(null));
+  await routeTo(page, "/settings/api");
+  await expect(page.getByRole("combobox", { name: "Token scope" })).toBeVisible();
   await page.evaluate(() => (window as any).__pg.setState({ createdToken: { name: "ha", secret: "pg_secret" } }));
   await pressed("Dismiss");
   await expect(page.getByRole("combobox", { name: "Token scope" })).toBeFocused();
 
-  await page.evaluate(() => (window as any).__pg.setState({ dialog: null, detailId: "m1" }));
+  await routeTo(page, "/monitors/m1");
+  await page.getByRole("tab", { name: "Preheat" }).click();
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await pressed("Remove PLA");
   await expect(page.getByRole("button", { name: "Remove PETG" })).toBeFocused();
@@ -2556,8 +2561,8 @@ test("focus moves to the next control when the one pressed goes away", async ({ 
   await expect(page.getByRole("button", { name: "+ Add preset" })).toBeFocused();
 });
 
-test("an unpinned tile dragged onto a pinned one is dropped among the unpinned", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
+test("an unpinned row dragged onto a pinned one is dropped among the unpinned", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1200 });
   const monitors = [monitor(), monitor({ id: "m2", name: "Voron" }), monitor({ id: "m3", name: "Ender" })];
   await dashboard(page, { engine: withLayout({ order: ["m1", "m2", "m3"], pinned: ["m1"] }, { monitors }), customising: true });
   const from = (await page.getByRole("button", { name: "Drag Ender to reorder" }).boundingBox())!;
@@ -2569,19 +2574,17 @@ test("an unpinned tile dragged onto a pinned one is dropped among the unpinned",
   await page.mouse.up();
 
   await expect.poll(() => page.evaluate(() => (window as any).__pg.getState().engine.settings.layout.monitors.order)).toEqual(["m1", "m3", "m2"]);
-  await expect(page.getByRole("main").getByRole("heading", { level: 3 })).toHaveText(["Prusa", "Ender", "Voron"]);
+  await expect(page.getByRole("main").getByRole("link", { name: /^(Prusa|Voron|Ender)$/ })).toHaveText(["Prusa", "Ender", "Voron"]);
 });
 
 test("a file rename the hub refuses goes back to the old name", async ({ page }) => {
-  const { commands, sockets } = await hub(page, undefined, library([printFile()]).engine);
-  await page.evaluate(() => (window as any).__pg.getState().openDialog("prints"));
-  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  const { commands, sockets } = await hub(page, undefined, library([printFile()]).engine, "/prints/f1");
   const name = page.getByRole("textbox", { name: "Name" });
   await name.fill("Boat");
   await name.blur();
   const renames = () => commands.filter((c) => c.cmd === "print.update");
   await expect.poll(() => renames()[0]).toMatchObject({ id: "f1", patch: { name: "Boat" } });
-  await expect(page.getByText("Boat", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Boat" })).toBeVisible();
 
   sockets[0].send(JSON.stringify({ event: "error", message: "no", req_id: renames()[0].req_id }));
   await expect(name).toHaveValue("Benchy");
@@ -2589,7 +2592,8 @@ test("a file rename the hub refuses goes back to the old name", async ({ page })
 
 test("a heater target or a plugin secret typed while the hub is away is not shown as saved", async ({ page }) => {
   const keyed = demoPlugin({ manifest: { ...demoPlugin().manifest, secrets: { api_key: "Your key" } } });
-  await dashboard(page, { engine: { ...withPlugins([keyed]), printers: [jobPrinter("idle")], monitors: [monitor({ printer_id: "p1" })] }, detailId: "m1" });
+  await dashboard(page, { engine: { ...withPlugins([keyed]), printers: [jobPrinter("idle")], monitors: [monitor({ printer_id: "p1" })] } }, "/monitors/m1");
+  await page.getByRole("tab", { name: "Preheat" }).click();
   await hubAway(page, true);
   const target = page.getByRole("spinbutton", { name: "nozzle target" });
   await target.fill("250");
@@ -2597,9 +2601,7 @@ test("a heater target or a plugin secret typed while the hub is away is not show
   await expect(target).toHaveValue("0");
   await expect(target).toBeEnabled();
 
-  await page.evaluate(() => (window as any).__pg.getState().openDetail(null));
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
-  await page.getByRole("button", { name: "Demo", exact: true }).click();
+  await routeTo(page, "/settings/plugins/demo");
   const secret = page.getByPlaceholder("Not set");
   await secret.fill("s3cret");
   await secret.blur();
@@ -2613,8 +2615,7 @@ test("a heater target or a plugin secret typed while the hub is away is not show
 });
 
 test("the install box sends once, keeps what was typed when it could not be sent, and Update shows it is working", async ({ page }) => {
-  await dashboard(page, { engine: withPlugins([demoPlugin()]) });
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
+  await dashboard(page, { engine: withPlugins([demoPlugin()]) }, "/settings/plugins");
   const box = page.getByRole("textbox", { name: "GitHub repository" });
 
   await hubAway(page, true);
@@ -2638,13 +2639,13 @@ test("the install box sends once, keeps what was typed when it could not be sent
 
 test("a review says its frames are loading, and cannot be sent while the review is switched off", async ({ page }) => {
   const dismissed = review({ status: "dismissed" });
-  await dashboard(page, { engine: engine({ reviews: [dismissed], settings: { ...engine().settings, feedback: "off" } }), reviewId: "r1" });
-  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  await dashboard(page, { engine: engine({ reviews: [dismissed], settings: { ...engine().settings, feedback: "off" } }) }, "/monitors/m1/review/r1");
+  const sheet = page.getByRole("main");
   const loading = sheet.getByRole("status").filter({ hasText: "loading the frames" });
-  await sheet.getByRole("button", { name: "No, something went wrong" }).click();
+  await sheet.getByRole("radio", { name: "No, something went wrong" }).check();
   await expect(loading).toBeVisible();
   await expect(sheet.getByRole("button", { name: "Send 3 frames" })).toBeDisabled();
-  await expect(sheet.getByText("Alert frames are marked as real failures. Press a frame to change its label.")).toBeVisible();
+  await expect(sheet.getByText("Alert frames are marked as real failures. Press a frame to change its label, or use the × to leave it out.")).toBeVisible();
 
   const frames = [
     { id: "a1", ts: 60, score: 0.9, kind: "alert", action: "pause", size: 1 },
@@ -2667,12 +2668,13 @@ test("Enter adds a monitor, generates a token and registers a printer, and a pri
   await page.keyboard.press("Enter");
   expect(await sent(page, "monitor.add")).toMatchObject({ monitor: { name: "Bench", camera_id: "c1" } });
 
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("api"));
+  await page.evaluate(() => (window as any).__pg.getState().openDialog(null));
+  await routeTo(page, "/settings/api");
   await page.getByRole("textbox", { name: "Token name" }).fill("ci");
   await page.keyboard.press("Enter");
   expect(await sent(page, "token.create")).toMatchObject({ name: "ci", scope: "read" });
 
-  await page.evaluate(() => (window as any).__pg.getState().openDialog("printers"));
+  await routeTo(page, "/printers/new");
   await page.getByRole("combobox", { name: "Printer service" }).selectOption("octoprint");
   const register = page.getByRole("button", { name: "Register printer" });
   await expect(register).toBeDisabled();
@@ -2685,7 +2687,7 @@ test("Enter adds a monitor, generates a token and registers a printer, and a pri
 });
 
 test("the broker port only takes a whole port number", async ({ page }) => {
-  await dashboard(page, { dialog: "settings", settingsTab: "mqtt" });
+  await dashboard(page, {}, "/settings/home-assistant");
   await page.getByRole("switch", { name: "Publish to an MQTT broker" }).click();
   const port = page.getByRole("spinbutton", { name: "Broker port" });
 
@@ -2694,33 +2696,23 @@ test("the broker port only takes a whole port number", async ({ page }) => {
   await expect(port).toHaveAttribute("step", "1");
 });
 
-test("a printer's light, the chosen theme and links that leave the dashboard are named, and a focused camera is not scrolled to smoothly when motion is reduced", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.addInitScript(() => {
-    const win = window as any;
-    win.__scrolls = [];
-    Element.prototype.scrollIntoView = function (options) {
-      win.__scrolls.push(options);
-    };
-  });
+test("a printer's status, the chosen theme and links that leave the dashboard are named", async ({ page }) => {
   const update = { current: "1.0.0", latest: "2.0.0", available: true, download: "https://example.com/app.dmg", checked_at: 0, releases_url: "https://example.com" };
-  await dashboard(page, { engine: engine({ printers: [jobPrinter()], update }), dialog: "printers" });
-  await expect(page.getByRole("img", { name: "online", exact: true })).toBeVisible();
+  await dashboard(page, { engine: engine({ printers: [jobPrinter()], update }) }, "/printers/p1");
+  await expect(page.getByRole("main").getByText("online")).toBeVisible();
 
   const newTab = (link: string | RegExp) => page.getByRole("link", { name: link }).getByRole("img", { name: "opens in a new tab" });
   await page.evaluate(() => (window as any).__pg.getState().openDialog("update"));
   await expect(newTab(/Download v2\.0\.0/)).toBeVisible();
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("storage"));
+  await page.evaluate(() => (window as any).__pg.getState().openDialog(null));
+  await routeTo(page, "/settings/storage");
   await expect(newTab(/What's sent/)).toBeVisible();
 
-  await page.getByRole("tab", { name: "Appearance" }).click();
+  await page.getByRole("link", { name: "Appearance" }).click();
   await page.getByRole("button", { name: "+ New" }).click();
   await page.getByRole("textbox", { name: "Theme name" }).fill("Workshop");
   await page.getByRole("button", { name: "Save theme" }).click();
   await expect(page.getByRole("button", { name: "Workshop dark" })).toHaveAttribute("aria-pressed", "true");
-
-  await page.evaluate(() => (window as any).__pg.getState().openDialog("cameras", "c1"));
-  await expect.poll(() => page.evaluate(() => (window as any).__scrolls.find((options: any) => options?.block === "center")?.behavior)).toBe("auto");
 });
 
 test("a wildcard over the end of an address is listed with what reaches your own network", async ({ page }) => {
@@ -2729,9 +2721,7 @@ test("a wildcard over the end of an address is listed with what reaches your own
     { id: "net", label: "Reach the internet", description: "", urls: true },
     { id: "net:local", label: "Reach your own network", description: "", urls: true },
   ];
-  await dashboard(page, { engine: { ...withPlugins([demoPlugin({ enabled: false, manifest })]), plugin_permissions } });
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
-  await page.getByRole("button", { name: "Demo", exact: true }).click();
+  await dashboard(page, { engine: { ...withPlugins([demoPlugin({ enabled: false, manifest })]), plugin_permissions } }, "/settings/plugins/demo");
 
   await expect(page.getByRole("row", { name: /Reach your own network/ }).getByRole("listitem")).toHaveCount(2);
   await expect(page.getByRole("row", { name: /Reach the internet/ }).getByRole("listitem")).toHaveText([/example\.com/]);
@@ -2743,11 +2733,9 @@ test("the redirect address to register swaps in 127.0.0.1 only for a hub opened 
   const state = { ...withPlugins([plugin]), plugin_permissions: [{ id: "oauth", label: "Sign in", description: "" }], plugin_oauth_callback: "/oauth/callback" };
   const port = new URL(baseURL!).port;
   for (const [host, shown] of [["localhost", "127.0.0.1"], ["localhost.localhost", "localhost.localhost"]]) {
-    await page.goto(`http://${host}:${port}/`);
+    await page.goto(`http://${host}:${port}/#/settings/plugins/demo`);
     await page.waitForFunction(() => Boolean((window as any).__pg?.getState().link));
     await page.evaluate((engine) => (window as any).__pg.setState({ phase: "ready", link: { send() {}, close() {} }, engine }), state);
-    await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
-    await page.getByRole("button", { name: "Demo", exact: true }).click();
     await expect(page.getByText(`http://${shown}:${port}/oauth/callback`, { exact: true })).toBeVisible();
   }
 });
@@ -2755,9 +2743,7 @@ test("the redirect address to register swaps in 127.0.0.1 only for a hub opened 
 test("a plugin whose sign-in address cannot be read still opens, showing the address as written", async ({ page }) => {
   const oauth = { label: "Thing", authorize_url: "https://256.256.256.256/a", token_url: "https://256.256.256.256/t", register_url: "", scopes: [] };
   const state = withPlugins([demoPlugin({ enabled: false, manifest: { ...demoPlugin().manifest, permissions: ["oauth"], oauth } })]);
-  await dashboard(page, { engine: { ...state, plugin_permissions: [{ id: "oauth", label: "Sign in", description: "" }] } });
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
-  await page.getByRole("button", { name: "Demo", exact: true }).click();
+  await dashboard(page, { engine: { ...state, plugin_permissions: [{ id: "oauth", label: "Sign in", description: "" }] } }, "/settings/plugins/demo");
 
   await expect(page.getByText("Sign in at https://256.256.256.256/a")).toBeVisible();
   await expect(page.getByRole("button", { name: "Remove", exact: true })).toBeVisible();
@@ -2765,26 +2751,27 @@ test("a plugin whose sign-in address cannot be read still opens, showing the add
 
 test("a toast raised over a dialog on a phone sits at the top, clear of the dialog's buttons", async ({ page }) => {
   await page.setViewportSize({ width: 393, height: 852 });
-  await dashboard(page, { dialog: "settings" });
+  await dashboard(page, { dialog: "report" });
   await page.evaluate(() => (window as any).__pg.getState().toast("info", "Diagnostics saved"));
   const box = (await page.getByRole("dialog").getByRole("status").filter({ hasText: "Diagnostics saved" }).boundingBox())!;
-  const save = (await page.getByRole("button", { name: "Save channels" }).boundingBox())!;
+  const save = (await page.getByRole("button", { name: "Send report" }).boundingBox())!;
 
   expect(box.y + box.height).toBeLessThan(852 / 4);
   expect(box.y + box.height).toBeLessThan(save.y);
 });
 
 test("settings copy says things plainly", async ({ page }) => {
-  await dashboard(page, { engine: engine({ monitors: [] }), dialog: "settings" });
+  await dashboard(page, { engine: engine({ monitors: [] }) }, "/settings/alerts");
   await expect(page.getByText("Channels hold credentials, so they apply when you press Save.")).toBeVisible();
-  await page.getByRole("tab", { name: "Home Assistant" }).click();
+  await page.getByRole("link", { name: "Home Assistant" }).click();
   await expect(page.getByText("Broker settings open a live connection, so they apply when you press Save.")).toBeVisible();
-  await page.getByRole("tab", { name: "API" }).click();
+  await page.getByRole("link", { name: "API and MCP" }).click();
   await expect(page.getByText("Control includes read, and manage includes both.")).toBeVisible();
 
   await page.evaluate(() => (window as any).__pg.getState().openDialog("report"));
   await expect(page.getByText("Describe what went wrong and it goes straight to me")).toBeVisible();
   await page.evaluate(() => (window as any).__pg.getState().openDialog(null));
+  await routeTo(page, "/");
   await expect(page.getByRole("button", { name: "How PrintGuard works", exact: true })).toBeVisible();
 });
 
@@ -2820,39 +2807,46 @@ test("buttons, tabs, the close button and the small controls are 44 pixels to a 
     tokens: [{ id: "t1", name: "ha", scope: "read", hint: "pg_1" }],
     settings: { ...engine().settings, preheat: [{ name: "PLA", nozzle: 200, bed: 60 }] },
   });
-  await dashboard(page, { engine: state, dialog: "settings", settingsTab: "appearance" });
+  await dashboard(page, { engine: state }, "/settings/appearance");
 
-  await fitsAFinger(page.getByRole("tab", { name: "Appearance" }));
+  await fitsAFinger(page.getByRole("link", { name: "Back" }));
   await fitsAFinger(page.getByRole("button", { name: "+ New" }));
-  await fitsAFinger(page.getByRole("button", { name: "Close dialog" }));
   await page.getByRole("button", { name: "+ New" }).click();
   await fitsAFinger(page.getByLabel(/ colour$/).first());
 
-  await page.getByRole("tab", { name: "API" }).click();
+  await routeTo(page, "/settings/api");
+  await expect(page.getByRole("combobox", { name: "Token scope" })).toBeVisible();
   await page.evaluate(() => (window as any).__pg.setState({ createdToken: { name: "ha", secret: "pg_secret" } }));
   await takesAFinger(page.getByRole("button", { name: "Dismiss" }));
 
   await page.evaluate(() => (window as any).__pg.getState().openDialog("report"));
   await fitsAFinger(page.getByText("What's sent with your report"));
+  await fitsAFinger(page.getByRole("button", { name: "Close dialog" }));
 
-  await page.evaluate(() => (window as any).__pg.getState().openDialog("prints"));
+  await page.evaluate(() => (window as any).__pg.getState().openDialog(null));
+  await routeTo(page, "/prints");
   await takesAFinger(page.getByRole("button", { name: "browse" }));
 
-  await page.evaluate(() => (window as any).__pg.setState({ dialog: null, detailId: "m1" }));
-  await takesAFinger(page.getByRole("button", { name: "Off", exact: true }));
+  await routeTo(page, "/monitors/m1");
+  await fitsAFinger(page.getByRole("tab", { name: "Preheat" }));
+  await page.getByRole("tab", { name: "Preheat" }).click();
+  await takesAFinger(page.getByRole("button", { name: "Heaters off" }));
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await fitsAFinger(page.getByRole("button", { name: "Remove PLA" }));
 
-  await page.evaluate(() => (window as any).__pg.setState({ detailId: null, customising: true }));
+  await page.evaluate(() => (window as any).__pg.setState({ customising: true }));
   await fitsAFinger(page.getByRole("button", { name: "Drag Prusa to reorder" }));
-  await fitsAFinger(page.getByRole("button", { name: "Drag Workshop to reorder" }));
+  await fitsAFinger(page.getByRole("button", { name: "Move Prusa down" }));
 
-  await page.evaluate(() => (window as any).__pg.setState({ customising: false, reviewId: "r1", snapshotCache: { s1: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" } }));
+  await page.evaluate(() => (window as any).__pg.setState({ customising: false, snapshotCache: { s1: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" } }));
+  await routeTo(page, "/monitors/m1/review/r1");
   await emit(page, { event: "review", ...review({ frames: 1 }), frames: [{ id: "s1", ts: 60, score: 0.1, kind: "spaced", size: 1 }] });
-  await page.getByRole("button", { name: "Yes", exact: true }).click();
-  await fitsAFinger(page.getByText("What's sent", { exact: true }));
-  await fitsAFinger(page.getByRole("button", { name: /^Enlarge frame 1 of 1 at/ }));
-  await fitsAFinger(page.getByRole("button", { name: /^Don't send frame 1 of 1 at/ }));
+  await fitsAFinger(page.getByRole("radio", { name: "Yes" }).locator(".."));
+  await page.getByRole("radio", { name: "Yes" }).check();
+  await fitsAFinger(page.getByRole("button", { name: /^Enlarge frame 1 of 1 at/ }).filter({ visible: true }));
+  await fitsAFinger(page.getByRole("button", { name: /^Don't send frame 1 of 1 at/ }).filter({ visible: true }));
+  await page.getByRole("tab", { name: "Recording" }).click();
+  await fitsAFinger(page.getByText("What's sent", { exact: true }).filter({ visible: true }));
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await context.close();
 });
@@ -2869,9 +2863,8 @@ const keyedIntegrations = [{ id: "octoprint", label: "OctoPrint", docs_url: "", 
 const lastSent = (page: Page, cmd: string) => page.evaluate((cmd) => (window as any).__sent.findLast((c: any) => c.cmd === cmd), cmd);
 
 async function editKeyedPrinter(page: Page) {
-  await dashboard(page, { engine: engine({ printers: [keyedPrinter()], integrations: keyedIntegrations }), dialog: "printers" });
-  await page.getByRole("button", { name: "Edit", exact: true }).click();
-  return page.locator(".panel .panel");
+  await dashboard(page, { engine: engine({ printers: [keyedPrinter()], integrations: keyedIntegrations }) }, "/printers/p1");
+  return page.getByRole("main");
 }
 
 test("a printer's saved key is never shown, is kept by a save that leaves it blank and does not hold up Save or Test", async ({ page }) => {
@@ -2886,7 +2879,7 @@ test("a printer's saved key is never shown, is kept by a save that leaves it bla
   expect((await sent(page, "printer.test")).config).not.toHaveProperty("api_key");
 
   await form.getByRole("textbox", { name: "Name" }).fill("MK4S");
-  await form.getByRole("button", { name: "Save", exact: true }).click();
+  await form.getByRole("button", { name: "Save printer" }).click();
   const saved = await sent(page, "printer.update");
   expect(saved.patch).toEqual({ name: "MK4S", config: { url: "http://mk4" } });
 });
@@ -2896,18 +2889,18 @@ test("a key typed over a saved one is sent, then forgotten by the form once the 
   const key = form.getByLabel(/^API key/);
   await key.fill("fresh");
   await expect(form.getByRole("button", { name: "Remove the stored API key" })).toBeHidden();
-  await form.getByRole("button", { name: "Save", exact: true }).click();
+  await form.getByRole("button", { name: "Save printer" }).click();
   const saved = await sent(page, "printer.update");
   expect(saved.patch.config).toEqual({ url: "http://mk4", api_key: "fresh" });
 
   await emit(page, { event: "state", ...engine({ printers: [keyedPrinter()], integrations: keyedIntegrations }), req_id: saved.req_id });
   await expect(key).toHaveValue("");
   await expect(key).toHaveAttribute("placeholder", KEPT_HINT);
-  await expect(form.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await expect(form.getByRole("button", { name: "Save printer" })).toBeDisabled();
 
   await key.fill("typo");
   await key.fill("");
-  await expect(form.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await expect(form.getByRole("button", { name: "Save printer" })).toBeDisabled();
 });
 
 test("clearing a saved key from the keyboard sends null and hands focus back to the field", async ({ page, browserName }) => {
@@ -2922,7 +2915,7 @@ test("clearing a saved key from the keyboard sends null and hands focus back to 
   await expect(key).toBeFocused();
   await expect(key).toHaveAccessibleDescription("Will be removed on Save");
 
-  await form.getByRole("button", { name: "Save", exact: true }).click();
+  await form.getByRole("button", { name: "Save printer" }).click();
   expect((await sent(page, "printer.update")).patch.config).toEqual({ url: "http://mk4", api_key: null });
 });
 
@@ -2940,20 +2933,20 @@ test("a printer save the hub refuses says why beside the form and keeps what was
   const form = await editKeyedPrinter(page);
   await form.getByRole("textbox", { name: "Address" }).fill("http://mk3");
   await form.getByLabel(/^API key/).fill("again");
-  await form.getByRole("button", { name: "Save", exact: true }).click();
+  await form.getByRole("button", { name: "Save printer" }).click();
   const refusal = "the printer did not answer";
   await emit(page, { event: "error", message: refusal, req_id: (await sent(page, "printer.update")).req_id });
   await expect(form.getByRole("alert")).toHaveText(refusal);
   await expect(form.getByRole("textbox", { name: "Address" })).toHaveValue("http://mk3");
 
-  await form.getByRole("button", { name: "Save", exact: true }).click();
+  await form.getByRole("button", { name: "Save printer" }).click();
   await expect(form.getByRole("alert")).toBeHidden();
   expect((await lastSent(page, "printer.update")).patch.config).toEqual({ url: "http://mk3", api_key: "again" });
 });
 
 test("a moved printer address asks for the saved key again and the whole address, and sends neither half-typed", async ({ page }) => {
   const form = await editKeyedPrinter(page);
-  const save = form.getByRole("button", { name: "Save", exact: true });
+  const save = form.getByRole("button", { name: "Save printer" });
   const key = form.getByLabel(/^API key/);
   await form.getByRole("textbox", { name: "Address" }).fill("http://mk3");
   await expect(form.getByText("The saved address may hide a login or key, so type the whole address.")).toBeVisible();
@@ -2967,14 +2960,14 @@ test("a moved printer address asks for the saved key again and the whole address
 });
 
 test("a printer address that shows [redacted] is only saved untouched", async ({ page }) => {
-  await dashboard(page, {
-    engine: engine({ printers: [keyedPrinter({ config: { url: "http://mk4/?apikey=[redacted]" }, secrets_set: [] })], integrations: keyedIntegrations }),
-    dialog: "printers",
-  });
-  await page.getByRole("button", { name: "Edit", exact: true }).click();
-  const form = page.locator(".panel .panel");
+  await dashboard(
+    page,
+    { engine: engine({ printers: [keyedPrinter({ config: { url: "http://mk4/?apikey=[redacted]" }, secrets_set: [] })], integrations: keyedIntegrations }) },
+    "/printers/p1",
+  );
+  const form = page.getByRole("main");
   const address = form.getByRole("textbox", { name: "Address" });
-  const save = form.getByRole("button", { name: "Save", exact: true });
+  const save = form.getByRole("button", { name: "Save printer" });
   await form.getByRole("textbox", { name: "Name" }).fill("MK4S");
   await expect(save).toBeEnabled();
 
@@ -3003,7 +2996,7 @@ test("the alerts step reads as done from a channel's saved secret alone", async 
 });
 
 test("a channel's saved secret is kept by a save or a test that leaves it blank, replaced when typed and removed by Clear", async ({ page }) => {
-  await dashboard(page, { engine: withSavedChannel(), dialog: "settings" });
+  await dashboard(page, { engine: withSavedChannel() }, "/settings/alerts");
   const address = page.getByLabel(/^Topic address/);
   await expect(address).toHaveValue("");
   await expect(address).toHaveAccessibleDescription(KEPT_HINT);
@@ -3030,7 +3023,7 @@ test("a channel's saved secret is kept by a save or a test that leaves it blank,
 });
 
 test("a channel switched off and on again keeps what was typed and its saved secret", async ({ page }) => {
-  await dashboard(page, { engine: withSavedChannel(), dialog: "settings" });
+  await dashboard(page, { engine: withSavedChannel() }, "/settings/alerts");
   const priority = page.getByRole("textbox", { name: "Priority" });
   await priority.fill("low");
   await page.getByRole("switch", { name: "ntfy" }).click();
@@ -3042,7 +3035,7 @@ test("a channel switched off and on again keeps what was typed and its saved sec
 });
 
 test("a channel's test result goes when its form is edited", async ({ page }) => {
-  await dashboard(page, { engine: withSavedChannel(), dialog: "settings" });
+  await dashboard(page, { engine: withSavedChannel() }, "/settings/alerts");
   await page.getByRole("button", { name: "Send test alert" }).click();
   await emit(page, { event: "notify_test", provider: "ntfy", ok: true, req_id: (await sent(page, "notify.test")).req_id });
   await expect(page.getByText("sent", { exact: true })).toBeVisible();
@@ -3054,8 +3047,7 @@ test("a channel's test result goes when its form is edited", async ({ page }) =>
 test("the broker form refuses an empty host and asks for the password again when the address moves", async ({ page }) => {
   const broker = { enabled: true, host: "broker.lan", username: "pg" };
   const state = engine({ settings: { ...engine().settings, mqtt: broker }, secrets_set: { notifiers: {}, mqtt: ["password"] } });
-  await dashboard(page, { engine: state, dialog: "settings", settingsTab: "mqtt" });
-  await page.getByRole("tab", { name: "Home Assistant" }).click();
+  await dashboard(page, { engine: state }, "/settings/home-assistant");
   const save = page.getByRole("button", { name: "Save broker settings" });
   const host = page.getByLabel("Broker host");
   const password = page.getByLabel("Password", { exact: true });
@@ -3076,8 +3068,7 @@ test("the broker form refuses an empty host and asks for the password again when
 test("the broker password follows the port in effect, so typing it or switching TLS keeps it and another port asks again", async ({ page }) => {
   const broker = { enabled: true, host: "broker.lan", tls: true, username: "pg" };
   const state = engine({ settings: { ...engine().settings, mqtt: broker }, secrets_set: { notifiers: {}, mqtt: ["password"] } });
-  await dashboard(page, { engine: state, dialog: "settings", settingsTab: "mqtt" });
-  await page.getByRole("tab", { name: "Home Assistant" }).click();
+  await dashboard(page, { engine: state }, "/settings/home-assistant");
   const save = page.getByRole("button", { name: "Save broker settings" });
   const port = page.getByLabel("Broker port");
   const retype = page.getByText("Retype Password, since the address changed.");
@@ -3099,8 +3090,7 @@ test("the broker password follows the port in effect, so typing it or switching 
 test("the broker password is kept by an unrelated broker edit, replaced when typed and removed by Clear", async ({ page }) => {
   const broker = { enabled: true, host: "broker.lan", port: 1883, username: "pg" };
   const state = engine({ settings: { ...engine().settings, mqtt: broker }, secrets_set: { notifiers: {}, mqtt: ["password"] } });
-  await dashboard(page, { engine: state, dialog: "settings", settingsTab: "mqtt" });
-  await page.getByRole("tab", { name: "Home Assistant" }).click();
+  await dashboard(page, { engine: state }, "/settings/home-assistant");
   const password = page.getByLabel("Password", { exact: true });
   await expect(password).toHaveValue("");
   await expect(password).toHaveAttribute("placeholder", KEPT_HINT);
@@ -3139,15 +3129,15 @@ test("an auto-saved setting sends only itself, never the channels, the broker or
 
 test("a camera with no access code and a scrubbed address still lists", async ({ page }) => {
   const cameras = [camera({ source: { kind: "bambu", host: "192.168.1.9" }, printer_id: "p1" }), camera({ id: "c2", name: "Shed", source: { kind: "rtsp", url: "rtsp://shed/live" } })];
-  await dashboard(page, { engine: engine({ cameras }), dialog: "cameras" });
+  await dashboard(page, { engine: engine({ cameras }) }, "/cameras/c1");
   await expect(page.getByText("bambu://192.168.1.9").first()).toBeVisible();
+  await page.getByRole("tab", { name: /^Cameras/ }).click();
   await expect(page.getByText("rtsp://shed/live").first()).toBeVisible();
 });
 
 test("a crop wider than a square shows the squares the model scores and says what it costs", async ({ page }) => {
-  await dashboard(page, { engine: engine({ cameras: [camera({ crop: { x: 0, y: 0, w: 1, h: 1 } })] }) });
-  await page.evaluate(() => (window as any).__pg.getState().openDialog("cameras", "c1"));
-  const editor = page.getByRole("dialog");
+  await dashboard(page, { engine: engine({ cameras: [camera({ crop: { x: 0, y: 0, w: 1, h: 1 } })] }) }, "/cameras/c1");
+  const editor = page.getByRole("main");
   await expect(editor.getByText("The model scores this crop as 2 overlapping squares, which takes 2 times the work.")).toBeVisible();
   await expect(editor.locator(".border-dashed")).toHaveCount(2);
 
@@ -3169,9 +3159,8 @@ test("a crop wider than a square shows the squares the model scores and says wha
 });
 
 test("a new crop is square until freeform is chosen, which warns that it might detect worse", async ({ page }) => {
-  await dashboard(page);
-  await page.evaluate(() => (window as any).__pg.getState().openDialog("cameras", "c1"));
-  const editor = page.getByRole("dialog");
+  await dashboard(page, {}, "/cameras/c1");
+  const editor = page.getByRole("main");
   await editor.getByRole("button", { name: "Set crop", exact: true }).click();
   const shape = editor.getByRole("group", { name: "Crop shape" });
   await expect(shape.getByRole("button", { name: "Square" })).toHaveAttribute("aria-pressed", "true");
@@ -3183,9 +3172,8 @@ test("a new crop is square until freeform is chosen, which warns that it might d
 });
 
 test("a feed that has no size yet leaves the crop square where it can be dragged", async ({ page }) => {
-  await dashboard(page);
-  await page.evaluate(() => (window as any).__pg.getState().openDialog("cameras", "c1"));
-  const feed = page.getByRole("dialog").locator("video");
+  await dashboard(page, {}, "/cameras/c1");
+  const feed = page.locator(".ReactCrop video");
   await feed.dispatchEvent("loadedmetadata");
   await page.getByRole("button", { name: "Set crop", exact: true }).click();
   const selection = page.locator(".ReactCrop__crop-selection");

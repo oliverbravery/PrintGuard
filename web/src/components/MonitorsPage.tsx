@@ -65,6 +65,7 @@ export function MonitorsPage() {
     return (
       <Page title="Monitors">
         <GettingStarted />
+        {(panels.length > 0 || hidden.length > 0) && <FleetLedger monitors={[]} selectedId={null} visible={visibleIds} hidden={hidden} />}
         {panelStrip}
       </Page>
     );
