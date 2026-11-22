@@ -190,10 +190,6 @@ body {
   border-color: var(--painted-edge);
 }
 
-:root[data-glass] [data-painted]::before {
-  filter: blur(28px) saturate(180%);
-}
-
 :root[data-glass] .btn:not(.btn-primary),
 :root[data-glass] .cell-action:not(.cell-action-primary),
 :root[data-glass] .btn-inline,
@@ -216,27 +212,23 @@ body {
   background: transparent;
 }
 
-[data-painted] {
+:root[data-glass] [data-painted] {
   isolation: isolate;
 }
 
-[data-painted] .app-main {
-  background: color-mix(in srgb, var(--color-ink-0) 90%, transparent);
-}
-
-[data-painted]::before {
+:root[data-glass] [data-painted]::before {
   content: "";
   position: fixed;
   inset: 0;
   z-index: -1;
   pointer-events: none;
   background: var(--painted-image) center / cover no-repeat;
-  filter: blur(28px);
+  filter: blur(28px) saturate(180%);
   transform: scale(1.12);
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  [data-painted]::before {
+  :root[data-glass] [data-painted]::before {
     display: none;
   }
 
