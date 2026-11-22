@@ -247,14 +247,6 @@ export function ReviewPage() {
             issue on GitHub with the hub ID from Settings.
           </p>
         </details>
-        {review.recording && review.recording.expires !== null && (
-          <p className="text-sm text-text-2">
-            This print's recording is {megabytes(review.recording.bytes)} and is deleted on {day(review.recording.expires)}, or once you send or skip it.{" "}
-            <Link to="/settings/storage" className="text-accent underline">
-              Manage storage
-            </Link>
-          </p>
-        )}
       </div>
     </section>
   );
@@ -266,9 +258,19 @@ export function ReviewPage() {
       {reviewable(review) && (
         <>
           <div className="grid gap-3 border-b border-rule px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-            <p className="text-sm text-text-1">
-              PrintGuard kept {framesLabel(review.frames)} from this print. Label them and send them to me, and I'll use them to train the detection model.
-            </p>
+            <div className="space-y-1 text-sm">
+              <p className="text-text-1">
+                PrintGuard kept {framesLabel(review.frames)} from this print. Label them and send them to me, and I'll use them to train the detection model.
+              </p>
+              {review.recording && review.recording.expires !== null && (
+                <p className="text-text-2">
+                  This print's recording is {megabytes(review.recording.bytes)} and is deleted on {day(review.recording.expires)}, or once you send or skip it.{" "}
+                  <Link to="/settings/storage" className="text-accent underline">
+                    Manage storage
+                  </Link>
+                </p>
+              )}
+            </div>
             <Segmented
               label="Did this print finish without any problems?"
               options={[
@@ -298,16 +300,14 @@ export function ReviewPage() {
                   value={column}
                   onChange={setColumn}
                 />
-                <TabPanel prefix="review" id="picked" className={column === "picked" ? "" : "hidden"}>
-                  {picked}
-                </TabPanel>
-                <TabPanel prefix="review" id="scrubber" className={column === "scrubber" ? "" : "hidden"}>
+              </div>
+              <div className="grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+                <TabPanel prefix="review" id="scrubber" className={`min-w-0 md:border-r md:border-rule ${column === "scrubber" ? "" : "max-md:hidden"}`}>
                   {workbench}
                 </TabPanel>
-              </div>
-              <div className="grid max-md:hidden md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
-                <div className="border-r border-rule">{workbench}</div>
-                {picked}
+                <TabPanel prefix="review" id="picked" className={`min-w-0 ${column === "picked" ? "" : "max-md:hidden"}`}>
+                  {picked}
+                </TabPanel>
               </div>
             </>
           )}
