@@ -84,11 +84,14 @@ dashboard or later in Settings, under **Detection**, where a chart compares them
 | Obico, Dec 2025 | Obico's YOLOv2 Spaghetti Detective, for comparison | 193 MB | 360 ms | 3 of 20 | 0 of 70 |
 
 The scores come from 1,534 frames from 30 PrintGuard hubs that no model was trained on, alerting
-at the default threshold of 0.75 held for 3 frames. Latency is one CPU thread of an M1 Max on
+at the default threshold of 0.75 held for 3 frames. Obico's scores aren't probabilities, so its
+threshold was matched on separate validation frames. Latency is one CPU thread of an M1 Max on
 ONNX Runtime 1.32, so expect it to be higher on a Raspberry Pi and lower with an accelerator.
 
-Every model gives its own probability that a frame shows a failing print, so a monitor's
-threshold means the same thing whichever one runs. Switching waits for the frames already being
+![The Detection tab in Settings, with the three models charted against Obico's](assets/settings-detection.png)
+
+Every model gives its own probability that a frame shows a failing print, with 0.5 as its
+decision boundary, so a monitor's threshold works the same way whichever one runs. Switching waits for the frames already being
 scored, then loads the new model and benchmarks it again. Pick **Light** when the **capacity**
 readout with Standard sits below what your cameras need.
 

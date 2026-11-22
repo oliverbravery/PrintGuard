@@ -364,6 +364,9 @@ class Inference:
         The frame counts as in flight from the start, so a switch to another
         model waits for it rather than closing this one under it.
 
+        Args:
+            rgb: HxWx3 uint8 frame in RGB channel order.
+
         Returns:
             The ``vision.classify`` result.
         """

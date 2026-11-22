@@ -121,7 +121,7 @@ pull request, and delete anything the change makes wrong or redundant.
 | A monitor or camera setting, risk history | [docs/monitoring.md](docs/monitoring.md) |
 | The frames kept from a print, what's sent for training, the Worker's limits | [docs/feedback.md](docs/feedback.md) |
 | A notifier, or when a notice is sent | [docs/notifications.md](docs/notifications.md) |
-| Model runtimes, execution providers, image variants, GPU setup | [docs/hardware.md](docs/hardware.md) |
+| Detection models, model runtimes, execution providers, image variants, GPU setup | [docs/hardware.md](docs/hardware.md) |
 | Exposure, proxies, origin checks, ports, hardening, an environment variable, the data directory | [docs/deployment.md](docs/deployment.md) |
 | A REST endpoint, MCP tool, scope, response shape or Home Assistant entity | [docs/api.md](docs/api.md) |
 | Installing plugins, a permission, what a plugin can reach | [docs/plugins.md](docs/plugins.md) |
