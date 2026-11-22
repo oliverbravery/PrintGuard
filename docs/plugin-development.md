@@ -179,7 +179,7 @@ the manifest lists in `media` shows, in the gallery.
 |---|---|
 | `panel` | A row of its own under **Plugins**, below the monitors |
 | `monitor` | Drawn beside the selected monitor's feed and on its row in the monitor list |
-| `settings` | Drawn in every monitor's settings, under its own heading |
+| `settings` | Drawn in every monitor's **Configure** tab, under its own heading |
 
 Anything that belongs to one monitor goes in `settings`.
 

@@ -373,7 +373,7 @@ export function CamerasPage() {
     </>
   );
   return (
-    <Page title="Cameras" back={cameraId ? { to: "/cameras", label: "Back" } : undefined} backOnPhones subview={Boolean(cameraId)}>
+    <Page title="Cameras" phoneBack={cameraId ? { to: "/cameras", label: "Back" } : undefined} subview={Boolean(cameraId)}>
       <Split list={list} detail={detail} detailShown={Boolean(cameraId)} />
     </Page>
   );

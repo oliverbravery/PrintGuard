@@ -4,6 +4,7 @@ import { useScrollEdges } from "../scroll";
 export interface Tab<T extends string> {
   id: T;
   label: string;
+  badge?: string;
 }
 
 export function Tabs<T extends string>({
@@ -50,8 +51,7 @@ export function Tabs<T extends string>({
       role="tablist"
       aria-label={label}
       onKeyDown={onKeyDown}
-      className={cells ? "tabs-cells" : "scroll-x flex border-b border-line-0"}
-      style={cells ? { gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` } : undefined}
+      className={cells ? "tabs-cells scroll-x" : "scroll-x flex border-b border-line-0"}
     >
       {tabs.map((t) => (
         <button
@@ -66,6 +66,12 @@ export function Tabs<T extends string>({
           className="tab"
         >
           {t.label}
+          {t.badge && (
+            <>
+              <span aria-hidden className="ml-1.5 inline-block size-1.5 bg-accent align-middle" />
+              <span className="sr-only">, {t.badge}</span>
+            </>
+          )}
         </button>
       ))}
     </div>

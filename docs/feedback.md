@@ -44,25 +44,22 @@ with no printer has no way to know a print ended, so it closes one every 24 hour
 
 ## Reviewing a print
 
-When a print ends its monitor shows a button to review the frames from the last print. Older prints are
-listed under **Prints** on the monitor's history page. A print with no frames kept
-isn't offered for review.
+Open a monitor's **Review** tab to see its finished prints, newest first, with the ones waiting
+for you marked. Pick one to see its frames beside the recording. A print with no frames kept
+isn't listed.
 
 ![The review page with a failed print's frames labelled good, failure and real failure beside the recording](assets/review.png)
 
-1. Answer whether the print finished without any problems. A print you rescued and resumed still
-   had one.
-2. Press any frame to change its label. An alert frame is a real failure or a false alarm, and
-   any other frame is good or a failure.
-3. Use the × on a frame to leave it out, and **Undo** to put it back. **Leave all out** clears every frame, so you can put back just the ones you want to send. **Put all back** brings back the frames PrintGuard picked but not ones you added.
-4. Scrub through the print with the slider under the frames and use **Add as good** or **Add as
-   failure** to send a frame PrintGuard didn't pick. Marks on the slider show where the alerts and
-   picked frames are.
-5. Add your printer model if you like, then press **Send**. You can send 60 frames a day, and
+1. Press the flag on any frame where something went wrong. A flagged alert frame is a real
+   failure and an unflagged one a false alarm, and any other flagged frame is a failure.
+2. Use the × on a frame to leave it out, or **Clear all** to leave every frame out.
+3. Scrub through the print with the slider and use **Add as good** or **Add as failure** to send a
+   frame PrintGuard didn't pick. Marks on the slider show where the alerts and picked frames are.
+4. Add your printer model if you like, then press **Send**. You can send 60 frames a day, and
    the count above the frames shows how many you have chosen.
 
-**Not this print** takes it off your list of prints to review and marks it reviewed, not sent. Its
-frames stay on the hub, so you can still open it from **Prints** later.
+**Not this print** marks it reviewed, not sent. Its frames stay on the hub, so you can still open
+it from **Review** later.
 
 ## What's sent
 

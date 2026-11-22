@@ -39,7 +39,7 @@ export function SettingsPage() {
     </nav>
   );
   return (
-    <Page title="Settings" back={chosen ? { to: "/settings", label: "Back" } : undefined} backOnPhones subview={Boolean(chosen)}>
+    <Page title="Settings" phoneBack={chosen ? { to: "/settings", label: "Back" } : undefined} subview={Boolean(chosen)}>
       <Split
         list={list}
         detailShown={Boolean(chosen)}

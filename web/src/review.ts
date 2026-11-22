@@ -70,3 +70,11 @@ export function awaitingReview(reviews: ReviewSummary[], monitorId: string): Rev
   const lastPrint = reviews.filter((review) => review.monitor_id === monitorId && review.status !== "running").at(-1);
   return lastPrint?.status === "ready" ? lastPrint : undefined;
 }
+
+export function printsToReview(reviews: ReviewSummary[], monitorId: string): ReviewSummary[] {
+  return reviews.filter((review) => review.monitor_id === monitorId && review.status !== "running" && review.frames > 0).reverse();
+}
+
+export function printedAt(review: ReviewSummary): string {
+  return new Date((review.ended ?? review.started) * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}

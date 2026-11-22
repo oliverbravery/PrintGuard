@@ -197,7 +197,7 @@ export function PrintsPage() {
     </>
   );
   return (
-    <Page title="Prints" back={printId ? { to: "/prints", label: "Back" } : undefined} backOnPhones subview={Boolean(printId)}>
+    <Page title="Prints" phoneBack={printId ? { to: "/prints", label: "Back" } : undefined} subview={Boolean(printId)}>
       <Split
         list={list}
         detail={

@@ -1,35 +1,29 @@
-import { Link, Navigate, useParams } from "react-router";
+import { Link } from "react-router";
 import { useStore } from "../store";
+import type { Monitor } from "../types";
 import { ConfirmButton } from "./ConfirmButton";
-import { Feed, useCovered } from "./Feed";
 import { NameField } from "./NameField";
-import { Page } from "./Page";
 import { PluginNodeView, usePluginSurface } from "./PluginNode";
 import { SaveStatus } from "./SaveStatus";
 import { Toggle } from "./Toggle";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="grid gap-3 border-b border-line-0 px-4 py-4 md:grid-cols-[14rem_minmax(0,48rem)] md:gap-6">
-      <h2 className="label pt-1">{title}</h2>
-      <div className="min-w-0 space-y-4">{children}</div>
+    <section className="space-y-3 border-b border-line-0 px-4 py-3">
+      <h3 className="label">{title}</h3>
+      {children}
     </section>
   );
 }
 
-export function MonitorEditPage() {
-  const { monitorId } = useParams();
+export function MonitorSettings({ monitor }: { monitor: Monitor }) {
   const { engine, send, isPending, updateMonitor } = useStore();
-  const monitor = engine?.monitors.find((m) => m.id === monitorId);
-  const settingsPanels = usePluginSurface("settings", monitorId ?? "");
-  const covered = useCovered();
-  if (!monitor) return <Navigate to="/" replace />;
+  const settingsPanels = usePluginSurface("settings", monitor.id);
   const removing = isPending("monitor.remove");
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
-
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
   return (
-    <Page title={`${monitor.name} settings`} back={{ to: `/monitors/${monitor.id}`, label: "Monitors" }} subview actions={<SaveStatus scope={`monitor:${monitor.id}`} />}>
+    <>
       <Section title="Monitor">
         <NameField name={monitor.name} onRename={(name) => updateMonitor(monitor.id, { name })} />
         <Toggle label="Watch this monitor" on={monitor.enabled} onChange={(v) => updateMonitor(monitor.id, { enabled: v })} />
@@ -48,18 +42,13 @@ export function MonitorEditPage() {
         <Toggle label="Push notifications" on={monitor.notify} onChange={(v) => updateMonitor(monitor.id, { notify: v })} />
       </Section>
       <Section title="Camera">
-        {camera && (
-          <div className="max-w-md">
-            <Feed camera={camera} active={!covered} />
-          </div>
-        )}
         <select className="field" aria-label="Camera" value={monitor.camera_id} onChange={(e) => updateMonitor(monitor.id, { camera_id: e.target.value })}>
-            <option value="">No camera</option>
-            {(engine?.cameras ?? []).map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
+          <option value="">No camera</option>
+          {(engine?.cameras ?? []).map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
         </select>
         <Link to={monitor.camera_id ? `/cameras/${monitor.camera_id}` : "/cameras"} className="btn-inline">
           Manage cameras
@@ -67,12 +56,12 @@ export function MonitorEditPage() {
       </Section>
       <Section title="Printer">
         <select className="field" aria-label="Printer" value={monitor.printer_id} onChange={(e) => updateMonitor(monitor.id, { printer_id: e.target.value })}>
-            <option value="">No printer (alerts only)</option>
-            {(engine?.printers ?? []).map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
+          <option value="">No printer (alerts only)</option>
+          {(engine?.printers ?? []).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
         </select>
         <Link to={monitor.printer_id ? `/printers/${monitor.printer_id}` : "/printers"} className="btn-inline">
           Manage printers
@@ -89,6 +78,9 @@ export function MonitorEditPage() {
           {removing ? "Deleting…" : "Delete monitor"}
         </ConfirmButton>
       </Section>
-    </Page>
+      <div className="mt-auto px-4 py-2">
+        <SaveStatus scope={`monitor:${monitor.id}`} />
+      </div>
+    </>
   );
 }

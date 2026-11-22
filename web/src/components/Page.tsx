@@ -35,7 +35,7 @@ export function Page({
   actions,
   subview = false,
   titleHidden = false,
-  backOnPhones = false,
+  phoneBack,
   children,
 }: {
   title: string;
@@ -43,7 +43,7 @@ export function Page({
   actions?: ReactNode;
   subview?: boolean;
   titleHidden?: boolean;
-  backOnPhones?: boolean;
+  phoneBack?: Back;
   children: ReactNode;
 }) {
   return (
@@ -55,7 +55,8 @@ export function Page({
         </h1>
       ) : (
         <div className="page-head">
-          {back && <BackLink back={back} className={backOnPhones ? "md:hidden" : ""} />}
+          {phoneBack && <BackLink back={phoneBack} className="md:hidden" />}
+          {back && <BackLink back={back} className={phoneBack ? "max-md:hidden" : ""} />}
           <h1 tabIndex={-1} className="page-title">
             {title}
           </h1>

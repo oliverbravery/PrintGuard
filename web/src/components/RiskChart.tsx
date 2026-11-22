@@ -19,7 +19,10 @@ function acrossItsSpan(bucket: GroupedBucket, span: number): GroupedBucket[] {
   return [-span / 2, span / 2].map((offset) => ({ ...bucket, t: bucket.t + offset }));
 }
 
-export function RiskBandChart({ data, span, threshold }: { data: GroupedBucket[]; span: number; threshold: number }) {
+const RISK_TICKS = [1, 0.75, 0.5, 0.25, 0];
+const TIME_TICKS = 5;
+
+function RiskBandChart({ data, span, threshold }: { data: GroupedBucket[]; span: number; threshold: number }) {
   const start = data[0].t;
   const width = data[data.length - 1].t - start + span;
   const x = (t: number) => (((t - start + span / 2) / width) * W).toFixed(1);
@@ -28,7 +31,10 @@ export function RiskBandChart({ data, span, threshold }: { data: GroupedBucket[]
   const runs = unbrokenRuns(data, span).map((run) => (run.length > 1 ? run : acrossItsSpan(run[0], span)));
   const colour = riskColor(data[data.length - 1].avg, threshold);
   return (
-    <svg viewBox={`0 0 ${W} ${CH}`} className="w-full" style={{ height: CH }} preserveAspectRatio="none" role="img" aria-label="Risk over time">
+    <svg viewBox={`0 0 ${W} ${CH}`} className="w-full border-b border-l border-line-1" style={{ height: CH }} preserveAspectRatio="none" role="img" aria-label="Risk over time">
+      {RISK_TICKS.slice(1, -1).map((risk) => (
+        <line key={risk} x1="0" x2={W} y1={y(risk)} y2={y(risk)} stroke="var(--color-line-0)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+      ))}
       <line x1="0" x2={W} y1={y(threshold)} y2={y(threshold)} stroke="var(--color-bad)" strokeOpacity="0.5" strokeWidth="1" strokeDasharray="5 4" />
       {runs.map((run) => (
         <g key={run[0].t}>
@@ -40,7 +46,7 @@ export function RiskBandChart({ data, span, threshold }: { data: GroupedBucket[]
   );
 }
 
-export function DefectBars({ data, span }: { data: GroupedBucket[]; span: number }) {
+function DefectBars({ data, span }: { data: GroupedBucket[]; span: number }) {
   const start = data[0].t;
   const width = data[data.length - 1].t - start + span;
   const peak = Math.max(1, ...data.map((d) => d.defects));
@@ -54,5 +60,41 @@ export function DefectBars({ data, span }: { data: GroupedBucket[]; span: number
         );
       })}
     </svg>
+  );
+}
+
+export function RiskPeriodChart({ data, span, threshold, time }: { data: GroupedBucket[]; span: number; threshold: number; time: (ts: number) => string }) {
+  const start = data[0].t;
+  const width = data[data.length - 1].t - start + span;
+  const peak = Math.max(1, ...data.map((d) => d.defects));
+  const ticks = Array.from({ length: TIME_TICKS }, (_, index) => index / (TIME_TICKS - 1));
+  return (
+    <div className="@container grid grid-cols-[3rem_minmax(0,1fr)] gap-y-2">
+      <div aria-hidden className="mono relative text-xs text-text-2" style={{ height: CH }}>
+        {RISK_TICKS.map((risk) => (
+          <span key={risk} className="absolute right-2" style={{ top: `${(1 - risk) * 100}%`, translate: `0 ${risk === 1 ? "0" : risk === 0 ? "-100%" : "-50%"}` }}>
+            {risk * 100}%
+          </span>
+        ))}
+      </div>
+      <RiskBandChart data={data} span={span} threshold={threshold} />
+      <div aria-hidden className="mono flex flex-col justify-between pr-2 text-right text-xs text-text-2">
+        <span>{peak}</span>
+        <span>0</span>
+      </div>
+      <DefectBars data={data} span={span} />
+      <span />
+      <div aria-hidden className="mono relative h-4 text-xs text-text-2">
+        {ticks.map((at, index) => (
+          <span
+            key={at}
+            className={`absolute whitespace-nowrap ${index % 2 ? "@max-2xl:hidden" : ""}`}
+            style={{ left: `${at * 100}%`, translate: index === 0 ? "0" : index === TIME_TICKS - 1 ? "-100%" : "-50%" }}
+          >
+            {time(start + width * at)}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }

@@ -2,12 +2,13 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { sourceLabel } from "../cameras";
 import { alertOutcome } from "../history";
-import { awaitingReview, framesLabel } from "../review";
 import { useStore } from "../store";
 import type { Monitor } from "../types";
 import { Feed, useCovered } from "./Feed";
+import { MonitorSettings } from "./MonitorSettings";
 import { PluginNodeView, usePluginSurface } from "./PluginNode";
 import { activeJob, HeaterReadouts, jobText, PreheatPane, PrintActions, ProgressBar } from "./PrinterControls";
+import { ReviewList } from "./ReviewList";
 import { RiskMeter } from "./RiskMeter";
 import { SaveStatus } from "./SaveStatus";
 import { Segmented } from "./Segmented";
@@ -16,13 +17,17 @@ import { Sparkline } from "./Sparkline";
 import { DeviceStatus, monitorState, Status } from "./Status";
 import { TabPanel, Tabs } from "./Tabs";
 
-type Pane = "control" | "tune" | "preheat";
+type Pane = "control" | "tune" | "preheat" | "configure" | "review";
 
 const PANES: { id: Pane; label: string }[] = [
   { id: "control", label: "Control" },
   { id: "tune", label: "Tune" },
   { id: "preheat", label: "Preheat" },
+  { id: "configure", label: "Configure" },
+  { id: "review", label: "Review" },
 ];
+
+const SAME_HEIGHT: Pane[] = ["control", "tune", "preheat"];
 
 const RESPONSES: { value: Monitor["on_defect"]; label: string }[] = [
   { value: "none", label: "Alert" },
@@ -39,21 +44,15 @@ function ControlPane({ monitor }: { monitor: Monitor }) {
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
   const device = printer?.device_state;
-  const awaiting = awaitingReview(engine?.reviews ?? [], monitor.id);
   const score = camera?.online && monitor.watching ? (history[monitor.id]?.at(-1)?.score ?? 0) : null;
   const state = monitorState(monitor, Boolean(camera?.online));
   return (
     <>
       <Block>
-        <div className="flex items-center justify-between gap-2">
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <Status tone={state.tone}>{state.text}</Status>
-            <DeviceStatus state={device} />
-          </span>
-          <Link to={`/monitors/${monitor.id}/edit`} className="btn-inline">
-            Edit
-          </Link>
-        </div>
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <Status tone={state.tone}>{state.text}</Status>
+          <DeviceStatus state={device} />
+        </span>
         <h2 className="mt-1 truncate text-xl font-bold tracking-[-0.02em]">{monitor.name}</h2>
         <p className="mono truncate text-xs text-text-1">
           {activeJob(device) ? jobText(device) : printer ? `${printer.name}, ${printer.device_state?.status ?? "no status yet"}` : "No printer, alerts only"}
@@ -76,14 +75,6 @@ function ControlPane({ monitor }: { monitor: Monitor }) {
           </p>
         )}
       </Block>
-      {awaiting && (
-        <Block className="flex items-center justify-between gap-3 bg-ink-1 py-2">
-          <span className="text-sm font-semibold">{framesLabel(awaiting.frames)} from the last print</span>
-          <Link to={`/monitors/${monitor.id}/review/${awaiting.id}`} className="btn-inline btn-inline-accent">
-            Review
-          </Link>
-        </Block>
-      )}
       {printer ? (
         <>
           <div className="flex-1 border-b border-rule">
@@ -142,11 +133,8 @@ function TunePane({ monitor }: { monitor: Monitor }) {
           onChange={(v) => updateMonitor(monitor.id, { cooldown_s: v })}
         />
       </Block>
-      <div className="mt-auto flex items-center justify-between gap-2 px-4 py-2">
+      <div className="mt-auto px-4 py-2">
         <SaveStatus scope={`monitor:${monitor.id}`} />
-        <Link to={`/monitors/${monitor.id}/edit`} className="btn-inline">
-          Monitor settings
-        </Link>
       </div>
     </>
   );
@@ -169,6 +157,8 @@ export function MonitorHero({ monitor }: { monitor: Monitor }) {
   const device = engine?.printers.find((p) => p.id === monitor.printer_id)?.device_state;
   const tools = usePluginSurface("monitor", monitor.id);
   const covered = useCovered();
+  const waiting = (engine?.reviews ?? []).filter((review) => review.monitor_id === monitor.id && review.status === "ready").length;
+  const tabs = PANES.map((tab) => (tab.id === "review" && waiting ? { ...tab, badge: `${waiting} to review` } : tab));
   const prefix = "hero";
   return (
     <section
@@ -201,13 +191,20 @@ export function MonitorHero({ monitor }: { monitor: Monitor }) {
         </div>
       </div>
       <div className="flex min-w-0 flex-col">
-        <Tabs prefix={prefix} label="Monitor panes" tabs={PANES} value={pane} onChange={setPane} cells />
+        <Tabs prefix={prefix} label="Monitor panes" tabs={tabs} value={pane} onChange={setPane} cells />
         <div className="grid flex-1 lg:min-h-0 lg:scroll-pb-14 lg:overflow-y-auto">
           {PANES.map(({ id }) => (
-            <TabPanel key={id} prefix={prefix} id={id} className={`flex flex-col [grid-area:1/1] ${pane === id ? "" : "invisible"}`}>
+            <TabPanel
+              key={id}
+              prefix={prefix}
+              id={id}
+              className={pane === id ? "flex flex-col [grid-area:1/1]" : SAME_HEIGHT.includes(id) ? "invisible flex flex-col [grid-area:1/1]" : "hidden"}
+            >
               {id === "control" && <ControlPane monitor={monitor} />}
               {id === "tune" && <TunePane monitor={monitor} />}
               {id === "preheat" && <PreheatPaneFor monitor={monitor} />}
+              {id === "configure" && <MonitorSettings monitor={monitor} />}
+              {id === "review" && <ReviewList monitorId={monitor.id} />}
             </TabPanel>
           ))}
         </div>

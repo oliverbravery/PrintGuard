@@ -39,7 +39,8 @@ alerting twice.
 
 ## Monitor settings
 
-Open a monitor from the dashboard to change these. They save as you move them.
+Open a monitor from the dashboard and use its **Tune** and **Configure** tabs to change these.
+They save as you move them.
 
 ![The selected monitor: its feed, live risk, temperatures, pause and cancel, with the Tune and Preheat panes beside them](assets/printer-detail.png)
 

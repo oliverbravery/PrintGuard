@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, Navigate, useParams } from "react-router";
+import { Navigate, useParams } from "react-router";
 import { alertOutcome, GROUP_S, groupBuckets, HISTORY_BUCKET_MS, PERIODS, type Period } from "../history";
-import { clock, framesLabel, reviewable, statusText } from "../review";
+import { clock } from "../review";
 import { useLazySnapshot } from "../snapshot";
 import { useStore } from "../store";
 import type { Snapshot } from "../types";
 import { Page } from "./Page";
-import { DefectBars, RiskBandChart } from "./RiskChart";
+import { ReviewList } from "./ReviewList";
+import { RiskPeriodChart } from "./RiskChart";
 import { riskColor, RiskMeter } from "./RiskMeter";
 import { SnapshotLightbox } from "./SnapshotLightbox";
 
@@ -79,7 +80,6 @@ export function HistoryPage() {
   const monitor = engine?.monitors.find((m) => m.id === monitorId);
   const camera = engine?.cameras.find((c) => c.id === monitor?.camera_id);
   const reviews = (engine?.reviews ?? []).filter((review) => review.monitor_id === monitorId);
-  const prints = reviews.filter((review) => review.status !== "running" && review.frames > 0).reverse();
   const alertsKept = reviews.reduce((kept, review) => kept + review.alerts, 0);
   const [period, setPeriod] = useState<Period>("1h");
   const [sortByScore, setSortByScore] = useState(false);
@@ -136,14 +136,7 @@ export function HistoryPage() {
           {grouped.length === 0 ? (
             <p className="mono py-8 text-center text-xs text-text-2">{history ? "awaiting results" : "loading history"}</p>
           ) : (
-            <>
-              <RiskBandChart data={grouped} span={GROUP_S[period]} threshold={monitor.threshold} />
-              <DefectBars data={grouped} span={GROUP_S[period]} />
-              <div className="mt-1 flex justify-between">
-                <span className="label">{axisTime(grouped[0].t)}</span>
-                <span className="label">{axisTime(grouped[grouped.length - 1].t)}</span>
-              </div>
-            </>
+            <RiskPeriodChart data={grouped} span={GROUP_S[period]} threshold={monitor.threshold} time={axisTime} />
           )}
         </div>
       </section>
@@ -151,27 +144,7 @@ export function HistoryPage() {
       <div className="grid lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
         <section className="border-b border-rule lg:border-r">
           <SectionHead title="Prints" />
-          {prints.length === 0 ? (
-            <p className="px-4 py-4 text-sm text-text-2">No finished prints yet.</p>
-          ) : (
-            <ul>
-              {prints.map((print) => (
-                <li key={print.id} className="flex items-center gap-3 border-b border-line-0 px-4 py-2">
-                  <span className="min-w-0 flex-1">
-                    <span className="mono block truncate text-xs">
-                      {new Date((print.ended ?? print.started) * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
-                    </span>
-                    <span className="mono block text-xs text-text-2">
-                      {framesLabel(print.frames)} · {statusText(print)}
-                    </span>
-                  </span>
-                  <Link to={`/monitors/${monitor.id}/review/${print.id}`} className={`btn-inline ${reviewable(print) ? "btn-inline-accent" : ""}`}>
-                    {reviewable(print) ? "Review" : "View"}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
+          <ReviewList monitorId={monitor.id} />
         </section>
         <section className="border-b border-rule">
           <SectionHead title="Risky moments">
