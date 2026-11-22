@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Pencil } from "lucide-react";
 import { createContext, useContext } from "react";
 import { useParentPanel } from "react-resizable-panels";
 import { Link } from "react-router";
@@ -9,6 +9,7 @@ import type { Monitor } from "../types";
 import { ConfirmButton } from "./ConfirmButton";
 import { Feed, useCovered } from "./Feed";
 import { LayoutControls, useReorder } from "./LayoutControls";
+import { AddCell } from "./Page";
 import { PluginNodeView, usePluginSurface } from "./PluginNode";
 import { activeJob, HEATERS, heaterText, ProgressBar } from "./PrinterControls";
 import { riskColor, RiskMeter } from "./RiskMeter";
@@ -19,7 +20,7 @@ function counted(count: number, noun: string): string {
   return count ? `${count} ${noun}${count === 1 ? "" : "s"}` : "";
 }
 
-const COLUMNS = "grid-cols-[6.5rem_minmax(0,1fr)_auto] @3xl:grid-cols-[8rem_minmax(0,1.3fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,1fr)]";
+const COLUMNS = "grid-cols-[6.5rem_minmax(6rem,1fr)_auto] @3xl:grid-cols-[8rem_minmax(0,1.3fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,1fr)]";
 
 export function Cell({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <div className={`flex min-w-0 flex-col justify-center gap-1 border-l border-line-0 px-3 py-2 ${className}`}>{children}</div>;
@@ -152,7 +153,7 @@ function HiddenTray({ hidden }: { hidden: Tile[] }) {
 }
 
 export function FleetLedger({ monitors, selectedId, visible, hidden }: { monitors: Monitor[]; selectedId: string | null; visible: string[]; hidden: Tile[] }) {
-  const { engine, customising, setCustomising, resetLayout } = useStore();
+  const { engine, customising, setCustomising, resetLayout, openDialog } = useStore();
   const pinned = section(engine?.settings.layout).pinned;
   const group = monitors.map((m) => m.id);
   const reorder = useReorder(visible);
@@ -171,8 +172,10 @@ export function FleetLedger({ monitors, selectedId, visible, hidden }: { monitor
               </ConfirmButton>
             </>
           )}
-          <button className="cell-action self-stretch px-4 text-xs" aria-pressed={customising} onClick={() => setCustomising(!customising)}>
+          {!customising && <AddCell label="Add monitor" onClick={() => openDialog("monitor")} />}
+          <button className="cell-action flex items-center gap-2 self-stretch px-4 text-xs" aria-pressed={customising} onClick={() => setCustomising(!customising)}>
             {customising ? "Done" : "Layout"}
+            {!customising && <Pencil size={13} aria-hidden />}
           </button>
           <FoldButton />
         </div>

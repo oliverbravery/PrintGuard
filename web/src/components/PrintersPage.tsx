@@ -4,7 +4,7 @@ import { useStore } from "../store";
 import { useSubmit } from "../submit";
 import type { AdapterConfig, AdapterMeta, Printer } from "../types";
 import { ConfirmButton } from "./ConfirmButton";
-import { DetailHead, ListHead, Page, Split } from "./Page";
+import { AddCell, DetailHead, ListHead, Page, Split } from "./Page";
 import { retypeReason, SchemaForm, savedSecretTitles } from "./SchemaForm";
 import { DeviceStatus, Status } from "./Status";
 import { TestRow } from "./TestRow";
@@ -183,7 +183,7 @@ export function PrintersPage() {
   const selected = adding ? undefined : (chosen ?? printers[0]);
   const list = (
     <>
-      <ListHead title={`Printers · ${printers.length}`} />
+      <ListHead title={`Printers · ${printers.length}`} action={<AddCell label="Register a printer" to="/printers/new" current={adding} />} />
       {printers.map((printer) => (
         <Link key={printer.id} to={`/printers/${printer.id}`} aria-current={printer.id === selected?.id ? "page" : undefined} className="list-row">
           <span className="min-w-0 flex-1">
@@ -193,9 +193,6 @@ export function PrintersPage() {
           {printer.online ? <DeviceStatus state={printer.device_state} /> : <Status tone="bad">offline</Status>}
         </Link>
       ))}
-      <Link to="/printers/new" aria-current={adding ? "page" : undefined} className="list-row font-mono text-xs font-semibold uppercase tracking-[0.06em]">
-        + Register a printer
-      </Link>
     </>
   );
   const detail = selected ? (

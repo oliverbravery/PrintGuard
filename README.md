@@ -114,8 +114,8 @@ your first monitor.
 1. Add a camera under **Cameras**, and crop it to the print.
 2. Register your printer under **Printers** and test the connection.
 3. Enable an alert channel under **Settings**, then **Alerts**.
-4. Add a monitor that binds the camera and printer. Choose whether a defect alerts you, pauses or
-   cancels, and turn on its push notifications.
+4. Add a monitor with **+ Add** beside the fleet, binding the camera and printer. Choose whether a
+   defect alerts you, pauses or cancels, and turn on its push notifications.
 
 ## Printers and cameras
 

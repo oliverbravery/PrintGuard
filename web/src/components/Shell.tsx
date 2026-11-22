@@ -160,9 +160,6 @@ function TopBar() {
       <button className="topbar-cell topbar-icon" aria-label="Report a bug" title="Report a bug" onClick={() => openDialog("report")}>
         <Bug size={18} aria-hidden />
       </button>
-      <button className="topbar-add" aria-label="Add monitor" onClick={() => openDialog("monitor")}>
-        + Add
-      </button>
     </header>
   );
 }

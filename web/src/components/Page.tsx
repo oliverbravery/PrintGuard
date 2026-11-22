@@ -88,11 +88,28 @@ export function DetailHead({ title, children }: { title: string; children?: Reac
   );
 }
 
-export function ListHead({ title, children }: { title: string; children?: ReactNode }) {
+export function ListHead({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="flex min-h-11 items-center gap-2 border-b border-rule bg-ink-1 px-4 py-1.5">
-      <h2 className="label flex-1 text-text-1">{title}</h2>
-      {children}
+    <div className="flex min-h-11 items-stretch border-b border-rule bg-ink-1">
+      <div className="flex min-w-0 flex-1 items-center gap-2 px-4 py-1.5">
+        <h2 className="label flex-1 text-text-1">{title}</h2>
+        {children}
+      </div>
+      {action}
     </div>
+  );
+}
+
+const ADD_CELL = "cell-action cell-action-primary flex items-center self-stretch px-4 text-xs";
+
+export function AddCell({ label, to, current, onClick }: { label: string; to?: string; current?: boolean; onClick?: () => void }) {
+  return to ? (
+    <Link to={to} aria-label={label} aria-current={current ? "page" : undefined} className={ADD_CELL}>
+      + Add
+    </Link>
+  ) : (
+    <button type="button" aria-label={label} className={ADD_CELL} onClick={onClick}>
+      + Add
+    </button>
   );
 }

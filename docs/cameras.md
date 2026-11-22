@@ -17,7 +17,7 @@ Where PrintGuard gets video from, and how to add each kind of camera.
 
 ## Camera sources
 
-Open **Cameras**. Printer webcams have their own tab, and **+ Register a camera** adds the other
+Open **Cameras**. Printer webcams have their own tab, and **+ Add** beside the tabs adds the other
 three.
 
 | Source | What it is | Keeps watching with every window closed |

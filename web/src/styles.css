@@ -520,24 +520,6 @@ a.topbar-readout:hover {
   padding-inline: 0;
 }
 
-.topbar-add {
-  padding-inline: 1rem;
-  border-left: 1px solid var(--color-rule);
-  background: var(--color-accent);
-  color: var(--color-on-accent);
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.topbar-add:hover {
-  background: color-mix(in srgb, var(--color-accent) 86%, var(--color-text-0));
-}
-
 @media (width >= 80rem) {
   .topbar-tab {
     padding-inline: 1rem;

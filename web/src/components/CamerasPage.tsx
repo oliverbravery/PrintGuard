@@ -11,7 +11,7 @@ import { useCovered } from "./Feed";
 import { NameField } from "./NameField";
 import { SaveStatus } from "./SaveStatus";
 import { Slider } from "./Slider";
-import { DetailHead, Page, Split } from "./Page";
+import { AddCell, DetailHead, Page, Split } from "./Page";
 import { Segmented } from "./Segmented";
 import { Status } from "./Status";
 import { TabPanel, Tabs } from "./Tabs";
@@ -331,27 +331,28 @@ export function CamerasPage() {
   };
   const list = (
     <>
-      <Tabs
-        prefix="cameras"
-        label="Camera groups"
-        cells
-        tabs={[
-          { id: "cameras", label: `Cameras · ${own.length}` },
-          { id: "printers", label: `Printer cams · ${fromPrinters.length}` },
-        ]}
-        value={group}
-        onChange={setGroup}
-      />
+      <div className="flex *:first:min-w-0 *:first:flex-1">
+        <Tabs
+          prefix="cameras"
+          label="Camera groups"
+          cells
+          tabs={[
+            { id: "cameras", label: `Cameras · ${own.length}` },
+            { id: "printers", label: `Printer cams · ${fromPrinters.length}` },
+          ]}
+          value={group}
+          onChange={setGroup}
+        />
+        <span className="flex border-b border-rule">
+          <AddCell label="Register a camera" to="/cameras/new" current={adding} />
+        </span>
+      </div>
       <TabPanel prefix="cameras" id={group}>
         {shown.map((camera) => (
           <CameraLink key={camera.id} camera={camera} selected={camera.id === selected?.id} />
         ))}
         {group === "cameras" && own.length === 0 && <p className="border-b border-line-0 px-4 py-3 text-sm text-text-2">No cameras registered yet.</p>}
-        {group === "cameras" ? (
-          <Link to="/cameras/new" aria-current={adding ? "page" : undefined} className="list-row font-mono text-xs font-semibold uppercase tracking-[0.06em]">
-            + Register a camera
-          </Link>
-        ) : (
+        {group === "printers" && (
           <div className="space-y-3 px-4 py-3">
             <p className="text-sm text-text-1">Cameras connected to your registered printers. Refresh to register any added since.</p>
             {!hasPrinters && <p className="mono text-xs text-text-2">register a printer first</p>}
