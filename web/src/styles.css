@@ -190,6 +190,10 @@ body {
   border-color: var(--painted-edge);
 }
 
+:root[data-glass] .tabs-cells .tab[aria-selected="true"] {
+  background: var(--painted-wash);
+}
+
 :root[data-glass] .btn:not(.btn-primary):hover,
 :root[data-glass] .chip:hover {
   border-color: color-mix(in srgb, var(--painted-ink) 55%, transparent);

@@ -9,16 +9,16 @@ const docs = (page: string) => `${REPO}/blob/main/docs/${page}`;
 const link = "text-accent underline hover:opacity-80";
 
 export const SHOT_SIZES = {
-  alert: [860, 758],
-  alerts: [980, 1420],
-  cameras: [868, 146],
-  checklist: [1192, 1172],
-  customise: [860, 768],
-  plugins: [980, 1284],
-  printers: [1024, 576],
-  prints: [1344, 1472],
-  standby: [860, 278],
-  tuning: [938, 904],
+  alert: [2000, 1544],
+  alerts: [1316, 1796],
+  cameras: [2000, 1544],
+  checklist: [1320, 1084],
+  customise: [2000, 716],
+  plugins: [1316, 1432],
+  printers: [2000, 1904],
+  prints: [2000, 1904],
+  standby: [2000, 122],
+  tuning: [2000, 838],
 } as const;
 
 export interface GuideSection {

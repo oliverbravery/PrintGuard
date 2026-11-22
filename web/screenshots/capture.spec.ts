@@ -602,6 +602,7 @@ async function captureCrop(browser: Browser, crop: Crop, theme: "dark" | "light"
   const { page, close } = await stage(browser, { ...crop, name: crop.id, theme });
   if (crop.prepare) await crop.prepare(page);
   await page.addStyleTag({ content: `*{outline:none!important}${crop.hideFeeds ? ".aspect-video{display:none}" : ""}` });
+  await crop.target(page).scrollIntoViewIfNeeded();
   const box = (await crop.target(page).boundingBox())!;
   const pad = crop.pad ?? 10;
   await page.screenshot({
