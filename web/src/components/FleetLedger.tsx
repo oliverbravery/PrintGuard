@@ -47,7 +47,6 @@ function Row({ monitor, selected, handle, visible, group }: { monitor: Monitor; 
       <Cell>
         <Link
           to={`/monitors/${monitor.id}`}
-          replace
           aria-current={selected ? "true" : undefined}
           className="truncate font-bold after:absolute after:inset-0 after:content-['']"
         >

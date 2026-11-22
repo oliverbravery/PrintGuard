@@ -2834,6 +2834,7 @@ test("buttons, tabs, the close button and the small controls are 44 pixels to a 
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await fitsAFinger(page.getByRole("button", { name: "Remove PLA" }));
 
+  await routeTo(page, "/");
   await page.evaluate(() => (window as any).__pg.setState({ customising: true }));
   await fitsAFinger(page.getByRole("button", { name: "Drag Prusa to reorder" }));
   await fitsAFinger(page.getByRole("button", { name: "Move Prusa down" }));
@@ -3282,18 +3283,26 @@ test("the fleet can't grow over the selected monitor's risk, and what's pinned u
   expect(risk.y + risk.height).toBeLessThan((await pinned.boundingBox())!.y);
 });
 
-test("on a phone the fleet stays at the bottom of the screen while the selected monitor scrolls above it", async ({ page }) => {
+test("on a phone the fleet is the page, a monitor opens on its own and back returns to the fleet", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  const monitors = Array.from({ length: 6 }, (_, index) => monitor({ id: `m${index}`, name: `Printer ${index}` }));
-  await dashboard(page, { engine: engine({ monitors }) });
+  await dashboard(page, { engine: engine({ monitors: [monitor(), monitor({ id: "m2", name: "MK4" })] }) });
   const fleet = page.getByRole("heading", { name: /^Fleet/ });
-  await expect(fleet).toBeInViewport();
-  const fleetTop = (await fleet.boundingBox())!.y;
-  await page.getByRole("link", { name: "Edit", exact: true }).scrollIntoViewIfNeeded();
-  await page.getByRole("link", { name: "Printer 5", exact: true }).scrollIntoViewIfNeeded();
-  expect((await fleet.boundingBox())!.y).toBe(fleetTop);
-  await expect(page.getByRole("navigation", { name: "Primary" }).last()).toBeInViewport();
-  expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight)).toBe(true);
+  const selected = page.getByRole("region", { name: /selected monitor$/ });
+  await expect(fleet).toBeVisible();
+  await expect(selected).toHaveCount(0);
+  await expect(page.getByRole("separator")).toHaveCount(0);
+
+  await page.getByRole("link", { name: "MK4", exact: true }).click();
+  await expect(page.getByRole("region", { name: "MK4, selected monitor" })).toBeVisible();
+  await expect(fleet).toHaveCount(0);
+  await expect(page.locator(".dock")).toBeHidden();
+
+  await page.getByRole("link", { name: "Back" }).click();
+  await expect(fleet).toBeVisible();
+  await expect(selected).toHaveCount(0);
+  await page.getByRole("link", { name: "Prusa", exact: true }).click();
+  await page.goBack();
+  await expect(fleet).toBeVisible();
 });
 
 test("a quarter turn keeps the crop a square of the same size and centre, and the preview keeps its size", async ({ page }) => {

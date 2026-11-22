@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
-import { Link, Navigate, useParams } from "react-router";
+import { Navigate, useParams } from "react-router";
 import { applyLayout, section, tiles } from "../layout";
 import { useStore } from "../store";
 import { FleetLedger } from "./FleetLedger";
@@ -10,34 +10,17 @@ import { MonitorHero } from "./MonitorHero";
 import { Page } from "./Page";
 import { PluginPanel } from "./PluginPanel";
 import { rectSortingStrategy, Sortable } from "./Sortable";
-import { monitorState, Status } from "./Status";
 
-function Switcher({ monitors, selectedId }: { monitors: { id: string; name: string }[]; selectedId: string }) {
-  const engine = useStore((s) => s.engine);
-  if (monitors.length < 2) return null;
-  return (
-    <nav aria-label="Switch monitor" className="scroll-x flex border-b border-rule md:hidden">
-      {engine?.monitors
-        .filter((m) => monitors.some((shown) => shown.id === m.id))
-        .map((monitor) => {
-          const camera = engine.cameras.find((c) => c.id === monitor.camera_id);
-          const state = monitorState(monitor, Boolean(camera?.online));
-          return (
-            <Link
-              key={monitor.id}
-              to={`/monitors/${monitor.id}`}
-              replace
-              aria-current={monitor.id === selectedId ? "true" : undefined}
-              className="flex min-h-11 shrink-0 items-center gap-2 border-r border-line-0 px-4 text-sm font-semibold aria-[current]:bg-text-0 aria-[current]:text-ink-0"
-            >
-              <Status tone={state.tone}>
-                <span className="sr-only">{state.text}</span>
-              </Status>
-              {monitor.name}
-            </Link>
-          );
-        })}
-    </nav>
+const PHONE = "(width < 48rem)";
+
+function usePhone(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const query = matchMedia(PHONE);
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    },
+    () => matchMedia(PHONE).matches,
   );
 }
 
@@ -75,6 +58,7 @@ export function MonitorsPage() {
   const panels = visible.flatMap((tile) => (tile.plugin ? [tile.plugin] : []));
   const panelIds = panels.map((plugin) => plugin.id);
   const reorderPanels = useReorder(visibleIds);
+  const phone = usePhone();
   const selected = monitorId ? engine.monitors.find((m) => m.id === monitorId) : monitors[0];
   if (monitorId && !selected) return <Navigate to="/" replace />;
   const panelStrip = panels.length > 0 && (
@@ -94,16 +78,21 @@ export function MonitorsPage() {
         {panelStrip}
       </Page>
     );
+  if (phone && monitorId && selected)
+    return (
+      <Page title="Monitors" back={{ to: "/", label: "Back" }} subview>
+        <MonitorHero monitor={selected} />
+      </Page>
+    );
   const fleet = (
     <>
-      <FleetLedger monitors={monitors} selectedId={selected?.id ?? null} visible={visibleIds} hidden={hidden} />
+      <FleetLedger monitors={monitors} selectedId={phone ? null : (selected?.id ?? null)} visible={visibleIds} hidden={hidden} />
       {panelStrip}
     </>
   );
   return (
     <Page title="Monitors" titleHidden>
-      {selected && <Switcher monitors={monitors} selectedId={selected.id} />}
-      {selected ? <HeroOverFleet hero={<MonitorHero monitor={selected} />} fleet={fleet} /> : fleet}
+      {selected && !phone ? <HeroOverFleet hero={<MonitorHero monitor={selected} />} fleet={fleet} /> : fleet}
     </Page>
   );
 }
