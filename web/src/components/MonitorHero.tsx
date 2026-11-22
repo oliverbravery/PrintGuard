@@ -27,8 +27,6 @@ const PANES: { id: Pane; label: string }[] = [
   { id: "review", label: "Review" },
 ];
 
-const SAME_HEIGHT: Pane[] = ["control", "tune", "preheat"];
-
 const RESPONSES: { value: Monitor["on_defect"]; label: string }[] = [
   { value: "none", label: "Alert" },
   { value: "pause", label: "Pause" },
@@ -77,7 +75,7 @@ function ControlPane({ monitor }: { monitor: Monitor }) {
       </Block>
       {printer ? (
         <>
-          <div className="flex-1 border-b border-rule">
+          <div className="border-b border-rule">
             <HeaterReadouts state={device} />
           </div>
           <div className="surface z-[1] lg:sticky lg:bottom-0">
@@ -85,7 +83,7 @@ function ControlPane({ monitor }: { monitor: Monitor }) {
           </div>
         </>
       ) : (
-        <p className="surface z-[1] mt-auto border-t border-rule px-4 py-3 text-sm text-text-1 lg:sticky lg:bottom-0">Bind a printer to pause or cancel a failing print.</p>
+        <p className="surface z-[1] border-b border-rule px-4 py-3 text-sm text-text-1 lg:sticky lg:bottom-0">Bind a printer to pause or cancel a failing print.</p>
       )}
     </>
   );
@@ -133,7 +131,7 @@ function TunePane({ monitor }: { monitor: Monitor }) {
           onChange={(v) => updateMonitor(monitor.id, { cooldown_s: v })}
         />
       </Block>
-      <div className="mt-auto px-4 py-2">
+      <div className="px-4 py-2">
         <SaveStatus scope={`monitor:${monitor.id}`} />
       </div>
     </>
@@ -192,13 +190,13 @@ export function MonitorHero({ monitor }: { monitor: Monitor }) {
       </div>
       <div className="flex min-w-0 flex-col">
         <Tabs prefix={prefix} label="Monitor panes" tabs={tabs} value={pane} onChange={setPane} cells />
-        <div className="grid flex-1 lg:min-h-0 lg:scroll-pb-14 lg:overflow-y-auto">
+        <div className="flex-1 lg:min-h-0 lg:scroll-pb-14 lg:overflow-y-auto">
           {PANES.map(({ id }) => (
             <TabPanel
               key={id}
               prefix={prefix}
               id={id}
-              className={pane === id ? "flex flex-col [grid-area:1/1]" : SAME_HEIGHT.includes(id) ? "invisible flex flex-col [grid-area:1/1]" : "hidden"}
+              className={pane === id ? "" : "hidden"}
             >
               {id === "control" && <ControlPane monitor={monitor} />}
               {id === "tune" && <TunePane monitor={monitor} />}

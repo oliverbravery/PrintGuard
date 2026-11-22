@@ -78,7 +78,7 @@ export function MonitorSettings({ monitor }: { monitor: Monitor }) {
           {removing ? "Deleting…" : "Delete monitor"}
         </ConfirmButton>
       </Section>
-      <div className="mt-auto px-4 py-2">
+      <div className="px-4 py-2">
         <SaveStatus scope={`monitor:${monitor.id}`} />
       </div>
     </>
