@@ -17,7 +17,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Changed
 
-- The dashboard is redesigned. The selected monitor's feed and controls sit at the top with the rest listed below, and Prints, Cameras, Printers and Settings each have their own page.
+- The dashboard is redesigned. The selected monitor's feed and controls sit at the top with the rest listed below, which you can resize or hide, and Prints, Cameras, Printers and Settings each have their own page.
 - Hubs run Standard after updating. It's about 5x slower than the old model on a CPU, so pick Light, or Legacy for the old model, if the capacity readout falls below what your cameras need.
 - The runtime setting has moved from Advanced in Settings to Detection.
 - Creality and Ultimaker printers are no longer marked experimental.

@@ -1,9 +1,9 @@
-import { useSyncExternalStore, type ReactNode } from "react";
-import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
+import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Navigate, useParams } from "react-router";
 import { applyLayout, section, tiles } from "../layout";
 import { useStore } from "../store";
-import { FleetLedger } from "./FleetLedger";
+import { FleetFold, FleetLedger } from "./FleetLedger";
 import { GettingStarted } from "./GettingStarted";
 import { MonitorHero } from "./MonitorHero";
 import { Page } from "./Page";
@@ -23,9 +23,13 @@ function usePhone(): boolean {
 }
 
 const HERO_MIN = "23rem";
+const FLEET_HEADER = "3.0625rem";
 
 function HeroOverFleet({ hero, fleet }: { hero: ReactNode; fleet: ReactNode }) {
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: "pg.monitors" });
+  const fleetPanel = usePanelRef();
+  const [folded, setFolded] = useState(false);
+  const fold = { folded, toggle: () => (folded ? fleetPanel.current?.expand() : fleetPanel.current?.collapse()) };
   return (
     <Group
       orientation="vertical"
@@ -38,8 +42,17 @@ function HeroOverFleet({ hero, fleet }: { hero: ReactNode; fleet: ReactNode }) {
         <div className="h-full overflow-y-auto max-lg:pb-2">{hero}</div>
       </Panel>
       <Separator className="splitter" aria-label="Selected monitor height" />
-      <Panel id="fleet" minSize="9rem">
-        <div className="h-full scroll-pt-20 overflow-y-auto">{fleet}</div>
+      <Panel
+        id="fleet"
+        panelRef={fleetPanel}
+        minSize="9rem"
+        collapsible
+        collapsedSize={FLEET_HEADER}
+        onResize={() => setFolded(fleetPanel.current?.isCollapsed() ?? false)}
+      >
+        <div className={`h-full scroll-pt-20 ${folded ? "overflow-hidden" : "overflow-y-auto"}`}>
+          <FleetFold value={fold}>{fleet}</FleetFold>
+        </div>
       </Panel>
     </Group>
   );

@@ -1,3 +1,5 @@
+import { ChevronDown, ChevronUp } from "lucide-react";
+import { createContext, useContext } from "react";
 import { useParentPanel } from "react-resizable-panels";
 import { Link } from "react-router";
 import { section, toggleHidden, type Tile } from "../layout";
@@ -98,6 +100,26 @@ function Row({ monitor, selected, handle, visible, group }: { monitor: Monitor; 
   );
 }
 
+const FoldContext = createContext<{ folded: boolean; toggle: () => void } | null>(null);
+export const FleetFold = FoldContext.Provider;
+
+function FoldButton() {
+  const fold = useContext(FoldContext);
+  if (!fold) return null;
+  const Icon = fold.folded ? ChevronUp : ChevronDown;
+  return (
+    <button
+      className="cell-action self-stretch px-3"
+      aria-expanded={!fold.folded}
+      aria-label={fold.folded ? "Show the fleet" : "Hide the fleet"}
+      title={fold.folded ? "Show the fleet" : "Hide the fleet"}
+      onClick={fold.toggle}
+    >
+      <Icon size={16} aria-hidden />
+    </button>
+  );
+}
+
 function HeightButtons() {
   const panel = useParentPanel();
   if (!panel) return null;
@@ -152,6 +174,7 @@ export function FleetLedger({ monitors, selectedId, visible, hidden }: { monitor
           <button className="cell-action self-stretch px-4 text-xs" aria-pressed={customising} onClick={() => setCustomising(!customising)}>
             {customising ? "Done" : "Layout"}
           </button>
+          <FoldButton />
         </div>
         <div aria-hidden className={`label grid border-b border-line-0 @max-3xl:hidden ${COLUMNS}`}>
           {["Frame", "Monitor / job", "Heaters", "Risk", "State and tools"].map((heading, index) => (
