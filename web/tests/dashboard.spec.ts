@@ -1566,11 +1566,11 @@ test("a theme started from dark keeps dark text on its accent", async ({ page })
   const themed = { ...engine().settings, theme: "mine", themes: [{ id: "mine", name: "Mine", base: "dark", colors: {} }] };
   await emit(page, { event: "state", ...engine({ settings: themed }) });
 
-  expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--color-on-accent"))).toBe("#0b0c0a");
+  expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--color-on-accent"))).toBe("#090908");
 });
 
-test("glass keeps status colours readable and distinct over a bright picture, blurs behind a sheet and forgets a picture that fails to load", async ({ page }) => {
-  await dashboard(page, { detailId: "m1" });
+test("glass keeps status colours readable and distinct over a bright picture, blurs behind the page and forgets a picture that fails to load", async ({ page }) => {
+  await dashboard(page);
   await emit(page, { event: "state", ...engine({ settings: { ...engine().settings, theme: "glass" } }) });
   const { lowestRatio, colours } = await page.evaluate(async () => {
     const loaded = performance.getEntriesByType("resource").find((entry) => entry.name.includes("/src/theme.ts"))!.name;
@@ -1600,7 +1600,7 @@ test("glass keeps status colours readable and distinct over a bright picture, bl
   expect(lowestRatio).toBeGreaterThanOrEqual(4.5);
   expect(new Set(colours).size).toBe(4);
   expect(colours).not.toContain("rgb(255, 255, 255)");
-  await expect(page.getByRole("dialog", { name: "Prusa" }).locator("aside")).not.toHaveCSS("backdrop-filter", "none");
+  await expect(page.locator("main")).not.toHaveCSS("backdrop-filter", "none");
 
   const tint = await page.evaluate(async () => {
     const loaded = performance.getEntriesByType("resource").find((entry) => entry.name.includes("/src/theme.ts"))!.name;
@@ -1633,7 +1633,7 @@ test("copy works where the clipboard API is missing", async ({ page }) => {
     Object.defineProperty(Navigator.prototype, "clipboard", { get: () => undefined });
     document.addEventListener("copy", () => ((window as any).__copied = (document.activeElement as HTMLTextAreaElement).value));
   });
-  await dashboard(page, { dialog: "settings", settingsTab: "api", createdToken: { name: "ci", secret: "pg_once" } });
+  await dashboard(page, { createdToken: { name: "ci", secret: "pg_once" } }, "/settings/api");
   await page.getByRole("button", { name: "Copy" }).click();
 
   await expect(page.getByRole("button", { name: "Copied" })).toBeFocused();
@@ -1652,11 +1652,11 @@ test("a toast raised over a dialog is part of it, so it is announced and can be 
 });
 
 test("the consecutive slider reaches the engine's limit, and the detection rate at its top lifts the cap", async ({ page }) => {
-  await dashboard(page, { engine: engine({ monitors: [monitor({ consecutive: 20 })] }), detailId: "m1" });
+  await dashboard(page, { engine: engine({ monitors: [monitor({ consecutive: 20 })] }) }, "/monitors/m1");
+  await page.getByRole("tab", { name: "Tune" }).click();
   await expect(page.getByRole("slider", { name: "Consecutive detections to alert" })).toHaveValue("20");
 
-  await page.evaluate(() => (window as any).__pg.setState({ detailId: null, dialog: "cameras" }));
-  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.evaluate(() => (location.hash = "#/cameras/c1"));
   const rate = page.getByRole("slider", { name: "Detection rate" });
   await rate.fill("10");
   await rate.fill("30");
@@ -1664,15 +1664,17 @@ test("the consecutive slider reaches the engine's limit, and the detection rate 
   await expect.poll(lastPatch).toEqual({ detect_fps: 60 });
 });
 
-test("a camera form empties once its camera is registered, and its fields are named", async ({ page }) => {
-  await dashboard(page, { dialog: "cameras" });
+test("a camera form opens the camera once it is registered, and its fields are named", async ({ page }) => {
+  await dashboard(page, {}, "/cameras/new");
   await page.getByRole("textbox", { name: "Name" }).fill("Garage");
   const address = page.getByRole("textbox", { name: "Stream URL" });
   await address.fill("rtsp://garage/stream");
   await page.getByRole("button", { name: "Register stream" }).click();
   const { req_id } = await sent(page, "camera.add");
   await emit(page, { event: "state", req_id, ...engine({ cameras: [camera(), camera({ id: "c2", name: "Garage" })] }) });
-  await expect(address).toHaveValue("");
+  await expect(page.getByRole("heading", { name: "Garage", level: 2 })).toBeVisible();
+  await expect(page).toHaveURL(/#\/cameras\/c2$/);
+  await expect(address).toHaveCount(0);
 
   await page.evaluate(() => (window as any).__pg.setState({ dialog: "monitor" }));
   await expect(page.getByRole("combobox", { name: "Camera" })).toBeVisible();
@@ -1680,18 +1682,20 @@ test("a camera form empties once its camera is registered, and its fields are na
 });
 
 test("Enter in a camera's name or address registers it", async ({ page }) => {
-  await dashboard(page, { dialog: "cameras" });
+  await dashboard(page, {}, "/cameras/new");
   await page.getByRole("textbox", { name: "Stream URL" }).fill("rtsp://garage/stream");
   await page.getByRole("textbox", { name: "Name" }).press("Enter");
   expect(await sent(page, "camera.add")).toMatchObject({ name: "Stream", source: { kind: "url", url: "rtsp://garage/stream" } });
 });
 
-test("a camera's address is shown without its password, and an idle one reads none", async ({ page }) => {
+test("a camera's address is shown without its password, and an idle one reads idle", async ({ page }) => {
   const source = { kind: "url", url: "rtsp://admin:p@ss/w0rd@cam.local/stream?token=1" };
-  await dashboard(page, { engine: engine({ cameras: [camera({ source, in_use: false })] }) });
+  await dashboard(page, { engine: engine({ cameras: [camera({ source, in_use: false })] }) }, "/cameras/c1");
+  const main = page.locator("main");
 
-  await expect(page.getByText("rtsp://cam.local/stream?token=1")).toBeVisible();
-  await expect(page.getByText("none")).toHaveCount(2);
+  await expect(main.getByText("rtsp://cam.local/stream?token=1")).toHaveCount(2);
+  await expect(main).not.toContainText("p@ss");
+  await expect(main.getByText(/^idle · 30 fps max$/)).toBeVisible();
 });
 
 test("only an adjusted camera has its pixels read back each frame", async ({ page }) => {
@@ -1717,13 +1721,14 @@ test("only an adjusted camera has its pixels read back each frame", async ({ pag
   expect(reads).toEqual([0, 1]);
 });
 
-test("a guide action opens the settings tab it names, and no dash or arrow glyph is left in the copy", async ({ page }) => {
-  for (const [action, tab] of [["Open settings", "Appearance"], ["Manage access", "API"], ["Browse plugins", "Plugins"]]) {
+test("a guide action opens the settings section it names, and no dash or arrow glyph is left in the copy", async ({ page }) => {
+  for (const [action, section] of [["Open settings", "Appearance"], ["Manage access", "API and MCP"], ["Browse plugins", "Plugins"]]) {
     await dashboard(page, { dialog: "guide" });
     expect(await page.getByRole("dialog").innerText()).not.toMatch(/[—→←↗]/);
     await expect(page.getByRole("link", { name: "Documentation opens in a new tab" })).toBeVisible();
     await page.getByRole("button", { name: action }).click();
-    await expect(page.getByRole("tab", { name: tab })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: section, exact: true })).toHaveAttribute("aria-current", "page");
   }
 });
 
@@ -1760,14 +1765,17 @@ test("the setup and introduction progress bars are named, and the file picker is
   await page.evaluate(() => (window as any).__pg.setState({ dialog: "intro" }));
   await expect(page.getByRole("progressbar", { name: "Introduction progress" })).toBeVisible();
 
-  await page.evaluate(() => (window as any).__pg.setState({ dialog: "prints" }));
+  await page.evaluate(() => {
+    (window as any).__pg.setState({ dialog: null });
+    location.hash = "#/prints";
+  });
   await expect(page.getByRole("button", { name: "browse" })).toBeVisible();
   await expect(page.locator("input[type=file]")).toBeHidden();
 });
 
 test("the glass sliders read out percentages, and two review frames from one minute are told apart", async ({ page }) => {
   const settings = { ...engine().settings, glass: { opacity: 0.5, tone: 0.25 } };
-  await dashboard(page, { engine: engine({ settings, reviews: [review({ frames: 2 })] }), reviewId: "r1" });
+  await dashboard(page, { engine: engine({ settings, reviews: [review({ frames: 2 })] }) }, "/monitors/m1/review/r1");
   await expect(page.getByRole("slider", { name: "Opacity", includeHidden: true }).first()).toHaveAttribute("aria-valuetext", "50%");
   await expect(page.getByRole("slider", { name: "Tone", includeHidden: true }).first()).toHaveAttribute("aria-valuetext", "25%");
 
@@ -1775,51 +1783,60 @@ test("the glass sliders read out percentages, and two review frames from one min
     event: "review", ...review({ frames: 2 }),
     frames: [{ id: "s1", ts: 60, score: 0.1, kind: "spaced", size: 1 }, { id: "s2", ts: 70, score: 0.1, kind: "spaced", size: 1 }],
   });
-  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
-  await sheet.getByRole("button", { name: "Yes" }).click();
+  const sheet = page.locator("main");
+  await sheet.getByRole("radio", { name: "Yes" }).check();
   await expect(sheet.getByRole("button", { name: /^Frame 1 of 2 at .*, marked Good/ })).toBeVisible();
   await expect(sheet.getByRole("button", { name: /^Frame 2 of 2 at .*, marked Good/ })).toBeVisible();
   await expect(sheet.getByRole("button", { name: /^Don't send frame 2 of 2 at / })).toBeVisible();
 });
 
 test("a slider is named by its label and reads its formatted value", async ({ page }) => {
-  await dashboard(page, { detailId: "m1" });
+  await dashboard(page, {}, "/monitors/m1");
+  await page.getByRole("tab", { name: "Tune" }).click();
   const threshold = page.getByRole("slider", { name: "Alert threshold", exact: true });
 
   await expect(threshold).toHaveAttribute("aria-valuetext", "0.60");
+  await page.evaluate(() => (location.hash = "#/monitors/m1/edit"));
   await expect(page.getByRole("switch", { name: "Watch this monitor", exact: true })).toBeVisible();
 });
 
-test("an alerting tile opens from its banner, and an offline camera shows no signal below it and no inference figures", async ({ page }) => {
+test("an alerting monitor shows no signal below its banner and no inference figures, and its row is selected from its frame", async ({ page }) => {
   await dashboard(page, {
-    engine: engine({ cameras: [camera({ online: false })], monitors: [monitor({ alert: { score: 0.9, action: "pause", ts: 1 } })] }),
+    engine: engine({
+      cameras: [camera({ online: false }), camera({ id: "c2", name: "Garage" })],
+      monitors: [monitor({ alert: { score: 0.9, action: "pause", ts: 1 } }), monitor({ id: "m2", name: "Ender", camera_id: "c2" })],
+    }),
     history: { m1: [{ ts: 1, score: 0.9 }] },
   });
-  const tile = page.locator("article");
-  await expect(tile).not.toContainText("5.0/5.0");
-  await expect(tile.getByRole("img", { name: "risk unknown" })).toBeVisible();
+  const hero = page.getByRole("region", { name: "Prusa, selected monitor" });
+  await expect(hero).not.toContainText("5.0/5.0");
+  await expect(hero.getByRole("img", { name: "risk unknown" })).toBeVisible();
 
-  const banner = (await page.getByText("DEFECT DETECTED").boundingBox())!;
-  const signal = (await tile.getByText("no signal").boundingBox())!;
+  const banner = (await hero.getByText("DEFECT DETECTED").boundingBox())!;
+  const signal = (await hero.getByText("no signal").boundingBox())!;
   expect(signal.y).toBeGreaterThanOrEqual(banner.y + banner.height);
-  await page.mouse.click(banner.x + banner.width / 2, banner.y + banner.height / 2);
-  await expect(page.getByRole("dialog", { name: "Prusa" })).toBeVisible();
+
+  const enderFrame = page.locator("main li").filter({ hasText: "Ender" }).locator("[data-camera]");
+  await enderFrame.scrollIntoViewIfNeeded();
+  const frame = (await enderFrame.boundingBox())!;
+  await page.mouse.click(frame.x + frame.width / 2, frame.y + frame.height / 2);
+  await expect(page.getByRole("region", { name: "Ender, selected monitor" })).toBeVisible();
 });
 
-test("an offline camera shows no frame rate in the camera list and no risk in the history sheet", async ({ page }) => {
+test("an offline camera shows no frame rate in the camera list and no risk in the history", async ({ page }) => {
   const offline = engine({ cameras: [camera({ online: false })] });
-  await dashboard(page, { engine: offline, history: { m1: [{ ts: 1, score: 0.9 }] } });
-  const card = page.getByRole("button", { name: /Edit camera Workshop/ });
+  await dashboard(page, { engine: offline, history: { m1: [{ ts: 1, score: 0.9 }] } }, "/cameras");
+  const card = page.getByRole("link", { name: /^Workshop/ });
   await expect(card).not.toContainText("5.0");
-  await expect(card.getByText("none")).toHaveCount(2);
+  await expect(card).toContainText("offline");
 
-  await page.evaluate(() => (window as any).__pg.getState().openStats("m1"));
-  await expect(page.getByRole("dialog", { name: "Prusa · history" }).getByRole("img", { name: "risk unknown" })).toBeVisible();
+  await page.evaluate(() => (location.hash = "#/monitors/m1/history"));
+  await expect(page.locator("main").getByRole("img", { name: "risk unknown" })).toBeVisible();
 });
 
 test("the saved chip shows only on the form that saved", async ({ page }) => {
-  await dashboard(page, { detailId: "m1" });
-  const panel = page.getByRole("dialog", { name: "Prusa" });
+  await dashboard(page, {}, "/monitors/m1/edit");
+  const panel = page.locator("main");
   const acknowledge = async (cmd: string) => {
     await page.evaluate(() => (window as any).__pg.getState().flushUpdates());
     const { req_id } = await page.evaluate((cmd) => (window as any).__sent.findLast((c: any) => c.cmd === cmd), cmd);
@@ -1837,28 +1854,27 @@ test("the saved chip shows only on the form that saved", async ({ page }) => {
 });
 
 test("a settings tab shows saved only for what it saved itself", async ({ page }) => {
-  await dashboard(page, { dialog: "settings", settingsTab: "updates" });
+  await dashboard(page, {}, "/settings/updates");
   const acknowledge = async () => {
     await page.evaluate(() => (window as any).__pg.getState().flushUpdates());
     await emit(page, { event: "state", ...engine(), req_id: (await lastSent(page, "settings.update")).req_id });
   };
+  const sections = page.getByRole("navigation", { name: "Settings sections" });
   await page.evaluate(() => (window as any).__pg.getState().updateSettings({ theme: "light" }));
   await acknowledge();
-  await page.getByRole("tab", { name: "Updates" }).click();
   await expect(page.getByText(/saved ✓/)).toBeHidden();
-  await page.getByRole("tab", { name: "Storage" }).click();
+  await sections.getByRole("link", { name: "Storage" }).click();
   await expect(page.getByText(/saved ✓/)).toBeHidden();
 
   await page.getByRole("switch", { name: "Ask me to review frames after a print" }).click();
   await acknowledge();
   await expect(page.getByText(/saved ✓/)).toBeVisible();
-  await page.getByRole("tab", { name: "Updates" }).click();
+  await sections.getByRole("link", { name: "Updates" }).click();
   await expect(page.getByText(/saved ✓/)).toBeHidden();
 });
 
-test("the updates tab opens the release notes whether or not an update is waiting", async ({ page }) => {
-  await dashboard(page, { dialog: "settings", settingsTab: "updates" });
-  await page.getByRole("tab", { name: "Updates" }).click();
+test("the updates section opens the release notes whether or not an update is waiting", async ({ page }) => {
+  await dashboard(page, {}, "/settings/updates");
   await page.getByRole("button", { name: "Release notes" }).click();
   expect(await page.evaluate(() => (window as any).__pg.getState().dialog)).toBe("update");
 });
@@ -1868,8 +1884,7 @@ test("a token revoke greys out only its own button, and a token name stays until
     { id: "t1", name: "ci", scope: "read", hint: "pg_aaaa" },
     { id: "t2", name: "ha", scope: "control", hint: "pg_bbbb" },
   ];
-  await dashboard(page, { engine: engine({ tokens }), dialog: "settings", settingsTab: "api" });
-  await page.getByRole("tab", { name: "API" }).click();
+  await dashboard(page, { engine: engine({ tokens }) }, "/settings/api");
   await page.getByRole("button", { name: "Revoke" }).first().click();
   await pastDoublePress(page);
   await page.getByRole("button", { name: "Confirm" }).click();
@@ -1890,14 +1905,14 @@ test("a token revoke greys out only its own button, and a token name stays until
 });
 
 test("an alert says what happened to the print, and nothing for alert only", async ({ page }) => {
-  await dashboard(page, { engine: engine({ monitors: [monitor({ alert: { score: 0.9, action: "none", ts: 1 } })] }), detailId: "m1" });
+  await dashboard(page, { engine: engine({ monitors: [monitor({ alert: { score: 0.9, action: "none", ts: 1 } })] }) }, "/monitors/m1");
   await emit(page, { event: "alert", monitor_id: "m1", score: 0.9, action: "none", ts: 1 });
   await emit(page, { event: "alert", monitor_id: "m1", score: 0.9, action: "pause", ts: 2 });
-  const panel = page.getByRole("dialog", { name: "Prusa" });
+  const toasts = page.getByRole("alert");
 
-  await expect(panel.getByRole("alert").first()).toHaveText("Defect on Prusa, 90%");
-  await expect(panel.getByRole("alert").last()).toHaveText("Defect on Prusa, 90%, print paused");
-  await expect(panel.getByText("defect at 90%", { exact: true })).toBeVisible();
+  await expect(toasts.first()).toHaveText("Defect on Prusa, 90%");
+  await expect(toasts.last()).toHaveText("Defect on Prusa, 90%, print paused");
+  await expect(page.getByRole("region", { name: "Prusa, selected monitor" }).getByText("defect at 90%", { exact: true })).toBeVisible();
 });
 
 test("the add monitor dialog stays open with what was typed when the add fails, and drops a camera removed elsewhere", async ({ page }) => {
@@ -1917,14 +1932,13 @@ test("a printer test result goes when the form it tested is edited, and a traili
   const schema = { properties: { url: { title: "Address" } } };
   const printer = { id: "p1", name: "MK4", provider: "octoprint", config: { url: "http://mk4" }, online: true, device_state: null };
   const integrations = [{ id: "octoprint", label: "OctoPrint", docs_url: "", formats: [], heater_control: true, schema }];
-  await dashboard(page, { engine: engine({ printers: [printer], integrations }), dialog: "printers" });
-  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await dashboard(page, { engine: engine({ printers: [printer], integrations }) }, "/printers/p1");
   await page.getByRole("button", { name: "Test connection" }).click();
   await emit(page, { event: "printer_test", ok: true, status: "idle", req_id: (await sent(page, "printer.test")).req_id });
   await expect(page.getByText("ok, idle")).toBeVisible();
 
   await page.getByRole("textbox", { name: "Name" }).fill("MK4 ");
-  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save printer" })).toBeDisabled();
   await expect(page.getByText("ok, idle")).toBeVisible();
   await page.getByRole("textbox", { name: "Address" }).fill("http://mk3");
   await expect(page.getByText("ok, idle")).toBeHidden();
@@ -1935,9 +1949,8 @@ test("a connection or alert test that was never sent leaves its button free", as
   const schema = { properties: { url: { title: "Address" } } };
   const printer = { id: "p1", name: "MK4", provider: "octoprint", config: { url: "http://mk4" }, online: true, device_state: null };
   const integrations = [{ id: "octoprint", label: "OctoPrint", docs_url: "", formats: [], heater_control: true, schema }];
-  await dashboard(page, { engine: engine({ printers: [printer], integrations }), dialog: "printers" });
+  await dashboard(page, { engine: engine({ printers: [printer], integrations }) }, "/printers/p1");
   await page.evaluate(() => (window as any).__pg.setState({ link: { send: () => false, close() {} } }));
-  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Test connection" }).click();
 
   await expect(page.getByRole("status").filter({ hasText: "wasn't sent" })).toBeVisible();
@@ -1953,18 +1966,18 @@ test("a connection or alert test that was never sent leaves its button free", as
 });
 
 test("a device scan that was never sent does not read as scanning, or as finished", async ({ page }) => {
-  await dashboard(page, { dialog: "cameras" });
+  await dashboard(page, {}, "/cameras/new");
   await page.evaluate(() => (window as any).__pg.setState({ link: { send: () => false, close() {} } }));
-  await page.getByRole("button", { name: "This machine" }).click();
+  await page.getByRole("radio", { name: "This machine" }).check();
 
-  await expect(page.getByRole("button", { name: "This machine" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("radio", { name: "This machine" })).toBeChecked();
   await expect(page.getByText("scanning devices")).toBeHidden();
   await expect(page.getByText("no unregistered cameras found")).toBeHidden();
 });
 
 test("removing a camera the hub never hears about leaves it publishing and remembered for the next load", async ({ page }) => {
   const publishing = camera({ id: "c2", name: "Bench", source: { kind: "path", path: "dev-bench-1" } });
-  await dashboard(page, { engine: engine({ cameras: [publishing] }), dialog: "cameras" });
+  await dashboard(page, { engine: engine({ cameras: [publishing] }) }, "/cameras/c2");
   await page.evaluate(async () => {
     const win = window as any;
     const stream = await import("/src/stream.ts" as string);
@@ -2053,19 +2066,20 @@ test("a hub that never answers the connection is tried again", async ({ page }) 
   await expect.poll(() => page.evaluate(() => (window as any).__dialled)).toBe(2);
 });
 
-test("a preset temperature can be cleared and retyped, and pause is off for a paused print", async ({ page }) => {
+test("a preset temperature can be cleared and retyped, and a paused print offers resume rather than pause", async ({ page }) => {
   const heater = { actual: 21, target: 0 };
   const printer = {
     id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true,
     device_state: { status: "paused", progress: 40, job: "benchy", remaining_s: 60, nozzle: heater, bed: heater },
   };
   const settings = { ...engine().settings, preheat: [{ name: "PLA", nozzle: 200, bed: 60 }] };
-  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })], settings }), detailId: "m1" });
-  const panel = page.getByRole("dialog", { name: "Prusa" });
-  await expect(panel.getByRole("button", { name: "pause" })).toBeDisabled();
-  await expect(panel.getByRole("button", { name: "resume" })).toBeEnabled();
+  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })], settings }) }, "/monitors/m1");
+  const panel = page.getByRole("region", { name: "Prusa, selected monitor" });
+  await expect(panel.getByRole("button", { name: "pause print" })).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "resume print" })).toBeEnabled();
 
-  await panel.getByRole("button", { name: "Edit" }).click();
+  await panel.getByRole("tab", { name: "Preheat" }).click();
+  await panel.getByRole("button", { name: "Edit", exact: true }).click();
   const nozzle = panel.getByRole("spinbutton", { name: "PLA nozzle target" });
   await nozzle.fill("");
   await expect(nozzle).toHaveValue("");
@@ -2105,19 +2119,23 @@ test("a page that was frozen for longer than the silence limit does not drop a h
   expect(await page.evaluate(() => (window as any).__dialled)).toBe(2);
 });
 
-test("pause, resume and cancel are each enabled only when the printer's state allows them", async ({ page }) => {
+test("pause or resume and cancel are each enabled only when the printer's state allows them", async ({ page }) => {
   const heater = { actual: 21, target: 0 };
   const printer = (status: string) => ({
     id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true,
     device_state: { status, progress: 40, job: "benchy", remaining_s: 60, nozzle: heater, bed: heater },
   });
-  const expected: Record<string, boolean[]> = { idle: [false, false, false], offline: [false, false, false], printing: [true, false, true], paused: [false, true, true] };
-  for (const [status, [pause, resume, cancel]] of Object.entries(expected)) {
-    await dashboard(page, { engine: engine({ printers: [printer(status)], monitors: [monitor({ printer_id: "p1" })] }), detailId: "m1" });
-    const panel = page.getByRole("dialog", { name: "Prusa" });
-    await expect(panel.getByRole("button", { name: "pause" })).toBeEnabled({ enabled: pause });
-    await expect(panel.getByRole("button", { name: "resume" })).toBeEnabled({ enabled: resume });
-    await expect(panel.getByRole("button", { name: "cancel" })).toBeEnabled({ enabled: cancel });
+  const expected: Record<string, [string, boolean, boolean]> = {
+    idle: ["pause print", false, false],
+    offline: ["pause print", false, false],
+    printing: ["pause print", true, true],
+    paused: ["resume print", true, true],
+  };
+  for (const [status, [primary, enabled, cancel]] of Object.entries(expected)) {
+    await dashboard(page, { engine: engine({ printers: [printer(status)], monitors: [monitor({ printer_id: "p1" })] }) }, "/monitors/m1");
+    const panel = page.getByRole("region", { name: "Prusa, selected monitor" });
+    await expect(panel.getByRole("button", { name: primary, exact: true })).toBeEnabled({ enabled });
+    await expect(panel.getByRole("button", { name: "cancel print", exact: true })).toBeEnabled({ enabled: cancel });
   }
 });
 
@@ -2128,12 +2146,13 @@ test("a heater target typed or stored above the limit is never sent as it is", a
     device_state: { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: heater, bed: heater },
   };
   const settings = { ...engine().settings, preheat: [{ name: "PLA", nozzle: 400, bed: 200 }] };
-  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })], settings }), detailId: "m1" });
-  const panel = page.getByRole("dialog", { name: "Prusa" });
+  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })], settings }) }, "/monitors/m1");
+  const panel = page.getByRole("region", { name: "Prusa, selected monitor" });
+  await panel.getByRole("tab", { name: "Preheat" }).click();
   await panel.getByRole("button", { name: /^PLA/ }).click();
   expect(await sent(page, "printer.heat")).toMatchObject({ nozzle: 350, bed: 150 });
 
-  await panel.getByRole("button", { name: "Edit" }).click();
+  await panel.getByRole("button", { name: "Edit", exact: true }).click();
   const nozzle = panel.getByRole("spinbutton", { name: "PLA nozzle target" });
   await nozzle.fill("999");
   await nozzle.blur();
@@ -2163,19 +2182,19 @@ test("a long toast stays inside a phone screen", async ({ page }) => {
 
 test("a print the reviewer chose not to send reads as reviewed and can still be opened", async ({ page }) => {
   const reviews = [review({ status: "dismissed" }), review({ id: "r2", status: "skipped" })];
-  await dashboard(page, { engine: engine({ reviews }), statsMonitorId: "m1" });
-  const prints = page.getByRole("dialog", { name: "Prusa · history" }).getByRole("listitem");
-  await expect(prints.filter({ hasText: /^.*framesnot reviewed/ })).toHaveCount(1);
+  await dashboard(page, { engine: engine({ reviews }) }, "/monitors/m1/history");
+  const prints = page.locator("main").getByRole("listitem");
+  await expect(prints.filter({ hasText: /frames · not reviewed/ })).toHaveCount(1);
   const skipped = prints.filter({ hasText: "reviewed, not sent" });
   await expect(skipped).toHaveCount(1);
-  await skipped.getByRole("button", { name: "Review" }).click();
-  expect(await page.evaluate(() => (window as any).__pg.getState().reviewId)).toBe("r2");
+  await skipped.getByRole("link", { name: "Review" }).click();
+  await expect(page).toHaveURL(/#\/monitors\/m1\/review\/r2$/);
 });
 
 test("a print that kept no frames is not offered for review, and a snapshot is opened and closed on its own", async ({ page }) => {
   const reviews = [review({ status: "dismissed", frames: 0 }), review({ id: "r2", frames: 4 })];
-  await dashboard(page, { engine: engine({ reviews }), statsMonitorId: "m1" });
-  const sheet = page.getByRole("dialog", { name: "Prusa · history" });
+  await dashboard(page, { engine: engine({ reviews }) }, "/monitors/m1/history");
+  const sheet = page.locator("main");
   const snap = { id: "s1", ts: 1_700_000_000, score: 0.9, action: "failed" };
   await emit(page, { event: "history", monitor_id: "m1", now: 1_700_000_040, buckets: [], snaps: [snap], alerts: [], stats: {} });
   await expect(sheet.getByRole("listitem")).toHaveCount(1);
@@ -2195,39 +2214,45 @@ test("a print that kept no frames is not offered for review, and a snapshot is o
   await expect(sheet).toBeVisible();
 });
 
-test("a tile behind a panel says its feed is paused", async ({ page }) => {
-  await dashboard(page, { detailId: "m1" });
-  await expect(page.locator("article").getByText("feed paused")).toBeAttached();
+test("a monitor's feed behind a dialog says it is paused", async ({ page }) => {
+  await dashboard(page, { dialog: "guide" });
+  await expect(page.getByRole("region", { name: "Prusa, selected monitor", includeHidden: true }).getByText("feed paused")).toBeAttached();
 });
 
 test("a camera with no Remove says why in the text", async ({ page }) => {
   const owned = camera({ id: "c2", name: "Printer cam", printer_id: "p1" });
   const declared = camera({ id: "c3", name: "Passed in", declared: true });
   const printers = [{ id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true, device_state: null }];
-  await dashboard(page, { dialog: "cameras", engine: engine({ cameras: [owned, declared], printers }) });
+  await dashboard(page, { engine: engine({ cameras: [owned, declared], printers }) }, "/cameras/c3");
 
   await expect(page.getByText("Passed in by the deployment, remove its devices entry to remove this camera.")).toBeVisible();
-  await page.getByRole("tab", { name: "Printer cameras" }).click();
+  await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0);
+  await page.getByRole("tab", { name: /^Printer cams/ }).click();
+  await page.getByRole("link", { name: /^Printer cam/ }).click();
   await expect(page.getByText("Managed by its printer integration, remove the printer to remove this camera.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0);
 });
 
-test("camera and settings controls are named, and toggle buttons say which is selected", async ({ page }) => {
-  await dashboard(page, { dialog: "cameras", focusCameraId: "c1" });
-  await expect(page.getByRole("img", { name: "online" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "0°", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: "90°" })).toHaveAttribute("aria-pressed", "false");
+test("camera and settings controls are named, and choices say which is selected", async ({ page }) => {
+  await dashboard(page, {}, "/cameras/c1");
+  await expect(page.locator("main")).toContainText("online");
+  await expect(page.getByRole("radiogroup", { name: "Rotation" }).or(page.getByRole("group", { name: "Rotation" }))).toBeVisible();
+  await expect(page.getByRole("radio", { name: "0°", exact: true })).toBeChecked();
+  await expect(page.getByRole("radio", { name: "90°" })).not.toBeChecked();
+
+  await page.evaluate(() => (location.hash = "#/cameras/new"));
   await expect(page.getByRole("textbox", { name: "Stream URL" })).toHaveAttribute("autocapitalize", "none");
 
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("api"));
+  await page.evaluate(() => (location.hash = "#/settings/api"));
   await expect(page.getByRole("combobox", { name: "Token scope" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Token name" })).toBeVisible();
-  await page.getByRole("tab", { name: "Alerts" }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "Alerts" }).click();
   await expect(page.getByText("for monitors with push notifications on")).toBeVisible();
 });
 
 test("a dialog opened with the pointer shows no focus ring until the keyboard is used", async ({ page }) => {
   await dashboard(page);
-  await page.getByRole("button", { name: "+ Camera" }).click();
+  await page.getByRole("button", { name: "Add monitor" }).click();
   const close = page.getByRole("button", { name: "Close dialog" });
   await expect(close).toBeFocused();
   await expect(close).toHaveCSS("outline-style", "none");
@@ -2240,15 +2265,16 @@ test("a dialog opened with the pointer shows no focus ring until the keyboard is
 test.describe("on a touch screen", () => {
   test.use({ hasTouch: true, viewport: { width: 393, height: 852 } });
 
-  test("the header's more button takes a tap 44 pixels across", async ({ page }) => {
+  test("the top bar's buttons and the dock's links each take a tap 44 pixels across", async ({ page }) => {
     await dashboard(page);
-    const box = (await page.getByRole("button", { name: "More" }).boundingBox())!;
-    const centre = [box.x + box.width / 2, box.y + box.height / 2];
-    const hits = await page.evaluate(
-      (points) => points.map(([x, y]) => document.elementFromPoint(x, y)?.closest("button")?.getAttribute("aria-label")),
-      [[centre[0] - 21, centre[1]], [centre[0], centre[1] - 21], [centre[0], centre[1] + 21]],
-    );
-    expect(hits).toEqual(["More", "More", "More"]);
+    const targets = [
+      ...["Open the guide", "Report a bug", "Add monitor"].map((name) => page.getByRole("banner").getByRole("button", { name })),
+      ...["Monitors", "Prints", "Cameras", "Printers", "Settings"].map((name) => page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name })),
+    ];
+    for (const target of targets) {
+      const { width, height } = (await target.boundingBox())!;
+      expect(Math.min(width, height)).toBeGreaterThanOrEqual(44);
+    }
   });
 });
 
@@ -2267,14 +2293,15 @@ test("a stored file is drawn from what arrives, and one over the limit is cut of
       return new Response(win.__megabytes ? body : "G1 Z0.2\nG1 X10 Y10 E1\nG1 Z0.4\nG1 X20 Y20 E2\n");
     };
   });
-  await dashboard(page, { engine: engine({ prints: [printFile()] }), printId: "f1" });
+  await dashboard(page, { engine: engine({ prints: [printFile()] }) }, "/prints/f1");
   await expect(page.getByRole("slider", { name: "Layers shown" })).toBeVisible();
 
   await page.evaluate(() => {
     (window as any).__megabytes = 40;
-    (window as any).__pg.setState({ printId: null });
+    location.hash = "#/";
   });
-  await page.evaluate(() => (window as any).__pg.setState({ printId: "f1" }));
+  await expect(page.getByRole("slider", { name: "Layers shown" })).toHaveCount(0);
+  await page.evaluate(() => (location.hash = "#/prints/f1"));
   await expect(page.getByText("files over 32 MB are not drawn")).toBeVisible();
   expect(await page.evaluate(() => (window as any).__cancelledAt)).toBeLessThan(36);
 });
@@ -2298,9 +2325,9 @@ const allSent = (page: Page, cmd: string) => page.evaluate((cmd) => (window as a
 
 test("cancelling a print takes a second press that a double click is not, and the button stands down on Escape, a press elsewhere or a few seconds", async ({ page }) => {
   await page.clock.install();
-  await dashboard(page, { engine: engine({ printers: [jobPrinter()], monitors: [monitor({ printer_id: "p1" })] }), detailId: "m1" });
-  const panel = page.getByRole("dialog", { name: "Prusa" });
-  const cancel = panel.getByRole("button", { name: "cancel", exact: true });
+  await dashboard(page, { engine: engine({ printers: [jobPrinter()], monitors: [monitor({ printer_id: "p1" })] }) }, "/monitors/m1");
+  const panel = page.locator("main");
+  const cancel = panel.getByRole("button", { name: "cancel print", exact: true });
   const confirm = panel.getByRole("button", { name: "Confirm", exact: true });
   const { width, height } = (await cancel.boundingBox())!;
 
@@ -2315,7 +2342,7 @@ test("cancelling a print takes a second press that a double click is not, and th
   await expect(panel).toBeVisible();
 
   await cancel.click();
-  await panel.getByRole("heading", { name: "Live risk" }).click();
+  await panel.getByRole("heading", { name: "Prusa", level: 2 }).click();
   await expect(confirm).toBeHidden();
 
   await cancel.click();
