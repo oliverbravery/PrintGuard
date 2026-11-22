@@ -1,3 +1,4 @@
+import { useParentPanel } from "react-resizable-panels";
 import { Link } from "react-router";
 import { section, toggleHidden, type Tile } from "../layout";
 import { awaitingReview, framesLabel } from "../review";
@@ -73,7 +74,7 @@ function Row({ monitor, selected, handle, visible, group }: { monitor: Monitor; 
               <Status tone={state.tone}>{state.text}</Status>
               <DeviceStatus state={device} />
               {score !== null && (
-                <span className="mono text-xs font-semibold @3xl:hidden" style={{ color: riskColor(score, monitor.threshold) }}>
+                <span className="mono min-w-[9ch] text-right text-xs font-semibold @3xl:hidden" style={{ color: riskColor(score, monitor.threshold) }}>
                   risk {Math.round(score * 100)}%
                 </span>
               )}
@@ -95,6 +96,22 @@ function Row({ monitor, selected, handle, visible, group }: { monitor: Monitor; 
         )}
       </Cell>
     </li>
+  );
+}
+
+function HeightButtons() {
+  const panel = useParentPanel();
+  if (!panel) return null;
+  const grow = (by: number) => panel.resize(`${panel.getSize().asPercentage + by}%`);
+  return (
+    <>
+      <button className="btn-inline" onClick={() => grow(10)}>
+        Taller
+      </button>
+      <button className="btn-inline" onClick={() => grow(-10)}>
+        Shorter
+      </button>
+    </>
   );
 }
 
@@ -120,25 +137,30 @@ export function FleetLedger({ monitors, selectedId, visible, hidden }: { monitor
   const reorder = useReorder(visible);
   return (
     <section aria-labelledby="fleet-heading" className="@container border-b border-rule">
-      <div className="flex min-h-11 items-center gap-2 border-b border-rule bg-ink-1 pl-4">
-        <h2 id="fleet-heading" className="label flex-1 text-text-1">
-          Fleet · {monitors.length}
-        </h2>
-        {customising && (
-          <ConfirmButton className="btn-inline" onConfirm={resetLayout}>
-            Reset layout
-          </ConfirmButton>
-        )}
-        <button className="cell-action self-stretch px-4 text-xs" aria-pressed={customising} onClick={() => setCustomising(!customising)}>
-          {customising ? "Done" : "Layout"}
-        </button>
-      </div>
-      <div aria-hidden className={`label grid border-b border-line-0 @max-3xl:hidden ${COLUMNS}`}>
-        {["Frame", "Monitor / job", "Heaters", "Risk", "State and tools"].map((heading, index) => (
-          <span key={heading} className={`px-3 py-1.5 ${index ? "border-l border-line-0" : ""} ${index === 4 ? "text-right" : ""}`}>
-            {heading}
-          </span>
-        ))}
+      <div className="surface z-[5] lg:sticky lg:top-0">
+        <div className="flex min-h-11 items-center gap-2 border-b border-rule bg-ink-1 pl-4">
+          <h2 id="fleet-heading" className="label flex-1 text-text-1">
+            Fleet · {monitors.length}
+          </h2>
+          {customising && (
+            <>
+              <HeightButtons />
+              <ConfirmButton className="btn-inline" onConfirm={resetLayout}>
+                Reset layout
+              </ConfirmButton>
+            </>
+          )}
+          <button className="cell-action self-stretch px-4 text-xs" aria-pressed={customising} onClick={() => setCustomising(!customising)}>
+            {customising ? "Done" : "Layout"}
+          </button>
+        </div>
+        <div aria-hidden className={`label grid border-b border-line-0 @max-3xl:hidden ${COLUMNS}`}>
+          {["Frame", "Monitor / job", "Heaters", "Risk", "State and tools"].map((heading, index) => (
+            <span key={heading} className={`px-3 py-1.5 ${index ? "border-l border-line-0" : ""} ${index === 4 ? "text-right" : ""}`}>
+              {heading}
+            </span>
+          ))}
+        </div>
       </div>
       {customising && <p className="border-b border-line-0 px-4 py-2 text-sm text-text-2">Drag a row or use its arrows to reorder. Pinned rows stay at the top.</p>}
       {customising && <HiddenTray hidden={hidden} />}

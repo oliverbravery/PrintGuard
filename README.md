@@ -218,7 +218,8 @@ Themes are saved on the hub and follow every browser that opens it.
 </table>
 
 Press **Layout** above the monitor list to put monitors in any order, by dragging or with the
-arrow buttons, pin the ones that matter to the top and hide the rest.
+arrow buttons, pin the ones that matter to the top and hide the rest. On a desktop you can drag
+the line above the list to show more or fewer monitors.
 
 ![Layout mode: reorder, pin and hide monitors](docs/assets/customise.png)
 

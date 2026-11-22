@@ -50,8 +50,8 @@ export function SettingsPage() {
                 <DetailHead title={section.label} />
                 <div className="max-w-3xl px-4 py-4">
                   <Body key={section.id} />
-                  {footer && <p className="mono mt-6 truncate border-t border-line-0 pt-3 text-xs text-text-2">{footer}</p>}
                 </div>
+                {footer && <p className="mono truncate border-t border-line-0 px-4 py-3 text-xs text-text-2">{footer}</p>}
               </section>
             )}
           </SettingsFooter>

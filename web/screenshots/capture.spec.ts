@@ -291,7 +291,7 @@ const SCENES: Scene[] = [
 
   { name: "dashboard", width: 1360, height: 900, theme: "dark", route: "/monitors/m2" },
   { name: "dashboard-light", width: 1360, height: 900, theme: "light", route: "/monitors/m2" },
-  { name: "printer-detail", width: 1360, height: 600, theme: "dark", route: "/monitors/m1" },
+  { name: "printer-detail", width: 1360, height: 880, theme: "dark", route: "/monitors/m1" },
   { name: "prints", width: 390, height: 844, theme: "dark", route: "/prints", mutate: idlePrinters },
   { name: "print-viewer", width: 1360, height: 860, theme: "dark", route: "/prints/f1", mutate: idlePrinters },
   {
@@ -574,7 +574,7 @@ async function stage(browser: Browser, scene: Scene): Promise<{ page: Page; clos
   if (scene.route?.startsWith("/prints/")) await page.waitForSelector("main input[type=range]");
   await page.addStyleTag({ content: "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}" });
   await page.evaluate((frames) => {
-    for (const el of document.querySelectorAll<HTMLElement>(".aspect-video")) {
+    for (const el of document.querySelectorAll<HTMLElement>(".feed")) {
       const img = document.createElement("img");
       img.src = el.dataset.camera === "c2" ? frames.defect : frames.healthy;
       img.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:3";

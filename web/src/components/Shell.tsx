@@ -210,8 +210,11 @@ function useFocusOnNavigate() {
     const sectionChanged = shown.current.section !== section;
     shown.current = { pathname, section };
     leavePage(sectionChanged);
-    if (sectionChanged) window.scrollTo(0, 0);
     const main = document.getElementById("main");
+    if (sectionChanged) {
+      window.scrollTo(0, 0);
+      main?.scrollTo(0, 0);
+    }
     const focused = document.activeElement as HTMLElement | null;
     if (focused && main?.contains(focused) && focused.checkVisibility()) return;
     const headings = [...(main?.querySelectorAll<HTMLElement>(sectionChanged ? "h1" : "h1, [data-heading]") ?? [])].filter((heading) => heading.checkVisibility());

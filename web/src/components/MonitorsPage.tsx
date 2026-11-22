@@ -1,3 +1,5 @@
+import { useSyncExternalStore, type ReactNode } from "react";
+import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import { Link, Navigate, useParams } from "react-router";
 import { applyLayout, section, tiles } from "../layout";
 import { useStore } from "../store";
@@ -39,6 +41,40 @@ function Switcher({ monitors, selectedId }: { monitors: { id: string; name: stri
   );
 }
 
+const FITS_SCREEN = "(width >= 64rem)";
+
+function useFitsScreen(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const query = matchMedia(FITS_SCREEN);
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    },
+    () => matchMedia(FITS_SCREEN).matches,
+  );
+}
+
+function HeroOverFleet({ hero, fleet }: { hero: ReactNode; fleet: ReactNode }) {
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: "pg.monitors" });
+  return (
+    <Group
+      orientation="vertical"
+      className="page-fill"
+      defaultLayout={defaultLayout}
+      onLayoutChanged={onLayoutChanged}
+      resizeTargetMinimumSize={{ fine: 12, coarse: 44 }}
+    >
+      <Panel id="hero" defaultSize="62%" minSize="14rem">
+        {hero}
+      </Panel>
+      <Separator className="splitter" aria-label="Selected monitor height" />
+      <Panel id="fleet" minSize="9rem">
+        <div className="h-full scroll-pt-20 overflow-y-auto">{fleet}</div>
+      </Panel>
+    </Group>
+  );
+}
+
 export function MonitorsPage() {
   const { monitorId } = useParams();
   const engine = useStore((s) => s.engine)!;
@@ -50,6 +86,7 @@ export function MonitorsPage() {
   const panels = visible.flatMap((tile) => (tile.plugin ? [tile.plugin] : []));
   const panelIds = panels.map((plugin) => plugin.id);
   const reorderPanels = useReorder(visibleIds);
+  const fitsScreen = useFitsScreen();
   const selected = monitorId ? engine.monitors.find((m) => m.id === monitorId) : monitors[0];
   if (monitorId && !selected) return <Navigate to="/" replace />;
   const panelStrip = panels.length > 0 && (
@@ -69,12 +106,23 @@ export function MonitorsPage() {
         {panelStrip}
       </Page>
     );
+  const fleet = (
+    <>
+      <FleetLedger monitors={monitors} selectedId={selected?.id ?? null} visible={visibleIds} hidden={hidden} />
+      {panelStrip}
+    </>
+  );
   return (
     <Page title="Monitors" titleHidden>
       {selected && <Switcher monitors={monitors} selectedId={selected.id} />}
-      {selected && <MonitorHero monitor={selected} />}
-      <FleetLedger monitors={monitors} selectedId={selected?.id ?? null} visible={visibleIds} hidden={hidden} />
-      {panelStrip}
+      {selected && fitsScreen ? (
+        <HeroOverFleet hero={<MonitorHero monitor={selected} fill />} fleet={fleet} />
+      ) : (
+        <>
+          {selected && <MonitorHero monitor={selected} />}
+          {fleet}
+        </>
+      )}
     </Page>
   );
 }

@@ -89,6 +89,10 @@ body {
   outline: none;
 }
 
+:where(h1, h2)[tabindex="-1"]:focus {
+  outline: none;
+}
+
 @layer components {
 .skip-link {
   position: fixed;
@@ -352,8 +356,65 @@ button.chip:hover {
   padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
 }
 
-.app-main {
-  flex: 1;
+.app-main,
+.page {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
+
+.page-fill {
+  flex: 1 0 auto;
+}
+
+@media (width >= 64rem) {
+  .app {
+    height: 100dvh;
+  }
+
+  .app-main {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .page-fill {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+}
+
+.ReactCrop__child-wrapper {
+  isolation: isolate;
+}
+
+.ReactCrop--disabled .ReactCrop__crop-selection {
+  pointer-events: none;
+}
+
+.splitter {
+  position: relative;
+  z-index: 10;
+  height: 1px;
+  background: var(--color-rule);
+}
+
+.splitter::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2.5rem;
+  height: 0.375rem;
+  border: 1px solid var(--color-rule);
+  background: var(--color-ink-0);
+  translate: -50% -50%;
+}
+
+.splitter:is([data-separator="hover"], [data-separator="active"]),
+.splitter:is([data-separator="hover"], [data-separator="active"])::after {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
 }
 
 .topbar {
@@ -603,11 +664,6 @@ html {
   line-height: 1.2;
   letter-spacing: -0.01em;
   overflow-wrap: anywhere;
-}
-
-.page-title:focus,
-:where(h1, h2)[tabindex="-1"]:focus {
-  outline: none;
 }
 
 .page-back {

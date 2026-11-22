@@ -3193,3 +3193,78 @@ test("a feed that has no size yet leaves the crop square where it can be dragged
   await page.evaluate(() => (window as any).__pg.getState().flushUpdates());
   expect((await sent(page, "camera.update")).patch.crop.x).toBeLessThan(0.2);
 });
+
+test("a camera's page shows one uncropped feed with the crop button on it", async ({ page }) => {
+  await dashboard(page, { engine: engine({ cameras: [camera({ crop: { x: 0.25, y: 0, w: 0.5, h: 1 } })] }) }, "/cameras/c1");
+  await expect(page.locator("main video")).toHaveCount(1);
+  await expect(page.locator("main canvas")).toHaveCount(0);
+  const feed = (await page.locator("main .feed").boundingBox())!;
+  const button = (await page.getByRole("button", { name: "Edit crop", exact: true }).boundingBox())!;
+  expect(button.y).toBeGreaterThan(feed.y);
+  expect(button.y + button.height).toBeLessThan(feed.y + feed.height);
+  expect(button.x + button.width).toBeLessThan(feed.x + feed.width);
+});
+
+test("the selected monitor's risk bar keeps its width when the score drops to one digit", async ({ page }) => {
+  await dashboard(page, { history: { m1: [{ ts: 1, score: 0.12 }] } });
+  const bar = page.getByRole("region", { name: "Prusa, selected monitor" }).getByRole("img", { name: /^risk/ }).locator("> span").last();
+  const before = (await bar.boundingBox())!;
+  await page.evaluate(() => (window as any).__pg.setState({ history: { m1: [{ ts: 2, score: 0.09 }] } }));
+  await expect(page.getByRole("region", { name: "Prusa, selected monitor" }).getByRole("img", { name: "risk 9%" })).toBeVisible();
+  expect(await bar.boundingBox()).toEqual(before);
+});
+
+test("on a desktop the page fits the screen, with the fleet and each list scrolling on their own", async ({ page }) => {
+  const monitors = Array.from({ length: 8 }, (_, index) => monitor({ id: `m${index}`, name: `Printer ${index}` }));
+  const prints = Array.from({ length: 30 }, (_, index) => ({ id: `f${index}`, name: `part ${index}`, filename: `part${index}.gcode`, ext: "gcode", size: 1000, printer_ids: [], uploaded: index, meta: {}, thumbnail: null }));
+  await dashboard(page, { engine: engine({ monitors, prints }) });
+  const hero = page.getByRole("region", { name: "Printer 0, selected monitor" });
+  const heroTop = (await hero.boundingBox())!.y;
+  const lastMonitor = page.getByRole("link", { name: "Printer 7", exact: true });
+  await expect(lastMonitor).not.toBeInViewport();
+  await lastMonitor.scrollIntoViewIfNeeded();
+  await expect(lastMonitor).toBeInViewport();
+  expect((await hero.boundingBox())!.y).toBe(heroTop);
+  await expect(page.getByRole("heading", { name: /^Fleet/ })).toBeInViewport();
+
+  await routeTo(page, "/prints");
+  const title = page.getByRole("heading", { name: "Prints", level: 1 });
+  const titleTop = (await title.boundingBox())!.y;
+  const lastPrint = page.locator("main .list-row").last();
+  await expect(lastPrint).not.toBeInViewport();
+  await lastPrint.scrollIntoViewIfNeeded();
+  await expect(lastPrint).toBeInViewport();
+  expect((await title.boundingBox())!.y).toBe(titleTop);
+  expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight)).toBe(true);
+});
+
+test("the divider, its arrow keys and the layout buttons resize the fleet, and the size is remembered", async ({ page }) => {
+  const state = { engine: engine({ monitors: [monitor(), monitor({ id: "m2", name: "MK4" })] }) };
+  await dashboard(page, state);
+  const fleetTop = async () => (await page.getByRole("heading", { name: /^Fleet/ }).boundingBox())!.y;
+  const divider = page.getByRole("separator", { name: "Selected monitor height" });
+  const start = await fleetTop();
+  const handle = (await divider.boundingBox())!;
+  await page.mouse.move(handle.x + handle.width / 2, handle.y);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2, handle.y - 120, { steps: 6 });
+  await page.mouse.up();
+  expect(start - (await fleetTop())).toBeCloseTo(120, -1);
+
+  const dragged = await fleetTop();
+  await divider.press("ArrowDown");
+  expect(await fleetTop()).toBeGreaterThan(dragged);
+
+  await page.getByRole("button", { name: "Layout", exact: true }).click();
+  const beforeTaller = await fleetTop();
+  await page.getByRole("button", { name: "Taller", exact: true }).click();
+  expect(await fleetTop()).toBeLessThan(beforeTaller);
+
+  const kept = await fleetTop();
+  await page.reload();
+  await dashboard(page, state);
+  expect(await fleetTop()).toBe(kept);
+
+  await page.setViewportSize({ width: 900, height: 800 });
+  await expect(divider).toHaveCount(0);
+});
