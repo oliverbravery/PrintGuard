@@ -11,7 +11,7 @@ export function RiskMeter({ score, threshold, size = "row" }: { score: number | 
   const hero = size === "hero";
   return (
     <div role="img" aria-label={score === null ? "risk unknown" : `risk ${percent(score)}%`} className={`flex w-full ${hero ? "items-end gap-4" : "flex-col gap-1"}`}>
-      <span className={`mono leading-none ${hero ? "text-[2.5rem] font-medium tracking-[-0.04em]" : "flex justify-between text-sm font-semibold"}`} style={{ color: colour }}>
+      <span className={`mono leading-none ${hero ? "w-[4ch] shrink-0 text-[2.5rem] font-medium tracking-[-0.04em]" : "flex justify-between text-sm font-semibold"}`} style={{ color: colour }}>
         {score === null ? "-" : `${percent(score)}%`}
         {!hero && <span className="text-xs font-normal text-text-2">{percent(threshold)}%</span>}
       </span>
