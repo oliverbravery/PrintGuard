@@ -455,7 +455,7 @@ test("the consent dialog names where a plugin signs in and where it gets its tok
         })),
       },
     });
-    win.__pg.getState().openSettings("plugins");
+    location.hash = "#/settings/plugins";
     win.__pgEvent({ event: "catalogue", plugins: [] });
   });
   await page.getByRole("button", { name: "Installed" }).click();
@@ -468,7 +468,7 @@ test("the consent dialog names where a plugin signs in and where it gets its tok
 
 test("a plugin zip over 12 MB is refused before it is sent", async ({ page }) => {
   await dashboardWithPlugin(page, PIP);
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
+  await page.evaluate(() => (location.hash = "#/settings/plugins"));
   await page.locator("input[type=file]").setInputFiles({ name: "big.zip", mimeType: "application/zip", buffer: Buffer.alloc(12 * 1024 * 1024 + 1) });
 
   await expect(page.getByText("big.zip is over 12 MB, the most a plugin can be")).toBeVisible();
@@ -580,7 +580,8 @@ test("a monitor surface draws on each monitor and nothing on the dashboard", asy
   await dashboardWithPlugin(page, MONITOR_PIP, PLUGIN.granted, ["monitor"]);
 
   await expect(page.locator("section", { hasText: "Picture in picture" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Float Bench" }).click();
+  await expect(page.getByRole("button", { name: "Float Bench" })).toHaveCount(2);
+  await page.getByRole("region", { name: /selected monitor$/ }).getByRole("button", { name: "Float Bench" }).click();
 
   await expect.poll(() => page.evaluate(() => (window as any).__floated)).toBe(1);
 });
@@ -589,9 +590,9 @@ test("a camera drawn twice still floats after one of the two goes away", async (
   await stubFloat(page);
   await dashboardWithPlugin(page, MONITOR_PIP, PLUGIN.granted, ["monitor"]);
 
-  await page.getByRole("button", { name: "Open Bench monitor details" }).click();
-  await page.getByRole("button", { name: "Close monitor details" }).click();
-  await page.getByRole("button", { name: "Float Bench" }).click();
+  await page.getByRole("link", { name: "Edit", exact: true }).click();
+  await page.getByRole("link", { name: "Monitors", exact: true }).first().click();
+  await page.getByRole("button", { name: "Float Bench" }).first().click();
 
   await expect.poll(() => page.evaluate(() => (window as any).__floated)).toBe(1);
 });
@@ -678,7 +679,7 @@ test("the sounds plugin stays quiet until a monitor is switched on and a fresh a
   await dashboardWithPlugin(page, SOUNDS, ["state:read", "sound"], ["settings"]);
 
   await expect(page.locator("section", { hasText: "Picture in picture" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Open Bench monitor details" }).click();
+  await page.getByRole("link", { name: "Edit", exact: true }).click();
   await page.getByLabel("Sound an alert").click();
   await expect(page.getByLabel("Alert sound")).toBeVisible();
   expect(await page.evaluate(() => (window as any).__tones)).toBe(0);
@@ -784,31 +785,19 @@ test("a plugin that writes its store on every render is not drawn again by the h
   expect(await storeWrites(page)).toHaveLength(2);
 });
 
-test("a plugin panel rearranges with the monitors", async ({ page }) => {
+test("a plugin panel can be hidden, shown again and pinned in layout mode", async ({ page }) => {
   await dashboardWithPlugin(page, PIP);
-  await page.evaluate(() => (window as any).__pg.setState({ customising: true }));
+  await page.getByRole("button", { name: "Layout" }).click();
 
-  const panel = page.locator("section", { hasText: "Picture in picture" });
-  await panel.getByRole("button", { name: "Hide Picture in picture" }).click();
-  await expect(page.locator("section", { hasText: "Picture in picture" })).toHaveCount(0);
+  const heading = page.getByRole("heading", { name: "Picture in picture" });
+  await page.getByRole("button", { name: "Hide Picture in picture" }).click();
+  await expect(heading).toHaveCount(0);
   await page.getByRole("button", { name: "Picture in picture · show" }).click();
+  await expect(heading).toBeVisible();
 
-  const grid = page.locator("main .grid").first();
-  const tiles = () => grid.locator("> *").evaluateAll((all) => all.map((tile) => tile.textContent?.slice(0, 8)));
-  const before = await tiles();
-  const handle = page.getByRole("button", { name: "Drag Picture in picture to reorder" });
-  const from = (await handle.boundingBox())!;
-  const target = (await grid.locator("> *").first().boundingBox())!;
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
-  await page.mouse.down();
-  for (let step = 1; step <= 12; step++) {
-    await page.mouse.move(from.x - ((from.x - target.x - 40) * step) / 12, from.y + from.height / 2, { steps: 2 });
-  }
-  await page.mouse.up();
-
-  await expect.poll(tiles).not.toEqual(before);
+  await page.getByRole("button", { name: "Pin Picture in picture" }).click();
   const saved = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.patch?.layout).pop());
-  await expect.poll(async () => (await saved())?.patch.layout.monitors.order).toContain("pip");
+  await expect.poll(async () => (await saved())?.patch.layout.monitors.pinned).toContain("pip");
 });
 
 
@@ -816,7 +805,7 @@ test("glass takes the text colour its tone can carry", async ({ page }) => {
   await dashboardWithPlugin(page, PIP);
   const textShown = () =>
     page.evaluate(() => {
-      const tile = document.querySelector("main .panel") as HTMLElement;
+      const tile = document.querySelector("main") as HTMLElement;
       const probe = document.createElement("div");
       probe.style.color = getComputedStyle(tile).getPropertyValue("--color-text-1");
       tile.appendChild(probe);
@@ -841,7 +830,7 @@ test("glass takes the text colour its tone can carry", async ({ page }) => {
 test("an event never wipes the per-monitor views the plugin drew", async ({ page }) => {
   await stubFloat(page);
   await dashboardWithPlugin(page, `${MONITOR_PIP}\nplugin.on('result', () => {});`, PLUGIN.granted, ["monitor"]);
-  const float = page.getByRole("button", { name: "Float Bench" });
+  const float = page.getByRole("button", { name: "Float Bench" }).first();
 
   await expect(float).toBeVisible();
   for (let round = 0; round < 5; round += 1) {
