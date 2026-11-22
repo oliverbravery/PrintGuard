@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type SyntheticEvent } from "react";
 import { registerFeed } from "../float";
 import { renderVideoFrame, useVideoStream } from "../image";
 import { useStore } from "../store";
@@ -12,12 +12,20 @@ export function Feed({
   camera,
   active = true,
   compact = false,
+  fill = false,
+  aspect,
+  uncropped = false,
+  onFrameSize,
   banner,
   children,
 }: {
   camera: Camera | undefined;
   active?: boolean;
   compact?: boolean;
+  fill?: boolean;
+  aspect?: number;
+  uncropped?: boolean;
+  onFrameSize?: (size: { w: number; h: number }) => void;
   banner?: ReactNode;
   children?: ReactNode;
 }) {
@@ -27,7 +35,7 @@ export function Feed({
   const brightness = camera?.brightness ?? 1;
   const contrast = camera?.contrast ?? 1;
   const sharpness = camera?.sharpness ?? 0;
-  const crop = camera?.crop ?? null;
+  const crop = uncropped ? null : (camera?.crop ?? null);
   const rotation = camera?.rotation ?? 0;
   const useCanvas = sharpness > 0 || crop !== null || brightness !== 1 || contrast !== 1 || rotation !== 0;
 
@@ -61,8 +69,16 @@ export function Feed({
     return () => cancelAnimationFrame(frame);
   }, [camera?.id, useCanvas, brightness, contrast, sharpness, crop, rotation]);
 
+  const reportSize = ({ currentTarget: video }: SyntheticEvent<HTMLVideoElement>) => {
+    if (video.videoWidth) onFrameSize?.({ w: video.videoWidth, h: video.videoHeight });
+  };
+
   return (
-    <div data-camera={camera?.id} className={`feed relative aspect-video overflow-hidden bg-ink-1 ${compact ? "border border-line-0" : ""}`}>
+    <div
+      data-camera={camera?.id}
+      className={`feed relative overflow-hidden bg-ink-1 ${fill ? "min-h-0 flex-1" : aspect ? "" : "aspect-video"} ${compact ? "border border-line-0" : ""}`}
+      style={aspect ? { aspectRatio: aspect } : undefined}
+    >
       <video
         ref={videoRef}
         autoPlay
@@ -73,6 +89,8 @@ export function Feed({
         onPause={() => setPlaying(false)}
         onEmptied={() => setPlaying(false)}
         onError={() => setPlaying(false)}
+        onLoadedMetadata={reportSize}
+        onResize={reportSize}
         className={useCanvas ? "absolute inset-0 w-full h-full object-contain invisible" : "absolute inset-0 w-full h-full object-contain"}
       />
       {useCanvas && <canvas ref={canvasRef} className="absolute inset-0 m-auto" />}

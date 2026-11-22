@@ -89,8 +89,8 @@ the frames the [API](api.md) returns.
 | **Detection rate** | 60 a second | 0.5 up to the camera's own frame rate, never above 60, or from 0.1 over the API | The most frames a second the model scores from this camera |
 
 The model is trained on squares. Until you crop a camera it only watches the middle square of the
-frame, so on a wide camera the sides of the bed go unwatched. Crop it to the part of the bed you
-print on, leaving a little room, since the model trims a sixteenth off each edge of a square
+frame, so on a wide camera the sides of the bed go unwatched. Press **Set crop** on the camera's
+feed under **Cameras** and crop it to the part of the bed you print on, leaving a little room, since the model trims a sixteenth off each edge of a square
 before it scores it. A crop is square unless you choose **Freeform**. Square crops tend to do
 better at spotting defects, so the editor warns you when you switch. A crop wider than a square is
 scored as overlapping squares the height of

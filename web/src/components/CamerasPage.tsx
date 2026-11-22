@@ -7,7 +7,7 @@ import { publishStream, published } from "../stream";
 import { cameraStatus, sourceLabel } from "../cameras";
 import { ConfirmButton } from "./ConfirmButton";
 import { CropEditor } from "./CropEditor";
-import { Feed, useCovered } from "./Feed";
+import { useCovered } from "./Feed";
 import { NameField } from "./NameField";
 import { SaveStatus } from "./SaveStatus";
 import { Slider } from "./Slider";
@@ -59,7 +59,7 @@ function CameraEditor({ camera }: { camera: Camera }) {
       </DetailHead>
       <div className="grid xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <div className="min-w-0 border-b border-line-0 xl:border-r">
-          <Feed camera={camera} active={!covered} />
+          <CropEditor camera={camera} active={!covered} onChange={(crop) => updateCamera(camera.id, { crop })} />
           <div className="mono flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line-0 px-4 py-2 text-xs">
             <Status tone={camera.online ? "ok" : camera.standby ? "idle" : "bad"}>{cameraStatus(camera)}</Status>
             <span className="min-w-0 truncate text-text-1">{sourceLabel(camera.source)}</span>
@@ -105,9 +105,6 @@ function CameraEditor({ camera }: { camera: Camera }) {
             onChange={(deg) => updateCamera(camera.id, { rotation: Number(deg) })}
           />
         </div>
-      </div>
-      <div className="px-4 py-4">
-        <CropEditor camera={camera} crop={camera.crop ?? null} rotation={camera.rotation ?? 0} onChange={(crop) => updateCamera(camera.id, { crop })} />
       </div>
     </>
   );

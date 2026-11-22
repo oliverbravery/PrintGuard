@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type SyntheticEvent } from "react";
+import { useState } from "react";
 import ReactCrop, { type PercentCrop } from "react-image-crop";
 import { useFocusKept } from "../a11y";
-import { renderVideoFrame, useVideoStream } from "../image";
 import type { Camera, Crop } from "../types";
+import { Feed } from "./Feed";
 
 const MIN_SIZE_PX = 32;
 const LONGEST_RATIO = 4;
@@ -43,159 +43,104 @@ function fromPercent(crop: PercentCrop): Crop {
   return { x: crop.x / 100, y: crop.y / 100, w: crop.width / 100, h: crop.height / 100 };
 }
 
-export function CropEditor({
-  camera,
-  crop,
-  rotation,
-  onChange,
-}: {
-  camera: Camera;
-  crop: Crop | null;
-  rotation: number;
-  onChange: (crop: Crop | null) => void;
-}) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+export function CropEditor({ camera, active, onChange }: { camera: Camera; active: boolean; onChange: (crop: Crop | null) => void }) {
+  const crop = camera.crop ?? null;
   const [editing, setEditing] = useState(false);
-  const actions = useFocusKept<HTMLDivElement>();
+  const controls = useFocusKept<HTMLDivElement>();
   const [draft, setDraft] = useState<PercentCrop | null>(null);
   const [freeform, setFreeform] = useState(false);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
 
-  const brightness = camera.brightness ?? 1;
-  const contrast = camera.contrast ?? 1;
-  const sharpness = camera.sharpness ?? 0;
-  const needsCanvas = brightness !== 1 || contrast !== 1 || sharpness > 0 || rotation !== 0;
-  const swap = rotation === 90 || rotation === 270;
+  const swap = camera.rotation === 90 || camera.rotation === 270;
   const frameAspect = dims ? (swap ? dims.h / dims.w : dims.w / dims.h) : 16 / 9;
   const watched = toPercent(crop ?? squareIn(WHOLE_FRAME, frameAspect));
   const region = editing && draft ? fromPercent(draft) : (crop ?? squareIn(WHOLE_FRAME, frameAspect));
   const squares = crop || editing ? scoredSquares(region, frameAspect) : [region];
 
-  useVideoStream(videoRef, camera);
-
-  const measureFrame = ({ currentTarget: video }: SyntheticEvent<HTMLVideoElement>) => {
-    if (video.videoWidth === 0) return;
-    setDims({ w: video.videoWidth, h: video.videoHeight });
+  const measureFrame = (size: { w: number; h: number }) => {
+    setDims(size);
     setDraft(null);
   };
 
-  useEffect(() => {
-    if (!needsCanvas) return;
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas) return;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return;
-
-    let frame = 0;
-    const tick = () => {
-      if (video.readyState >= 2 && video.videoWidth > 0) {
-        renderVideoFrame(ctx, video, canvas, { brightness, contrast, sharpness, rotation });
-      }
-      frame = requestAnimationFrame(tick);
-    };
-    tick();
-    return () => cancelAnimationFrame(frame);
-  }, [camera.id, needsCanvas, brightness, contrast, sharpness, rotation]);
-
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="label">Crop region</span>
-        <div ref={actions} className="flex gap-2">
-          {editing ? (
-            <>
-              <button
-                className="btn-inline"
-                onClick={() => {
-                  onChange(null);
-                  setEditing(false);
-                }}
-              >
-                Reset
-              </button>
-              <button className="btn-inline btn-inline-accent" onClick={() => setEditing(false)}>
-                Done
-              </button>
-            </>
-          ) : (
-            <button
-              key="edit"
-              className="btn-inline"
-              onClick={() => {
-                setDraft(watched);
-                setFreeform(!isSquare(fromPercent(watched), frameAspect));
-                setEditing(true);
-              }}
-            >
-              {crop ? "Edit crop" : "Set crop"}
-            </button>
-          )}
-        </div>
+    <div ref={controls}>
+      <div className="relative">
+        <ReactCrop
+          className={`ReactCrop--no-animate select-none ${editing ? "touch-none" : ""}`}
+          style={{ display: "block" }}
+          crop={editing && draft ? draft : watched}
+          aspect={freeform ? undefined : 1}
+          minWidth={MIN_SIZE_PX}
+          keepSelection
+          disabled={!editing}
+          onChange={(_, percent) => setDraft(percent)}
+          onComplete={(_, percent) => onChange(fromPercent(percent))}
+        >
+          <Feed camera={camera} active={active} aspect={frameAspect} uncropped onFrameSize={measureFrame}>
+            {squares.length > 1 &&
+              squares.map((square, index) => (
+                <span
+                  key={index}
+                  aria-hidden
+                  className="pointer-events-none absolute border border-dashed border-accent/70"
+                  style={{ left: `${square.x * 100}%`, top: `${square.y * 100}%`, width: `${square.w * 100}%`, height: `${square.h * 100}%` }}
+                />
+              ))}
+          </Feed>
+        </ReactCrop>
+        {!editing && (
+          <button
+            className="btn absolute top-3 right-3 z-[5]"
+            onClick={() => {
+              setDraft(watched);
+              setFreeform(!isSquare(fromPercent(watched), frameAspect));
+              setEditing(true);
+            }}
+          >
+            {crop ? "Edit crop" : "Set crop"}
+          </button>
+        )}
       </div>
       {editing && (
-        <div role="group" aria-label="Crop shape" className="flex gap-1.5">
-          {[false, true].map((shape) => (
-            <button
-              key={String(shape)}
-              className="btn flex-1"
-              aria-pressed={freeform === shape}
-              onClick={() => {
-                setFreeform(shape);
-                if (shape) return;
-                const square = squareIn(region, frameAspect);
-                setDraft(toPercent(square));
-                onChange(square);
-              }}
-            >
-              {shape ? "Freeform" : "Square"}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2 border-t border-line-0 px-4 py-2">
+          <div role="group" aria-label="Crop shape" className="flex flex-1 gap-1">
+            {[false, true].map((shape) => (
+              <button
+                key={String(shape)}
+                className="btn-inline"
+                aria-pressed={freeform === shape}
+                onClick={() => {
+                  setFreeform(shape);
+                  if (shape) return;
+                  const square = squareIn(region, frameAspect);
+                  setDraft(toPercent(square));
+                  onChange(square);
+                }}
+              >
+                {shape ? "Freeform" : "Square"}
+              </button>
+            ))}
+          </div>
+          <button
+            className="btn-inline"
+            onClick={() => {
+              onChange(null);
+              setEditing(false);
+            }}
+          >
+            Reset
+          </button>
+          <button className="btn-inline btn-inline-accent" onClick={() => setEditing(false)}>
+            Done
+          </button>
         </div>
       )}
       {editing && freeform && (
-        <p role="status" className="text-xs leading-snug text-warn">
+        <p role="status" className="border-t border-line-0 px-4 py-2 text-xs leading-snug text-warn">
           Square crops tend to do better at spotting defects than wide ones. A freeform crop still works, but detection might be worse.
         </p>
       )}
-      <ReactCrop
-        className="ReactCrop--no-animate"
-        style={{ display: "block" }}
-        crop={editing && draft ? draft : watched}
-        aspect={freeform ? undefined : 1}
-        minWidth={MIN_SIZE_PX}
-        keepSelection
-        disabled={!editing}
-        onChange={(_, percent) => setDraft(percent)}
-        onComplete={(_, percent) => onChange(fromPercent(percent))}
-      >
-        <div
-          className={`relative bg-ink-0 overflow-hidden select-none ${editing ? "touch-none" : ""}`}
-          style={{ aspectRatio: frameAspect }}
-        >
-          <video
-            ref={videoRef}
-            autoPlay
-            muted
-            playsInline
-            onLoadedMetadata={measureFrame}
-            onResize={measureFrame}
-            className={`absolute inset-0 w-full h-full object-contain pointer-events-none ${needsCanvas ? "invisible" : ""}`}
-          />
-          {needsCanvas && <canvas ref={canvasRef} className="absolute inset-0 m-auto pointer-events-none" />}
-          {squares.length > 1 &&
-            squares.map((square, index) => (
-              <span
-                key={index}
-                aria-hidden
-                className="pointer-events-none absolute border border-dashed border-accent/70"
-                style={{ left: `${square.x * 100}%`, top: `${square.y * 100}%`, width: `${square.w * 100}%`, height: `${square.h * 100}%` }}
-              />
-            ))}
-        </div>
-      </ReactCrop>
-      <p role="status" className="text-xs leading-snug text-text-2">
+      <p role="status" className="border-t border-line-0 px-4 py-2 text-xs leading-snug text-text-2">
         {!crop && !editing
           ? "The model only watches this square until you crop the camera, so frame the print with a crop."
           : squares.length > 1
