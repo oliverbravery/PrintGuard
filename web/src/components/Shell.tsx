@@ -1,5 +1,5 @@
 import { Bug, Camera, CircleHelp, Layers, type LucideIcon, Printer, ScanEye, Settings } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Link, Outlet, useLocation } from "react-router";
 import { useStore } from "../store";
@@ -205,7 +205,7 @@ function useFocusOnNavigate() {
   const section = pathname.split("/")[1];
   const shown = useRef({ pathname, section });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (shown.current.pathname === pathname) return;
     const sectionChanged = shown.current.section !== section;
     shown.current = { pathname, section };
