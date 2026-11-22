@@ -1413,7 +1413,7 @@ test("removing or sending one file leaves the other files' buttons alone", async
   await expect(page.getByRole("button", { name: "Removing…" })).toBeVisible();
 
   await page.getByRole("link", { name: "View Vase" }).click();
-  await expect(page.getByText("2h 0m")).toBeVisible();
+  await expect(page.getByText("2h 0m", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Remove", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Print", exact: true }).click();
   await page.getByRole("button", { name: "Start print" }).click();
