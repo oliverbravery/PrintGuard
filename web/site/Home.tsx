@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { copyText } from "../src/components/CopyButton";
+import { ModelChart } from "../src/components/ModelChart";
 import { Wordmark } from "../src/components/Wordmark";
 import { NewTab } from "../src/components/NewTab";
 import dashboardDark from "../../docs/assets/dashboard.png";
@@ -23,7 +24,7 @@ const DOCS: { title: string; page: string; body: string }[] = [
   { title: "Cameras", page: "cameras.md", body: "Add a printer webcam, a stream URL, a USB camera or a phone." },
   { title: "Monitoring", page: "monitoring.md", body: "Tune a monitor's thresholds, frame its camera and read its risk history." },
   { title: "Notifications", page: "notifications.md", body: "Set up ntfy, Pushover, Telegram, Discord or desktop notifications, and quieten a flaky camera." },
-  { title: "Hardware", page: "hardware.md", body: "Pick an image variant and use an Intel or NVIDIA GPU, or an NPU." },
+  { title: "Hardware", page: "hardware.md", body: "Pick a detection model and an image variant, and use an Intel or NVIDIA GPU, or an NPU." },
   { title: "Deployment", page: "deployment.md", body: "Reach your hub from outside your network without exposing it." },
   { title: "API & MCP", page: "api.md", body: "Drive the hub from a script, an agent or Home Assistant." },
   { title: "Plugins", page: "plugins.md", body: "Install a plugin and see what it can reach." },
@@ -195,10 +196,10 @@ export function Home() {
           <a className={`btn ${download ? "" : "btn-primary"}`} href="#install" onClick={scrollToId("install")}>Run it in Docker</a>
         </div>
         <div className="mt-10 grid grid-cols-2 gap-x-6 gap-y-4 sm:flex sm:items-center sm:justify-center sm:gap-12">
-          <Spec index={3} value="93.6%" label="accuracy on a Pi 4B" />
-          <Spec index={4} value="43x" label="faster than Obico's model" />
-          <Spec index={5} value="≈5 MB" label="model" />
-          <Spec index={6} value="5" label="printer services" />
+          <Spec index={3} value="12x" label="faster than Obico's model" />
+          <Spec index={4} value="3" label="detection models" />
+          <Spec index={5} value="≈13 MB" label="standard model" />
+          <Spec index={6} value="7" label="printer services" />
         </div>
       </section>
 
@@ -209,7 +210,7 @@ export function Home() {
       <section id="features" className="mx-auto max-w-6xl scroll-mt-20 px-5 pb-20">
         <p className="label mb-8 text-center">WHAT IT DOES</p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Feature index={2} led="led-infer" title="Detect" body="A compact encoder scores every frame against failure prototypes, scheduled fairly across all your cameras." />
+          <Feature index={2} led="led-infer" title="Detect" body="The detection model you pick scores every frame, scheduled fairly across all your cameras." />
           <Feature index={3} led="led-on" title="Act" body="A sustained defect pauses or cancels the print through OctoPrint, Klipper, Creality, Elegoo, Prusa, Bambu Lab or Ultimaker, and inference rests while the printer is idle." />
           <Feature index={4} led="led-bad" title="Alert" body="The moment a defect holds, PrintGuard sends a snapshot to your phone over ntfy, Pushover, Telegram or Discord, or to your desktop from the app." />
           <Feature index={5} led="led-warn" title="Fail safe" body="A watchdog warns when a camera drops, a feed freezes or your printer stops answering for longer than the grace period, two minutes by default." />
@@ -217,6 +218,18 @@ export function Home() {
           <Feature index={7} led="led-on" title="Automate" body="Every monitor appears in Home Assistant over MQTT, and a REST API and MCP server let a script or an agent watch and control your printers." />
           <Feature index={8} led="led-on" title="Accelerate" body="Runs on a Raspberry Pi 4's CPU, and uses Core ML, Windows ML, OpenVINO or TensorRT where your machine has them." />
           <Feature index={9} led="led-infer" title="Anywhere" body="The dashboard fits a phone or a tablet, and works from the keyboard and with a screen reader." />
+        </div>
+      </section>
+
+      <section id="models" className="mx-auto max-w-4xl scroll-mt-20 px-5 pb-20">
+        <p className="label mb-2 text-center">DETECTION MODELS</p>
+        <h2 className="display mb-4 text-center text-3xl font-bold sm:text-4xl">Pick the model your hardware keeps up with</h2>
+        <p className="mx-auto mb-8 max-w-2xl text-center leading-relaxed text-text-1">
+          On hubs it was never trained on, Standard catches 10 of 20 failed prints against 3 for Obico's latest model, and runs 12x
+          faster on a CPU. Light is 2.5x faster again, and you can switch between them at any time.
+        </p>
+        <div className="panel p-4 sm:p-6">
+          <ModelChart />
         </div>
       </section>
 

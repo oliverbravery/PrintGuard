@@ -175,6 +175,15 @@ SOFTWARE.
 - Project: https://github.com/google-ai-edge/LiteRT
 - Licence: Apache-2.0, reproduced under Wasmtime below
 
+## Detection model weights
+
+The Light and Standard detection models in `models/` are fine-tuned for print failures from
+ImageNet-1k weights that Ross Wightman trained and published with
+[timm](https://github.com/huggingface/pytorch-image-models), under Apache-2.0, whose text is under
+Wasmtime below: [`convnext_atto.d2_in1k`](https://huggingface.co/timm/convnext_atto.d2_in1k) for
+Standard and [`mobilenetv4_conv_small.e3600_r256_in1k`](https://huggingface.co/timm/mobilenetv4_conv_small.e3600_r256_in1k)
+for Light.
+
 ## Wasmtime
 
 - Project: https://github.com/bytecodealliance/wasmtime

@@ -143,7 +143,7 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | **compute** names a CPU in the Windows desktop app | The PC has no GPU driver, so there is nothing for DirectML or Windows ML to run on | Install the GPU's driver, then restart PrintGuard |
 | **compute** reads `microsoft gpu` on Windows 11 24H2 or newer | DirectML is in use because Windows ML needs the Windows App Runtime 2.x. Versions before 2.5.0 stopped at a prompt to install it instead of starting | Run the x64 installer from [Windows App SDK downloads](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads), then restart PrintGuard |
 | **compute** names a CPU on a machine with an accelerator | No provider was handed the accelerator, or it was offered and could not run the model. Versions before 2.6.0 failed to start in the second case | The log lists what the providers offered at start, and a warning that a device `cannot run the model, so detection is not using it` names one that failed and why. The dashboard shows it as a startup warning, once per page load, and it is kept until the hub restarts. [Execution providers by platform](hardware.md#execution-providers-by-platform) |
-| Throughput differs from what you expected | Automatic mode picks whichever runtime benchmarks faster on the host | The choice is logged at start. Pin one in the Advanced tab in Settings |
+| Throughput differs from what you expected | Automatic mode picks whichever runtime benchmarks faster on the host, and Standard is about 2.5x slower than Light | The model and runtime are logged at start. Pin a runtime, or pick Light, in the Detection tab in Settings |
 
 ## Getting logs and diagnostics
 

@@ -7,6 +7,7 @@ import type { AdapterConfig, AdapterMeta, ApiToken, CustomTheme, MqttConfig, The
 import { ConfirmButton } from "./ConfirmButton";
 import { CopyButton } from "./CopyButton";
 import { Dialog } from "./Dialog";
+import { ModelPicker } from "./ModelPicker";
 import { PluginsTab } from "./PluginsTab";
 import { SettingsFooter } from "./SettingsFooter";
 import { SaveStatus } from "./SaveStatus";
@@ -130,12 +131,12 @@ export function SettingsDialog() {
   const tabs: { id: SettingsTabId; label: string }[] = [
     { id: "appearance", label: "Appearance" },
     { id: "alerts", label: "Alerts" },
+    { id: "detection", label: "Detection" },
     { id: "plugins", label: "Plugins" },
     { id: "mqtt", label: "Home Assistant" },
     { id: "updates", label: "Updates" },
     { id: "api", label: "API" },
     { id: "storage", label: "Storage" },
-    { id: "advanced", label: "Advanced" },
   ];
 
   return (
@@ -500,31 +501,33 @@ export function SettingsDialog() {
           </TabPanel>
         )}
 
-        {tab === "advanced" && (
-          <TabPanel prefix="settings" id="advanced" className="space-y-3">
-            <label className="label block" htmlFor="inference-runtime">
-              Model runtime
+        {tab === "detection" && (
+          <TabPanel prefix="settings" id="detection" className="space-y-3">
+            <span className="label block">Model</span>
+            <ModelPicker />
+            <label className="label block pt-2" htmlFor="inference-runtime">
+              Runtime
             </label>
             <select
               id="inference-runtime"
               className="field w-full"
               value={engine?.settings.inference_runtime ?? "auto"}
-              onChange={(event) => updateSettings({ inference_runtime: event.target.value }, "advanced")}
+              onChange={(event) => updateSettings({ inference_runtime: event.target.value }, "detection")}
             >
               <option value="auto">Automatic</option>
               <option value="litert">LiteRT</option>
               <option value="onnx">ONNX Runtime</option>
             </select>
             <span className="block text-[0.7rem] leading-relaxed text-text-2">
-              Automatic benchmarks both models and uses the higher-throughput runtime. ONNX Runtime can use Core ML,
-              Windows ML, OpenVINO or NVIDIA hardware. LiteRT uses its optimised CPU runtime for this model.
+              Automatic benchmarks the model on both runtimes and keeps the faster. ONNX Runtime can use Core ML,
+              Windows ML, OpenVINO or NVIDIA hardware. LiteRT runs on the CPU.
             </span>
             <div className="flex items-center justify-between gap-3 rounded border border-line-0 px-3 py-2">
               <span className="text-xs text-text-1">Active compute</span>
               <span className="chip">{engine?.stats.inference_device ?? "initialising"}</span>
             </div>
             <div className="flex justify-end">
-              <SaveStatus scope="settings:advanced" />
+              <SaveStatus scope="settings:detection" />
             </div>
           </TabPanel>
         )}

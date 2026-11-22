@@ -113,7 +113,7 @@ export interface StagedPrint {
   id: number;
   file: File;
 }
-export type SettingsTabId = "appearance" | "alerts" | "plugins" | "mqtt" | "updates" | "api" | "storage" | "advanced";
+export type SettingsTabId = "appearance" | "alerts" | "plugins" | "mqtt" | "updates" | "api" | "storage" | "detection";
 
 interface PgStore {
   phase: "booting" | "ready";

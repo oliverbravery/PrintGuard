@@ -15,7 +15,7 @@ Start at the [README](../README.md) to install PrintGuard. These pages cover eve
 | [Monitoring](monitoring.md) | Tune a monitor's thresholds, frame its camera and read its risk history |
 | [Notifications](notifications.md) | Set up an alert channel, or quieten a camera that keeps dropping out |
 | [Training frames](feedback.md) | Send labelled frames to help train the model, and see what's sent and the limits |
-| [Hardware](hardware.md) | Pick an image variant, understand the model runtimes, and use a GPU or NPU |
+| [Hardware](hardware.md) | Pick a detection model and an image variant, understand the model runtimes, and use a GPU or NPU |
 | [Deployment](deployment.md) | Reach a hub from outside your LAN without exposing it, harden it and back it up |
 | [API & MCP](api.md) | Drive the hub from a script, an agent or Home Assistant, with scoped access tokens |
 | [Plugins](plugins.md) | Install a plugin and understand what it can reach |

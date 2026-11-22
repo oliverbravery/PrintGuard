@@ -141,6 +141,16 @@ test("a setting still saving holds its value when a later setting is acknowledge
   await expect.poll(pendingFields).toEqual([]);
 });
 
+test("picking a detection model in Settings sends it and marks it in use", async ({ page }) => {
+  const { commands } = await hub(page, () => {}, engine({ settings: { ...engine().settings, model: "standard", inference_runtime: "auto" } }));
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("detection"));
+  const light = page.getByRole("group", { name: "Detection model" }).getByRole("button", { name: /^Light/ });
+  await light.click();
+  await expect.poll(() => commands.filter((c) => c.cmd === "settings.update").map((c) => c.patch)).toEqual([{ model: "light" }]);
+  await expect(light).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("img", { name: "Failed prints caught against latency for each model" })).toBeVisible();
+});
+
 test("a rename still waiting to send is dropped when its monitor or camera is deleted", async ({ page }) => {
   const { commands } = await hub(page);
   await page.evaluate(() => {

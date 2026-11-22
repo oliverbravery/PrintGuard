@@ -1,3 +1,5 @@
+import type { ModelId } from "./models";
+
 export interface Crop {
   x: number;
   y: number;
@@ -15,9 +17,8 @@ export interface CameraSource {
 }
 
 export interface InferenceResult {
-  prediction: string;
-  distances: Record<string, number>;
-  margin: number;
+  prediction: "success" | "failure";
+  defect_score: number;
 }
 
 export interface Camera {
@@ -418,6 +419,7 @@ export interface EngineState {
     themes: CustomTheme[];
     glass: Glass;
     layout?: Layout;
+    model: ModelId;
     inference_runtime: "auto" | "litert" | "onnx";
     catalogue_url: string;
     fault_grace_s: number;

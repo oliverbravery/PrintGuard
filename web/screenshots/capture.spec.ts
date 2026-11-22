@@ -79,7 +79,7 @@ function engine(): EngineState {
       monitor("m2", "Ender 3 V3", "c2", "p2", true),
       monitor("m3", "Bambu X1C", "c3", ""),
     ],
-    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], glass: { opacity: 0, tone: 0 }, inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT, feedback: "ask", recording_days: 7 },
+    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], glass: { opacity: 0, tone: 0 }, model: "standard", inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT, feedback: "ask", recording_days: 7 },
     tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: INTEGRATIONS, notifiers: [],
     plugins: [], plugin_permissions: PERMISSIONS, plugin_events: {}, plugin_platforms: PLATFORMS,
     plugin_event_permissions: { state: "state:read", frame: "camera:frames", history: "history:read" },
@@ -297,6 +297,8 @@ const SCENES: Scene[] = [
   { name: "history", width: 1360, height: 860, theme: "dark", mutate: (e) => void (e.reviews = PRINTS_KEPT), prepare: openHistory },
   { name: "camera-editor", width: 1360, height: 680, theme: "dark", dialog: "cameras", prepare: openCameraEditor },
   { name: "settings-storage", width: 1360, height: 860, theme: "dark", settingsTab: "storage", mutate: (e) => void (e.reviews = PRINTS_KEPT) },
+  { name: "settings-detection", width: 1360, height: 1240, theme: "dark", settingsTab: "detection" },
+
   { name: "dashboard", width: 1360, height: 620, theme: "dark" },
   { name: "dashboard-light", width: 1360, height: 620, theme: "light" },
   { name: "printer-detail", width: 1360, height: 860, theme: "dark", detailId: "m1" },

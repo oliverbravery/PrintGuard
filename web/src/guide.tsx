@@ -1,5 +1,6 @@
 import { Bug } from "lucide-react";
 import type { ReactNode } from "react";
+import { ModelPicker } from "./components/ModelPicker";
 import { NewTab } from "./components/NewTab";
 import type { DialogKind, SettingsTabId } from "./store";
 
@@ -100,6 +101,18 @@ export const INTRO: GuideSection[] = [
         ))}
       </ul>
     ),
+  },
+  {
+    id: "model",
+    led: "led-infer",
+    title: "Pick a detection model",
+    body: (
+      <>
+        Standard catches the most failures, and Light trades some of that for about 2.5x the speed on a slower
+        computer. You can change it any time in Settings, under Detection.
+      </>
+    ),
+    visual: <ModelPicker />,
   },
   {
     id: "start",
@@ -207,6 +220,18 @@ export const GUIDE: GuideSection[] = [
     ),
   },
   {
+    id: "models",
+    led: "led-infer",
+    title: "Detection models",
+    body: (
+      <>
+        The hub runs one of three detection models, trading accuracy against speed. Settings compares them with
+        Obico's on frames none of them was trained on, so you can pick the one your hardware keeps up with.
+      </>
+    ),
+    action: { label: "Choose a model", dialog: "settings", tab: "detection" },
+  },
+  {
     id: "alerts",
     led: "led-bad",
     title: "Alerts",
@@ -293,7 +318,7 @@ export const GUIDE: GuideSection[] = [
         channels and the MQTT broker you set up. PrintGuard keeps a few frames from each print
         on your hub, and after a print you can label them and send them to me to train the detection
         model. Training frames are only sent when you press Send, and you can switch the prompt off in Settings,
-        under Advanced.
+        under Storage.
       </>
     ),
   },

@@ -7,6 +7,22 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-11-22
+
+### Added
+
+- Two new detection models, Light and Standard. On frames from 30 hubs none of the models was trained on, Standard catches 10 of 20 failed prints where the old model caught 1, with the same 1 in 70 good prints alarmed. Pick one when you first open the dashboard or in Settings under Detection, where a chart compares them with Obico's.
+
+### Changed
+
+- Hubs run Standard after updating. It's about 5x slower than the old model on a CPU, so pick Light, or Legacy for the old model, if the capacity readout falls below what your cameras need.
+- The runtime setting has moved from the Advanced tab in Settings to the Detection tab.
+- The image and the desktop apps are about 45 MB larger, since they carry the new models.
+
+### Removed
+
+- Classify results and a camera's `last_result` no longer carry `distances` or `margin`, and `result` events no longer carry `margin`, since only Legacy has prototypes to measure them against. Read `defect_score` instead.
+
 ## [2.6.7] - 2026-11-14
 
 ### Added

@@ -162,7 +162,7 @@ export function Header() {
                 label="compute"
                 value={stats.inference_device.toLowerCase()}
                 className="hidden xl:block"
-                onClick={() => openSettings("advanced")}
+                onClick={() => openSettings("detection")}
               />
               <Readout label="capacity" value={`${stats.capacity_fps.toFixed(1)} fps`} />
               <Readout label="latency" value={`${stats.infer_ms.toFixed(0)} ms`} />
