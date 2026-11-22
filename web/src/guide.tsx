@@ -9,7 +9,7 @@ const docs = (page: string) => `${REPO}/blob/main/docs/${page}`;
 const link = "text-accent underline hover:opacity-80";
 
 export const SHOT_SIZES = {
-  alert: [2000, 1544],
+  alert: [2720, 958],
   alerts: [1316, 1796],
   cameras: [2000, 1544],
   checklist: [1320, 1084],
@@ -17,7 +17,7 @@ export const SHOT_SIZES = {
   plugins: [1316, 1432],
   printers: [2000, 1904],
   prints: [2000, 1904],
-  standby: [2000, 122],
+  standby: [2000, 160],
   tuning: [2000, 838],
 } as const;
 

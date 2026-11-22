@@ -58,8 +58,9 @@ inbox's pull script has `tests/test_feedback_pull.py`. The REST API, MCP server,
 client, plugin install, state file and feedback each have a `tests/test_<name>.py` of their own.
 
 `npm run test:sandbox` runs everything in `web/tests`. `sandbox.spec.ts` holds the browser
-plugin sandbox, `dashboard.spec.ts` drives the dashboard against a faked hub and
-`markdown.spec.ts` covers how a plugin's README is rendered. CI fails on a `test.only` left in
+plugin sandbox, `dashboard.spec.ts` drives the dashboard against a faked hub, `a11y.spec.ts`
+checks every page and dialog against WCAG 2.2 AA with axe, and `markdown.spec.ts` covers how a
+plugin's README is rendered. The faked hub is in `fixtures.ts`. CI fails on a `test.only` left in
 any of them.
 
 [`feedback-worker/`](feedback-worker) is the Cloudflare Worker that takes

@@ -47,7 +47,9 @@ essentials a change must respect:
   is the full snapshot the UI renders, and any new engine-owned data the UI needs is added
   there. The UI is **presentation-only** - it never holds logic the engine should own, and
   it reaches the engine over one WebSocket (`/api/ws`), bar a sliced file's bytes, which go to
-  `POST /api/prints`.
+  `POST /api/prints`. Its pages are hash routes in [`web/src/router.tsx`](web/src/router.tsx),
+  so the dashboard keeps working under a proxy subpath, and only true modals stay in the store's
+  `dialog`.
 
 - **Resources vs monitors.** A **camera** (video source) and a **printer** (control-service
   connection) are registered resources, created/deleted only in their registry. A
@@ -115,8 +117,10 @@ essentials a change must respect:
   `tests/test_plugin_runtime.py` runs real JavaScript in the shipped QuickJS build to hold the
   hub's plugin sandbox to what it promises, and `web/tests/sandbox.spec.ts` does the same for
   the browser sandbox through Playwright (`npm run test:sandbox`, chromium and webkit), beside
-  `web/tests/dashboard.spec.ts`, which drives the dashboard against a faked hub, and
-  `web/tests/markdown.spec.ts` for README rendering. `tests/test_plugin_network.py` holds where
+  `web/tests/dashboard.spec.ts`, which drives the dashboard against a faked hub,
+  `web/tests/a11y.spec.ts`, which runs axe for WCAG 2.2 AA over every page and dialog in both
+  themes at phone and desktop widths, and `web/tests/markdown.spec.ts` for README rendering. The
+  faked hub and its builders live in `web/tests/fixtures.ts`. `tests/test_plugin_network.py` holds where
   a plugin's requests, sockets and sign-in may go, with `test_urls.py` and
   `test_plugin_schema.py` beside it. `tests/test_app.py` and `tests/test_platform.py` cover the
   hub's routes and its `Platform`. `tests/test_desktop.py` holds the desktop app's launch

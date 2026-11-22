@@ -204,7 +204,6 @@ interface Scene {
   customising?: boolean;
   dialog?: string;
   history?: Record<string, ScorePoint[]>;
-  hideFeeds?: boolean;
   catalogue?: unknown[];
   prepare?: (page: Page) => Promise<void>;
   tuner?: boolean;
@@ -386,7 +385,7 @@ const DESK = { width: 1000, height: 820 } as const;
 
 const CROPS: Crop[] = [
   {
-    id: "alert", ...DESK, pad: 0,
+    id: "alert", ...DESK, width: 1360, height: 900, pad: 0,
     mutate: (e) => {
       e.monitors = e.monitors.slice(0, 2);
     },
@@ -394,7 +393,7 @@ const CROPS: Crop[] = [
     target: (page) => page.getByRole("region", { name: /selected monitor$/ }),
   },
   {
-    id: "standby", ...DESK, pad: 0, hideFeeds: true, mutate: stoodDown, history: { m3: series(() => 0) },
+    id: "standby", ...DESK, pad: 0, mutate: stoodDown, history: { m3: series(() => 0) },
     target: (page) => page.locator("main li").nth(1),
   },
   {
@@ -601,7 +600,7 @@ async function capture(browser: Browser, scene: Scene): Promise<void> {
 async function captureCrop(browser: Browser, crop: Crop, theme: "dark" | "light"): Promise<void> {
   const { page, close } = await stage(browser, { ...crop, name: crop.id, theme });
   if (crop.prepare) await crop.prepare(page);
-  await page.addStyleTag({ content: `*{outline:none!important}${crop.hideFeeds ? ".aspect-video{display:none}" : ""}` });
+  await page.addStyleTag({ content: "*{outline:none!important}" });
   await crop.target(page).scrollIntoViewIfNeeded();
   const box = (await crop.target(page).boundingBox())!;
   const pad = crop.pad ?? 10;
