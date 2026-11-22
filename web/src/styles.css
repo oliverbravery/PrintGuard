@@ -544,7 +544,7 @@ a.topbar-readout:hover {
     justify-items: center;
     align-content: center;
     gap: 0.25rem;
-    min-height: 3.5rem;
+    height: 3.5rem;
     border-right: 1px solid var(--color-line-0);
     font-family: var(--font-mono);
     font-size: 0.75rem;
@@ -567,7 +567,7 @@ a.topbar-readout:hover {
   }
 
   html {
-    scroll-padding-bottom: calc(3.5rem + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(3.5rem + 1px + env(safe-area-inset-bottom));
   }
 
   body:has([data-subview]) .dock {
