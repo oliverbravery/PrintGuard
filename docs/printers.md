@@ -178,8 +178,6 @@ A finished or aborted print waiting for you to clear the bed shows as idle. Whil
 boots, runs maintenance or waits for you mid-print, PrintGuard shows its state as unknown and a
 monitor stays as it was.
 
-The integration is experimental until it has been tried on more of these models.
-
 </details>
 
 ## Sending prints

@@ -56,7 +56,7 @@ class UltimakerAdapter(IntegrationAdapter):
     label = "Ultimaker"
     docs_url = "https://github.com/Ultimaker/Cura/blob/main/plugins/UM3NetworkPrinting/src/Network/ClusterApiClient.py"
     setup_hint = "Use the IP address shown on the printer under Preferences > Network. The printer's API has no password, so keep it on a network you trust."
-    experimental = True
+    experimental = False
     formats = ("gcode",)
     schema = {
         "type": "object",
