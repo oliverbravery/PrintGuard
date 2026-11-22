@@ -43,7 +43,7 @@ export function SendToPrinter({ print }: { print: PrintFile }) {
 
   if (!printers.length) {
     return (
-      <p className="mono text-[0.68rem] text-text-2">
+      <p className="mono text-xs text-text-2">
         {print.printer_ids.length ? "none of its printers is registered" : `no registered printer takes .${print.ext} files`}
       </p>
     );

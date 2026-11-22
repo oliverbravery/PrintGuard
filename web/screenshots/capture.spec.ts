@@ -309,7 +309,6 @@ const SCENES: Scene[] = [
     mutate: (e) => {
       e.settings.layout = {
         monitors: { order: [], pinned: ["m1"], hidden: ["m3"] },
-        cameras: { order: [], pinned: [], hidden: ["c3"] },
       };
     },
   },

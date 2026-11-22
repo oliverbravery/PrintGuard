@@ -272,7 +272,6 @@ export interface LayoutSection {
 
 export interface Layout {
   monitors: LayoutSection;
-  cameras: LayoutSection;
 }
 
 export interface Permission {

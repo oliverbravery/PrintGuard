@@ -2,13 +2,13 @@ import { GUIDE, SHOT_SIZES, type GuideSection } from "../guide";
 import { useStore } from "../store";
 import { Dialog } from "./Dialog";
 import { NewTab } from "./NewTab";
+import { useGo } from "./Page";
 
 const REPO = "https://github.com/oliverbravery/PrintGuard";
 const MODEL = "https://github.com/oliverbravery/Edge-FDM-Fault-Detection";
 
 export function GuideEntry({ section, lead, fill }: { section: GuideSection; lead?: boolean; fill?: boolean }) {
-  const openDialog = useStore((s) => s.openDialog);
-  const openSettings = useStore((s) => s.openSettings);
+  const go = useGo();
   const { action } = section;
   const [shotWidth, shotHeight] = section.shot ? SHOT_SIZES[section.shot] : [];
   return (
@@ -19,7 +19,7 @@ export function GuideEntry({ section, lead, fill }: { section: GuideSection; lea
           {section.title}
         </h3>
       </div>
-      <p className={`shrink-0 leading-relaxed text-text-1 ${lead ? "text-sm" : "text-[0.84rem]"}`}>{section.body}</p>
+      <p className={`shrink-0 leading-relaxed text-text-1 ${lead ? "text-sm" : "text-sm"}`}>{section.body}</p>
       {section.shot && (
         <figure className={`shot ${fill ? "shot-fill" : ""}`}>
           <img className="shot-dark" src={`guide/${section.shot}-dark.jpg`} alt="" loading="lazy" width={shotWidth} height={shotHeight} />
@@ -28,7 +28,7 @@ export function GuideEntry({ section, lead, fill }: { section: GuideSection; lea
       )}
       {section.visual && <div className="mt-3">{section.visual}</div>}
       {action && (
-        <button className="btn mt-2.5" onClick={() => (action.tab ? openSettings(action.tab) : openDialog(action.dialog))}>
+        <button className="btn mt-2.5" onClick={() => go(action)}>
           {action.label}
         </button>
       )}
@@ -50,7 +50,7 @@ export function GuideDialog() {
         ))}
         <footer className="hairline flex flex-wrap gap-x-6 gap-y-2 pt-4">
           <a
-            className="mono text-[0.66rem] text-text-2 transition-colors hover:text-accent"
+            className="mono text-xs text-text-2 transition-colors hover:text-accent"
             href={REPO}
             target="_blank"
             rel="noreferrer"
@@ -58,7 +58,7 @@ export function GuideDialog() {
             Documentation <NewTab />
           </a>
           <a
-            className="mono text-[0.66rem] text-text-2 transition-colors hover:text-accent"
+            className="mono text-xs text-text-2 transition-colors hover:text-accent"
             href={MODEL}
             target="_blank"
             rel="noreferrer"

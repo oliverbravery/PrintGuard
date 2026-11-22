@@ -66,7 +66,7 @@ function NodeView({ node, pluginId, mayViewCameras }: { node: Node; pluginId: st
   }
 
   if (node.type === "text") {
-    return <span className={node.muted ? "text-[0.7rem] text-text-2" : "text-xs text-text-1"}>{node.value}</span>;
+    return <span className={node.muted ? "text-xs text-text-2" : "text-xs text-text-1"}>{node.value}</span>;
   }
 
   if (node.type === "chip") {
@@ -74,7 +74,7 @@ function NodeView({ node, pluginId, mayViewCameras }: { node: Node; pluginId: st
   }
 
   if (node.type === "camera") {
-    if (!mayViewCameras) return <span className="text-[0.7rem] text-text-2">Camera feeds not permitted</span>;
+    if (!mayViewCameras) return <span className="text-xs text-text-2">Camera feeds not permitted</span>;
     const camera = engine?.cameras.find((c) => c.id === node.camera_id);
     return (
       <div className="min-w-[12rem] flex-1 border border-line-0">

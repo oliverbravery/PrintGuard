@@ -22,7 +22,7 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
     <div className="space-y-2 border-t border-line-0 pt-2">
       {provider && (
         <div className="space-y-1">
-          <span className="block text-[0.7rem] text-text-2">
+          <span className="block text-xs text-text-2">
             {provider} needs an app of your own.{" "}
             {plugin.manifest.oauth.register_url && (
               <a className="text-accent hover:underline" href={plugin.manifest.oauth.register_url} target="_blank" rel="noreferrer">
@@ -31,7 +31,7 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
             )}{" "}
             with this redirect URI, then paste its client id below.
           </span>
-          <code className="mono block select-all break-all rounded border border-line-0 bg-ink-2 px-2 py-1 text-[0.65rem] text-text-1">
+          <code className="mono block select-all break-all rounded border border-line-0 bg-ink-2 px-2 py-1 text-xs text-text-1">
             {redirect}
           </code>
           <SignInAddresses oauth={plugin.manifest.oauth} />
@@ -40,7 +40,7 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
       {names.map((name) => (
         <label key={name} className="block">
           <span className="label block mb-1">{name.replace(/[_-]/g, " ")}</span>
-          <span className="mb-1 block text-[0.7rem] text-text-2">{plugin.manifest.secrets[name]}</span>
+          <span className="mb-1 block text-xs text-text-2">{plugin.manifest.secrets[name]}</span>
           <input
             className="field"
             type="password"
@@ -56,13 +56,13 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
         </label>
       ))}
       {names.length > 0 && (
-        <span className="block text-[0.7rem] text-text-2">
+        <span className="block text-xs text-text-2">
           PrintGuard fills these in. The plugin never reads them back.
         </span>
       )}
       {provider && (
         <div className="flex items-center gap-2">
-          <span className="text-[0.7rem] text-text-2 flex-1">
+          <span className="text-xs text-text-2 flex-1">
             {connected ? `Connected to ${provider}.` : `Sign in to ${provider}.`}
           </span>
           <button

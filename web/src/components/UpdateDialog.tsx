@@ -74,7 +74,7 @@ export function UpdateDialog() {
               href={update?.releases_url ?? release.url}
               target="_blank"
               rel="noreferrer"
-              className="text-[0.7rem] text-accent underline hover:opacity-80 inline-block"
+              className="text-xs text-accent underline hover:opacity-80 inline-block"
             >
               All releases on GitHub <NewTab />
             </a>
@@ -89,17 +89,17 @@ export function UpdateDialog() {
                 <a className="btn btn-primary inline-block" href={update!.download} target="_blank" rel="noreferrer">
                   Download v{update!.latest} <NewTab />
                 </a>
-                <p className="text-[0.7rem] text-text-2">
+                <p className="text-xs text-text-2">
                   Quit PrintGuard from the tray, replace the app with the downloaded one, and open it again.
                 </p>
               </>
             ) : (
               <>
-                <p className="text-[0.7rem] text-text-2">
+                <p className="text-xs text-text-2">
                   Pull the new image and recreate the container where your compose file lives:
                 </p>
                 <div className="flex items-center gap-2">
-                  <code className="mono text-[0.68rem] text-text-0 break-all flex-1">{PULL_COMMAND}</code>
+                  <code className="mono text-xs text-text-0 break-all flex-1">{PULL_COMMAND}</code>
                   <CopyButton text={PULL_COMMAND} />
                 </div>
               </>
@@ -107,7 +107,7 @@ export function UpdateDialog() {
           </div>
         )}
 
-        <p className="text-[0.7rem] text-text-2">
+        <p className="text-xs text-text-2">
           {update ? `Last checked ${new Date(update.checked_at * 1000).toLocaleString()}.` : "No check has run yet."}
         </p>
       </div>

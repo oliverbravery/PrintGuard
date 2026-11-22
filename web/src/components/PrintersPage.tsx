@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { Link, Navigate, useNavigate, useParams } from "react-router";
 import { useStore } from "../store";
 import { useSubmit } from "../submit";
 import type { AdapterConfig, AdapterMeta, Printer } from "../types";
 import { ConfirmButton } from "./ConfirmButton";
-import { Dialog } from "./Dialog";
-import { DeviceChip } from "./MonitorTile";
+import { DetailHead, ListHead, Page, Split } from "./Page";
 import { retypeReason, SchemaForm, savedSecretTitles } from "./SchemaForm";
+import { DeviceStatus, Status } from "./Status";
 import { TestRow } from "./TestRow";
 
 const NEW_PRINTER = "new";
@@ -36,9 +37,9 @@ function PrinterTest({ id, provider, config }: { id: string; provider: string; c
   );
 }
 
-function PrinterRow({ printer }: { printer: Printer }) {
+function PrinterEditor({ printer }: { printer: Printer }) {
   const { engine, send, isPending } = useStore();
-  const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
   const [name, setName] = useState(printer.name);
   const [config, setConfig] = useState<AdapterConfig>(printer.config ?? {});
   const integrations = engine?.integrations ?? [];
@@ -52,40 +53,39 @@ function PrinterRow({ printer }: { printer: Printer }) {
   const dirty = name.trim() !== printer.name || JSON.stringify(config) !== JSON.stringify(printer.config ?? {});
 
   return (
-    <div className="panel overflow-hidden">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
-        <span role="img" aria-label={printer.online ? "online" : "offline"} className={`led ${printer.online ? "led-on" : "led-off"}`} title={printer.online ? "online" : "offline"} />
-        <div className="min-w-0 grow basis-40 leading-tight">
-          <div className="text-sm font-medium truncate">{printer.name}</div>
-          <div className="mono text-[0.62rem] text-text-2 truncate">{providerLabel(integrations, printer.provider)}</div>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <DeviceChip state={printer.device_state ?? undefined} />
-          <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setOpen((v) => !v)}>
-            {open ? "Hide" : "Edit"}
-          </button>
-          <ConfirmButton
-            className="!py-1 !px-2.5 !text-[0.62rem]"
-            disabled={isPending("printer.remove", printer.id)}
-            onConfirm={() => send({ cmd: "printer.remove", id: printer.id })}
-          >
-            {isPending("printer.remove", printer.id) ? "Removing…" : "Remove"}
-          </ConfirmButton>
-        </div>
+    <>
+      <DetailHead title={printer.name}>
+        <ConfirmButton
+          disabled={isPending("printer.remove", printer.id)}
+          onConfirm={() => {
+            send({ cmd: "printer.remove", id: printer.id });
+            navigate("/printers", { replace: true });
+          }}
+        >
+          {isPending("printer.remove", printer.id) ? "Removing…" : "Remove"}
+        </ConfirmButton>
+      </DetailHead>
+      <div className="mono flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line-0 px-4 py-2 text-xs">
+        <Status tone={printer.online ? "ok" : "bad"}>{printer.online ? "online" : "offline"}</Status>
+        <span className="text-text-1">{providerLabel(integrations, printer.provider)}</span>
+        <DeviceStatus state={printer.device_state} />
       </div>
-      {open && meta && (
-        <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">
-          <input className="field" aria-label="Name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+      {meta && (
+        <div className="max-w-xl space-y-4 px-4 py-4">
+          <label className="block">
+            <span className="label mb-1 block">Name</span>
+            <input className="field" value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
           <SchemaForm meta={meta} value={config} stored={printer.config ?? {}} saved={printer.secrets_set} onChange={setConfig} />
           <PrinterTest id={printer.id} provider={printer.provider} config={config} />
           <button
-            className="btn btn-primary w-full !py-1.5"
+            className="btn btn-primary"
             disabled={!dirty || retype !== null || isPending("printer.update", printer.id)}
             onClick={() => save.submit({ cmd: "printer.update", id: printer.id, patch: { name: name.trim(), config } })}
           >
-            {isPending("printer.update", printer.id) ? "Saving…" : "Save"}
+            {isPending("printer.update", printer.id) ? "Saving…" : "Save printer"}
           </button>
-          {retype && <span className="block text-[0.7rem] text-text-2">{retype}</span>}
+          {retype && <span className="block text-sm text-text-2">{retype}</span>}
           {save.error && (
             <span role="alert" className="chip chip-message chip-bad">
               {save.error}
@@ -93,12 +93,13 @@ function PrinterRow({ printer }: { printer: Printer }) {
           )}
         </div>
       )}
-    </div>
+    </>
   );
 }
 
 function RegisterPrinter() {
   const { engine, send, isPending } = useStore();
+  const navigate = useNavigate();
   const integrations = engine?.integrations ?? [];
   const [provider, setProvider] = useState("");
   const [name, setName] = useState("");
@@ -110,11 +111,8 @@ function RegisterPrinter() {
 
   useEffect(() => {
     if (busy || printersWhenSent.current === null) return;
-    if (printers > printersWhenSent.current) {
-      setProvider("");
-      setName("");
-      setConfig({});
-    }
+    const added = engine?.printers.at(-1);
+    if (printers > printersWhenSent.current && added) navigate(`/printers/${added.id}`, { replace: true });
     printersWhenSent.current = null;
   }, [busy]);
 
@@ -123,7 +121,7 @@ function RegisterPrinter() {
 
   return (
     <form
-      className="space-y-3"
+      className="max-w-xl space-y-4 px-4 py-4"
       onSubmit={(event) => {
         event.preventDefault();
         printersWhenSent.current = printers;
@@ -148,10 +146,13 @@ function RegisterPrinter() {
       </select>
       {meta && (
         <>
-          <input className="field" aria-label="Name" placeholder={`Name (e.g. ${meta.label} Ender 3)`} value={name} onChange={(e) => setName(e.target.value)} />
+          <label className="block">
+            <span className="label mb-1 block">Name</span>
+            <input className="field" placeholder={`Such as ${meta.label} Ender 3`} value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
           <SchemaForm meta={meta} value={config} onChange={setConfig} />
           <PrinterTest id={NEW_PRINTER} provider={provider} config={config} />
-          <button type="submit" className="btn btn-primary w-full" disabled={busy || incomplete}>
+          <button type="submit" className="btn btn-primary" disabled={busy || incomplete}>
             {busy ? "Registering…" : "Register printer"}
           </button>
         </>
@@ -160,21 +161,43 @@ function RegisterPrinter() {
   );
 }
 
-export function PrintersDialog() {
-  const { engine, openDialog } = useStore();
-  const close = () => openDialog(null);
+export function PrintersPage() {
+  const { printerId } = useParams();
+  const engine = useStore((s) => s.engine);
+  const integrations = engine?.integrations ?? [];
   const printers = engine?.printers ?? [];
-  return (
-    <Dialog title="Printer registry" onClose={close}>
-      {printers.length > 0 && (
-        <div className="space-y-2 mb-6">
-          {printers.map((printer) => (
-            <PrinterRow key={printer.id} printer={printer} />
-          ))}
-        </div>
-      )}
-      <div className="label mb-3">Register new</div>
+  const adding = printerId === "new";
+  const chosen = printers.find((printer) => printer.id === printerId);
+  if (printerId && !adding && !chosen) return <Navigate to="/printers" replace />;
+  const selected = adding ? undefined : (chosen ?? printers[0]);
+  const list = (
+    <>
+      <ListHead title={`Printers · ${printers.length}`} />
+      {printers.map((printer) => (
+        <Link key={printer.id} to={`/printers/${printer.id}`} aria-current={printer.id === selected?.id ? "page" : undefined} className="list-row">
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-semibold">{printer.name}</span>
+            <span className="mono block truncate text-xs text-text-2">{providerLabel(integrations, printer.provider)}</span>
+          </span>
+          {printer.online ? <DeviceStatus state={printer.device_state} /> : <Status tone="bad">offline</Status>}
+        </Link>
+      ))}
+      <Link to="/printers/new" aria-current={adding ? "page" : undefined} className="list-row font-mono text-xs font-semibold uppercase tracking-[0.06em]">
+        + Register a printer
+      </Link>
+    </>
+  );
+  const detail = selected ? (
+    <PrinterEditor key={selected.id} printer={selected} />
+  ) : (
+    <>
+      <DetailHead title="Register a printer" />
       <RegisterPrinter />
-    </Dialog>
+    </>
+  );
+  return (
+    <Page title="Printers" back={printerId ? { to: "/printers", label: "Back" } : undefined} backOnPhones subview={Boolean(printerId)}>
+      <Split list={list} detail={detail} detailShown={Boolean(printerId)} />
+    </Page>
   );
 }

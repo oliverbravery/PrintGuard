@@ -2,7 +2,7 @@ import { Bug } from "lucide-react";
 import type { ReactNode } from "react";
 import { ModelPicker } from "./components/ModelPicker";
 import { NewTab } from "./components/NewTab";
-import type { DialogKind, SettingsTabId } from "./store";
+import type { Target } from "./components/Page";
 
 const REPO = "https://github.com/oliverbravery/PrintGuard";
 const docs = (page: string) => `${REPO}/blob/main/docs/${page}`;
@@ -28,7 +28,7 @@ export interface GuideSection {
   body: ReactNode;
   shot?: keyof typeof SHOT_SIZES;
   visual?: ReactNode;
-  action?: { label: string; dialog: DialogKind; tab?: SettingsTabId };
+  action?: Target & { label: string };
 }
 
 const WATCH_STATES: { led: string; when: string; then: string }[] = [
@@ -126,7 +126,7 @@ export const INTRO: GuideSection[] = [
         header, or under More on a phone.
       </>
     ),
-    action: { label: "Register a camera", dialog: "cameras" },
+    action: { label: "Register a camera", to: "/cameras/new" },
   },
 ];
 
@@ -157,7 +157,7 @@ export const GUIDE: GuideSection[] = [
         camera's crop editor, so crop it tightly around the part of the bed you print on.
       </>
     ),
-    action: { label: "Open cameras", dialog: "cameras" },
+    action: { label: "Open cameras", to: "/cameras" },
   },
   {
     id: "printers",
@@ -174,7 +174,7 @@ export const GUIDE: GuideSection[] = [
         </a>
       </>
     ),
-    action: { label: "Open printers", dialog: "printers" },
+    action: { label: "Open printers", to: "/printers" },
   },
   {
     id: "prints",
@@ -189,7 +189,7 @@ export const GUIDE: GuideSection[] = [
         printer's camera comes up first so you can check the bed is clear.
       </>
     ),
-    action: { label: "Open the library", dialog: "prints" },
+    action: { label: "Open the library", to: "/prints" },
   },
   {
     id: "monitors",
@@ -229,7 +229,7 @@ export const GUIDE: GuideSection[] = [
         Obico's on frames none of them was trained on, so you can pick the one your hardware keeps up with.
       </>
     ),
-    action: { label: "Choose a model", dialog: "settings", tab: "detection" },
+    action: { label: "Choose a model", to: "/settings/detection" },
   },
   {
     id: "alerts",
@@ -244,7 +244,7 @@ export const GUIDE: GuideSection[] = [
         notifications on per monitor in its detail panel.
       </>
     ),
-    action: { label: "Set up alerts", dialog: "settings" },
+    action: { label: "Set up alerts", to: "/settings/alerts" },
   },
   {
     id: "failsafe",
@@ -272,7 +272,7 @@ export const GUIDE: GuideSection[] = [
         the hub.
       </>
     ),
-    action: { label: "Open settings", dialog: "settings", tab: "appearance" },
+    action: { label: "Open settings", to: "/settings/appearance" },
   },
   {
     id: "integrate",
@@ -288,7 +288,7 @@ export const GUIDE: GuideSection[] = [
         </a>
       </>
     ),
-    action: { label: "Manage access", dialog: "settings", tab: "api" },
+    action: { label: "Manage access", to: "/settings/api" },
   },
   {
     id: "plugins",
@@ -306,7 +306,7 @@ export const GUIDE: GuideSection[] = [
         </a>
       </>
     ),
-    action: { label: "Browse plugins", dialog: "settings", tab: "plugins" },
+    action: { label: "Browse plugins", to: "/settings/plugins" },
   },
   {
     id: "privacy",

@@ -28,7 +28,7 @@ export function ModelPicker() {
                   {chosen && <span className="label !text-accent">in use</span>}
                 </span>
                 <span className="text-xs leading-snug text-text-1">{option.about}</span>
-                <span className="mono mt-auto flex flex-wrap gap-x-2 pt-1 text-[0.65rem] text-text-2">
+                <span className="mono mt-auto flex flex-wrap gap-x-2 pt-1 text-xs text-text-2">
                   <span className="whitespace-nowrap">
                     Caught {stats.caught} of {GOLD_TEST.failedPrints}
                   </span>

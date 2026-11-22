@@ -23,7 +23,7 @@ export function SignInAddresses({ oauth }: { oauth: PluginManifest["oauth"] }) {
 
 export function PermissionList({ plugin, permissions }: { plugin: { manifest: PluginManifest }; permissions: Permission[] }) {
   const asked = permissions.filter((p) => plugin.manifest.permissions.includes(p.id));
-  if (asked.length === 0) return <span className="text-[0.7rem] text-text-2">Asks for nothing.</span>;
+  if (asked.length === 0) return <span className="text-xs text-text-2">Asks for nothing.</span>;
   return (
     <table className="perms">
       <thead>
@@ -93,14 +93,14 @@ function Findings({ plugin }: { plugin: PluginRecord }) {
     if (!reconnecting) checkPlugin(plugin.id);
   }, [plugin.id, findings === undefined, reconnecting]);
 
-  if (findings === undefined) return <span className="block text-[0.7rem] text-text-2">Reading its code…</span>;
+  if (findings === undefined) return <span className="block text-xs text-text-2">Reading its code…</span>;
   if (findings.length === 0) {
-    return <span className="block text-[0.7rem] text-ok">Its code matches what it asks for.</span>;
+    return <span className="block text-xs text-ok">Its code matches what it asks for.</span>;
   }
   return (
     <ul className="space-y-1">
       {findings.map((finding) => (
-        <li key={`${finding.kind}:${finding.what}`} className={`text-[0.7rem] ${finding.kind === "dynamic" ? "text-text-2" : "text-warn"}`}>
+        <li key={`${finding.kind}:${finding.what}`} className={`text-xs ${finding.kind === "dynamic" ? "text-text-2" : "text-warn"}`}>
           {phraseFinding(finding)}
         </li>
       ))}
@@ -118,7 +118,7 @@ export function ConsentDialog({ plugin, permissions, onClose }: { plugin: Plugin
   return (
     <Dialog title={`Enable ${plugin.manifest.name}`} onClose={onClose}>
       <div className="space-y-3">
-        <span className="block text-[0.7rem] leading-relaxed text-text-2">
+        <span className="block text-xs leading-relaxed text-text-2">
           {plugin.verified
             ? "These bytes match PrintGuard's catalogue."
             : "Unreviewed third-party code. Read it first."}
@@ -126,12 +126,12 @@ export function ConsentDialog({ plugin, permissions, onClose }: { plugin: Plugin
         <Findings plugin={plugin} />
         <PermissionList plugin={plugin} permissions={permissions} />
         {Object.keys(plugin.manifest.secrets).length > 0 && (
-          <span className="block text-[0.7rem] text-text-2">
+          <span className="block text-xs text-text-2">
             It also needs {Object.keys(plugin.manifest.secrets).join(", ").replace(/[_-]/g, " ")}, which PrintGuard fills
             in for it.
           </span>
         )}
-        <span className="block text-[0.7rem] text-text-2">All of it or none. Disable to stop it.</span>
+        <span className="block text-xs text-text-2">All of it or none. Disable to stop it.</span>
         <div className="flex gap-2">
           <button className="btn btn-primary" onClick={accept}>
             Allow and enable

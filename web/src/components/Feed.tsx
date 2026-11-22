@@ -6,11 +6,13 @@ import type { Camera } from "../types";
 export function Feed({
   camera,
   active = true,
+  compact = false,
   banner,
   children,
 }: {
   camera: Camera | undefined;
   active?: boolean;
+  compact?: boolean;
   banner?: ReactNode;
   children?: ReactNode;
 }) {
@@ -55,7 +57,7 @@ export function Feed({
   }, [camera?.id, useCanvas, brightness, contrast, sharpness, crop, rotation]);
 
   return (
-    <div className="feed relative aspect-video bg-ink-0 overflow-hidden">
+    <div className={`feed relative aspect-video overflow-hidden bg-ink-1 ${compact ? "border border-line-0" : ""}`}>
       <video
         ref={videoRef}
         autoPlay
@@ -74,12 +76,12 @@ export function Feed({
         <div className="relative grid justify-items-center">
           {banner}
           <div className={banner ? "absolute top-full mt-2 w-max" : ""}>
-            {idle && !tapToPlay && (
-              <span className="mono relative z-[2] text-[0.65rem] tracking-[0.2em] text-text-2 uppercase">
+            {idle && !tapToPlay && !compact && (
+              <span className="mono relative z-[2] text-xs tracking-[0.12em] text-text-2 uppercase">
                 {!camera ? "no camera bound" : !active ? "feed paused" : camera.standby || camera.online ? "starting stream" : "no signal"}
               </span>
             )}
-            {tapToPlay && (
+            {tapToPlay && !compact && (
               <button className="btn pointer-events-auto relative z-[3]" onClick={() => void videoRef.current?.play()}>
                 Tap to play
               </button>

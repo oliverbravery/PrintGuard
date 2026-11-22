@@ -1,5 +1,5 @@
 import type { ScorePoint } from "../types";
-import { riskColor } from "./RiskGauge";
+import { riskColor } from "./RiskMeter";
 
 const W = 400;
 const H = 80;

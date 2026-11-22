@@ -262,7 +262,7 @@ export function ModelChart({ selected }: { selected?: ModelId }) {
         </svg>
         {tipped && (
           <div ref={tip} className="pointer-events-none absolute z-10 min-w-48 rounded border border-line-1 bg-ink-2 px-3 py-2.5 text-xs shadow-lg">
-            <div className="mb-1.5 flex items-center gap-1.5 text-[0.8rem] font-semibold text-text-0">
+            <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-text-0">
               <Swatch family={tipped.model.family} size={12} />
               {tipped.model.name}
             </div>
@@ -319,7 +319,7 @@ export function ModelChart({ selected }: { selected?: ModelId }) {
           </tbody>
         </table>
       </div>
-      <p className="text-[0.7rem] leading-relaxed text-text-2">
+      <p className="text-xs leading-relaxed text-text-2">
         Scored on {GOLD_TEST.frames.toLocaleString("en-GB")} frames from {GOLD_TEST.hubs} PrintGuard hubs no model was trained on, with
         latency measured on one CPU thread of an M1 Max. Caught and false alarms count whole prints, {GOLD_TEST.failedPrints} failed and{" "}
         {GOLD_TEST.goodPrints} good, alerting at 0.75 for 3 frames in a row. Obico's scores aren't probabilities, so its thresholds were

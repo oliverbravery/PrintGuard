@@ -41,7 +41,7 @@ function TemperatureField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
-      <span className="mono text-[0.7rem] text-text-2">°C</span>
+      <span className="mono text-xs text-text-2">°C</span>
     </label>
   );
 }
@@ -134,18 +134,18 @@ function StagedPrintForm({
             ))}
           </div>
           {invalidHeaters.length > 0 && (
-            <p className="mono mt-1.5 text-[0.66rem] text-bad">
+            <p className="mono mt-1.5 text-xs text-bad">
               Upload needs {invalidHeaters.map((heater) => `${heater} between 1 and ${HEATER_MAX[heater]} °C`).join(" and ")}
             </p>
           )}
-          {ext === "bgcode" && <p className="mono mt-1.5 text-[0.66rem] text-text-2">binary gcode prints at the temperatures it was sliced with</p>}
+          {ext === "bgcode" && <p className="mono mt-1.5 text-xs text-text-2">binary gcode prints at the temperatures it was sliced with</p>}
         </div>
         <div>
           <span className="label mb-1 block">Tag for</span>
           <PrinterTags selected={printerIds} ext={ext} onToggle={onToggleTag} />
         </div>
         {error && (
-          <p role="alert" className="mono text-[0.7rem] text-bad">
+          <p role="alert" className="mono text-xs text-bad">
             {error}
           </p>
         )}

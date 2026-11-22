@@ -137,7 +137,7 @@ export function ReportDialog() {
             </span>
           ))}
         </div>
-        <details className="text-[0.7rem] text-text-2">
+        <details className="text-xs text-text-2">
           <summary className="cursor-pointer pointer-coarse:py-3.5 hover:text-text-1">What's sent with your report</summary>
           <p className="mt-1.5 leading-relaxed">
             Your description, any files you attach, the address this dashboard is open at, your browser's

@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
-import { section, togglePinned, toggleHidden } from "../layout";
 import { useStore } from "../store";
 import type { PluginRecord } from "../types";
 import { PluginNodeView } from "./PluginNode";
+import { LayoutControls } from "./LayoutControls";
 import { SortableItem, type SortableHandle } from "./Sortable";
 
 function PluginWebview({ plugin }: { plugin: PluginRecord }) {
@@ -18,74 +18,35 @@ function PluginWebview({ plugin }: { plugin: PluginRecord }) {
   return <div ref={container} />;
 }
 
-export function PluginPanel({ plugin }: { plugin: PluginRecord }) {
-  const { customising, mutateLayout, engine } = useStore();
-  const pinned = section(engine?.settings.layout, "monitors").pinned.includes(plugin.id);
+export function PluginPanel({ plugin, visible, group }: { plugin: PluginRecord; visible: string[]; group: string[] }) {
+  const customising = useStore((s) => s.customising);
   const tree = useStore((s) => s.pluginTrees[plugin.id]);
   const failure = useStore((s) => s.pluginFailures[plugin.id]) ?? plugin.failure;
   const webview = plugin.files.includes("panel.html");
-
   const body = webview ? (
     <PluginWebview plugin={plugin} />
   ) : tree ? (
     <PluginNodeView plugin={plugin} node={tree} />
   ) : (
-    <span className="text-[0.7rem] text-text-2">{failure ?? "Starting"}</span>
+    <span className="text-sm text-text-2">{failure ?? "Starting"}</span>
   );
-
   const content = (handle?: SortableHandle) => (
-    <>
-      <div className="flex items-center gap-2">
-        {handle && (
-          <button
-            className="btn !py-1 !px-2 cursor-grab touch-none"
-            aria-label={`Drag ${plugin.manifest.name} to reorder`}
-            {...handle.attributes}
-            {...handle.listeners}
-          >
-            ⠿
-          </button>
-        )}
-        <h3 className="display text-sm font-semibold tracking-[0.08em] truncate flex-1">{plugin.manifest.name}</h3>
+    <section
+      ref={handle?.setNodeRef}
+      style={handle?.style}
+      className={`flex flex-col border-b border-line-0 bg-ink-0 md:border-r ${handle?.isDragging ? "z-10" : ""}`}
+    >
+      <div className="flex min-h-11 items-center gap-2 border-b border-line-0 px-4 py-1.5">
+        <h3 className="min-w-0 flex-1 truncate text-sm font-bold">{plugin.manifest.name}</h3>
         {handle ? (
-          <>
-            <button
-              className={`btn !py-1 !px-2 !text-[0.6rem] ${pinned ? "!border-accent !text-accent" : ""}`}
-              aria-pressed={pinned}
-              aria-label={`${pinned ? "Pinned" : "Pin"} ${plugin.manifest.name}`}
-              onClick={() => mutateLayout("monitors", (s) => togglePinned(s, plugin.id))}
-            >
-              {pinned ? "Pinned" : "Pin"}
-            </button>
-            <button
-              className="btn !py-1 !px-2 !text-[0.6rem]"
-              aria-label={`Hide ${plugin.manifest.name}`}
-              onClick={() => mutateLayout("monitors", (s) => toggleHidden(s, plugin.id))}
-            >
-              Hide
-            </button>
-          </>
+          <LayoutControls id={plugin.id} name={plugin.manifest.name} handle={handle} visible={visible} group={group} />
         ) : (
           <span className={`chip ${plugin.verified ? "chip-ok" : ""}`}>{plugin.verified ? "verified" : "third party"}</span>
         )}
       </div>
-      <div className="flex flex-1 flex-col justify-center">{body}</div>
-    </>
+      <div className="flex flex-1 flex-col justify-center p-4">{body}</div>
+    </section>
   );
-
-  if (!customising) return <section className="panel flex flex-col gap-3 p-4">{content()}</section>;
-
-  return (
-    <SortableItem id={plugin.id}>
-      {(handle) => (
-        <section
-          ref={handle.setNodeRef}
-          style={handle.style}
-          className={`panel flex flex-col gap-3 p-4 ${pinned ? "!border-accent" : ""} ${handle.isDragging ? "z-10 opacity-90 shadow-xl" : ""}`}
-        >
-          {content(handle)}
-        </section>
-      )}
-    </SortableItem>
-  );
+  if (!customising) return content();
+  return <SortableItem id={plugin.id}>{(handle) => content(handle)}</SortableItem>;
 }

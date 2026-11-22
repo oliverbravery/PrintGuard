@@ -54,7 +54,7 @@ export function SchemaForm({
   return (
     <div className="space-y-3">
       {meta.experimental && <ExperimentalBadge />}
-      {meta.setup_hint && <p className="text-[0.7rem] leading-snug text-text-2">{meta.setup_hint}</p>}
+      {meta.setup_hint && <p className="text-xs leading-snug text-text-2">{meta.setup_hint}</p>}
       {Object.entries(meta.schema.properties).map(([key, prop]) => (
         <div key={key}>
           <label className="label block mb-1" htmlFor={formId + key}>
@@ -100,11 +100,11 @@ export function SchemaForm({
             />
           )}
           {!prop.secret && stored !== undefined && ADDRESS_FIELDS.includes(key) && shown(value, key) !== shown(stored, key) && (
-            <span className="mt-1 block text-[0.7rem] text-text-2">The saved address may hide a login or key, so type the whole address.</span>
+            <span className="mt-1 block text-xs text-text-2">The saved address may hide a login or key, so type the whole address.</span>
           )}
         </div>
       ))}
-      <a href={meta.setup_url ?? meta.docs_url} target="_blank" rel="noreferrer" className="mono text-[0.64rem] text-text-2 hover:text-accent inline-block">
+      <a href={meta.setup_url ?? meta.docs_url} target="_blank" rel="noreferrer" className="mono text-xs text-text-2 hover:text-accent inline-block">
         {meta.label} {meta.setup_url ? "setup guide" : "API docs"} <NewTab />
       </a>
     </div>

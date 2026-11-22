@@ -29,6 +29,7 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-image-crop": "^11.1.2",
+    "react-router": "^8.5.2",
     "tailwindcss": "^4.3.0",
     "three": "^0.159.0",
     "zustand": "^5.0.13"

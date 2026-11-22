@@ -68,7 +68,7 @@ export function ThemeEditor({
         </div>
       ))}
 
-      <span className="block text-[0.7rem] text-text-2">Changes preview live. Save to keep this theme and switch to it.</span>
+      <span className="block text-xs text-text-2">Changes preview live. Save to keep this theme and switch to it.</span>
       <div className="flex gap-2">
         <button className="btn flex-1" onClick={onCancel}>
           Cancel

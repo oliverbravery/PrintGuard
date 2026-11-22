@@ -156,7 +156,7 @@ function PluginCard({ item, onOpen }: { item: StoreItem; onOpen: () => void }) {
           </button>
           {attention && <span className="chip chip-bad">needs attention</span>}
         </span>
-        <span className="clamp-2 block text-[0.7rem] leading-snug text-text-2">{description}</span>
+        <span className="clamp-2 block text-xs leading-snug text-text-2">{description}</span>
       </div>
       <span className="relative">{plugin ? <EnableToggle plugin={plugin} /> : <InstallButton entry={entry!} installed={false} />}</span>
     </div>
@@ -210,7 +210,7 @@ function PluginPage({
         <PluginIcon url={icon} name={name} size={64} />
         <div className="min-w-0 flex-1 space-y-1">
           <h3 className="display text-base font-bold leading-tight">{name}</h3>
-          <span className="block text-[0.7rem] text-text-2">
+          <span className="block text-xs text-text-2">
             {author}
             {version && ` · v${version}`}
           </span>
@@ -237,10 +237,10 @@ function PluginPage({
       )}
 
       {readme === undefined ? (
-        <span className="block text-[0.7rem] text-text-2">Reading its page…</span>
+        <span className="block text-xs text-text-2">Reading its page…</span>
       ) : readme ? (
         <div
-          className="changelog text-[0.78rem]"
+          className="changelog text-xs"
           dangerouslySetInnerHTML={{
             __html: renderMarkdown(readme.text, {
               base: readme.base,
@@ -252,7 +252,7 @@ function PluginPage({
           }}
         />
       ) : (
-        <p className="text-[0.78rem] leading-relaxed text-text-1">{fallback}</p>
+        <p className="text-xs leading-relaxed text-text-1">{fallback}</p>
       )}
 
       {children}
@@ -350,8 +350,8 @@ function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () 
               </button>
             )}
           </div>
-          {plugin.failure && <span className="block text-[0.7rem] text-bad">Stopped: {plugin.failure}</span>}
-          {!accepted && <span className="block text-[0.7rem] text-warn">Waiting on permissions you have not accepted.</span>}
+          {plugin.failure && <span className="block text-xs text-bad">Stopped: {plugin.failure}</span>}
+          {!accepted && <span className="block text-xs text-warn">Waiting on permissions you have not accepted.</span>}
         </div>
       }
     >
@@ -513,7 +513,7 @@ export function PluginsTab() {
     <div className="space-y-4">
       <div>
         <span className="label block">Plugins</span>
-        <span className="mt-1 block text-[0.7rem] leading-relaxed text-text-2">
+        <span className="mt-1 block text-xs leading-relaxed text-text-2">
           Third-party code, installed switched off. Verified ones match the catalogue by hash. Read the rest before you
           enable them.
         </span>
@@ -559,7 +559,7 @@ export function PluginsTab() {
       />
 
       {(catalogue === null || listed.length === 0) && (
-        <span className="block text-[0.7rem] text-text-2">
+        <span className="block text-xs text-text-2">
           {catalogue === null
             ? "Loading the catalogue…"
             : items.length === 0
@@ -609,7 +609,7 @@ export function PluginsTab() {
             installPlugin({ kind: "file", filename: chosen.name }, await readZip(chosen));
           }}
         />
-        <span className="text-[0.7rem] text-text-2">A zipped folder with plugin.json and plugin.js or worker.js.</span>
+        <span className="text-xs text-text-2">A zipped folder with plugin.json and plugin.js or worker.js.</span>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { alertOutcome } from "./history";
-import { currentLayout } from "./layout";
+import { section } from "./layout";
 import { log } from "./log";
 import type { Finding } from "./lint";
 import { PluginPanelHost } from "./panel";
@@ -13,7 +13,7 @@ import { openIn } from "./urls";
 import { extOf, FORMATS, sendPrint, type PrintDraft } from "./prints";
 import { recordedFrameKey } from "./review";
 import { withPreview, type ParsedToolpath } from "./toolpath";
-import type { AdapterConfig, Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, PrintFile, Review, ScorePoint, UpdateRelease } from "./types";
+import type { AdapterConfig, Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, LayoutSection, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, PrintFile, Review, ScorePoint, UpdateRelease } from "./types";
 
 const HISTORY_LIMIT = 240;
 const MAX_BACKGROUND_CHARS = 3 * 1024 * 1024;
@@ -101,7 +101,7 @@ export interface Toast {
   text: string;
 }
 
-export type DialogKind = "cameras" | "printers" | "prints" | "monitor" | "settings" | "update" | "guide" | "intro" | "report" | "more" | null;
+export type DialogKind = "monitor" | "update" | "guide" | "intro" | "report" | null;
 
 export interface Upload {
   id: number;
@@ -113,7 +113,6 @@ export interface StagedPrint {
   id: number;
   file: File;
 }
-export type SettingsTabId = "appearance" | "alerts" | "plugins" | "mqtt" | "updates" | "api" | "storage" | "detection";
 
 interface PgStore {
   phase: "booting" | "ready";
@@ -133,18 +132,12 @@ interface PgStore {
   releases: UpdateRelease[];
   pending: Record<string, { req_id: string; cmd: string }>;
   toasts: Toast[];
-  detailId: string | null;
-  statsMonitorId: string | null;
-  reviewId: string | null;
   reviewData: Record<string, Review>;
-  printId: string | null;
   uploads: Upload[];
   staged: StagedPrint[];
   historyData: Record<string, MonitorHistory | null>;
   snapshotCache: Record<string, string>;
   dialog: DialogKind;
-  settingsTab: SettingsTabId | null;
-  focusCameraId: string | null;
   createdToken: { name: string; secret: string } | null;
   customising: boolean;
   optimistic: Record<string, OptimisticEntry>;
@@ -165,7 +158,7 @@ interface PgStore {
   fetchPluginPage(id: string): void;
   installPlugin(source: Record<string, unknown>, zip?: string): boolean;
   setCustomising(on: boolean): void;
-  mutateLayout(key: keyof Layout, fn: (section: LayoutSection) => LayoutSection): void;
+  mutateLayout(fn: (section: LayoutSection) => LayoutSection): void;
   resetLayout(): void;
   send(cmd: Record<string, unknown>): string | null;
   isPending(cmd: string, id?: string): boolean;
@@ -175,14 +168,10 @@ interface PgStore {
   updateSettings(patch: Record<string, unknown>, scope?: string): void;
   flushUpdates(): void;
   discover(): void;
-  openDialog(dialog: DialogKind, focusCameraId?: string | null): void;
-  openSettings(tab?: SettingsTabId): void;
-  openDetail(id: string | null): void;
-  openStats(id: string | null): void;
+  openDialog(dialog: DialogKind): void;
+  leavePage(): void;
   fetchHistory(monitorId: string): void;
-  openReview(id: string | null): void;
   fetchReview(id: string): void;
-  openPrint(id: string | null): void;
   stagePrints(files: File[]): void;
   unstage(id: number): void;
   uploadPrint(draft: PrintDraft, thumbnailFrom: ParsedToolpath | null, signal: AbortSignal): Promise<void>;
@@ -272,10 +261,6 @@ export const useStore = create<PgStore>((set, get) => {
     const req_id = nextReqId();
     get().link?.send({ ...cmd, req_id });
     return req_id;
-  };
-
-  const forgetUnshownSnapshots = () => {
-    if (get().reviewId === null && get().statsMonitorId === null) set({ snapshotCache: {} });
   };
 
   let lastSnapshot: EngineState | null = null;
@@ -588,16 +573,11 @@ export const useStore = create<PgStore>((set, get) => {
           if (monitor.result) history = appendScore(history, monitor.id, monitor.result);
         }
         applyTheme(engine.settings?.theme ?? "system", engine.settings?.themes ?? [], engine.settings?.glass);
-        const monitorIds = new Set(server.monitors.map((m) => m.id));
-        const present = (monitorId: string | null) => (monitorId !== null && monitorIds.has(monitorId) ? monitorId : null);
         set((s) => ({
           engine,
           history,
           optimistic,
           outcome: issuedHere(event.req_id) ? { req_id: event.req_id, error: null } : s.outcome,
-          detailId: present(s.detailId),
-          statsMonitorId: present(s.statsMonitorId),
-          reviewId: server.reviews.some((r) => r.id === s.reviewId && monitorIds.has(r.monitor_id)) ? s.reviewId : null,
           phase: "ready",
           savedAt: { ...s.savedAt, ...Object.fromEntries(acknowledged.map((key) => [key, Date.now()])) },
           ...(firstRun ? { dialog: "intro" as const } : {}),
@@ -782,18 +762,12 @@ export const useStore = create<PgStore>((set, get) => {
     releases: [],
     pending: {},
     toasts: [],
-    detailId: null,
-    statsMonitorId: null,
-    reviewId: null,
     reviewData: {},
-    printId: null,
     uploads: [],
     staged: [],
     historyData: {},
     snapshotCache: {},
     dialog: null,
-    settingsTab: null,
-    focusCameraId: null,
     createdToken: null,
     customising: false,
     optimistic: {},
@@ -847,11 +821,10 @@ export const useStore = create<PgStore>((set, get) => {
       set({ customising: on });
     },
 
-    mutateLayout(key, fn) {
+    mutateLayout(fn) {
       const engine = get().engine;
       if (!engine) return;
-      const base = currentLayout(engine.settings.layout);
-      get().updateSettings({ layout: { ...base, [key]: fn(base[key]) } });
+      get().updateSettings({ layout: { monitors: fn(section(engine.settings.layout)) } });
     },
 
     resetLayout() {
@@ -904,63 +877,23 @@ export const useStore = create<PgStore>((set, get) => {
       set({ discovered: null, discovering: get().send({ cmd: "discover" }) !== null });
     },
 
-    openDialog(dialog, focusCameraId = null) {
+    openDialog(dialog) {
       get().flushUpdates();
       if (get().dialog === "intro") writeStored(INTRO_SEEN_KEY, "1");
-      set({
-        dialog,
-        discovered: null,
-        printerTest: null,
-        notifyTest: null,
-        reportResult: null,
-        focusCameraId,
-        createdToken: null,
-        settingsTab: null,
-        savedAt: {},
-      });
+      set({ dialog, reportResult: null });
     },
 
-    openSettings(settingsTab = "alerts") {
+    leavePage() {
       get().flushUpdates();
-      set({
-        dialog: "settings",
-        discovered: null,
-        printerTest: null,
-        notifyTest: null,
-        reportResult: null,
-        focusCameraId: null,
-        createdToken: null,
-        settingsTab,
-        savedAt: {},
-      });
-    },
-
-    openDetail(detailId) {
-      get().flushUpdates();
-      set({ detailId, printerTest: null, savedAt: {} });
-    },
-
-    openStats(statsMonitorId) {
-      get().flushUpdates();
-      set({ statsMonitorId });
-      forgetUnshownSnapshots();
+      set({ discovered: null, printerTest: null, notifyTest: null, createdToken: null, savedAt: {}, snapshotCache: {} });
     },
 
     fetchHistory(monitorId) {
       sendSilent({ cmd: "history.get", monitor_id: monitorId });
     },
 
-    openReview(reviewId) {
-      set({ reviewId });
-      forgetUnshownSnapshots();
-    },
-
     fetchReview(id) {
       sendSilent({ cmd: "review.get", id });
-    },
-
-    openPrint(printId) {
-      set({ printId });
     },
 
     stagePrints(files) {

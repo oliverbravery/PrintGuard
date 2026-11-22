@@ -1,5 +1,5 @@
 import type { GroupedBucket } from "../history";
-import { riskColor } from "./RiskGauge";
+import { riskColor } from "./RiskMeter";
 
 const W = 600;
 const CH = 150;

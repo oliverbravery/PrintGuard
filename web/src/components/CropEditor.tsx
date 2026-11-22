@@ -107,7 +107,7 @@ export function CropEditor({
           {editing ? (
             <>
               <button
-                className="btn !py-1 !px-2.5 !text-[0.62rem]"
+                className="btn !py-1 !px-2.5 !text-xs"
                 onClick={() => {
                   onChange(null);
                   setEditing(false);
@@ -115,14 +115,14 @@ export function CropEditor({
               >
                 Reset
               </button>
-              <button className="btn btn-primary !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setEditing(false)}>
+              <button className="btn btn-primary !py-1 !px-2.5 !text-xs" onClick={() => setEditing(false)}>
                 Done
               </button>
             </>
           ) : (
             <button
               key="edit"
-              className="btn !py-1 !px-2.5 !text-[0.62rem]"
+              className="btn !py-1 !px-2.5 !text-xs"
               onClick={() => {
                 setDraft(watched);
                 setFreeform(!isSquare(fromPercent(watched), frameAspect));
@@ -139,7 +139,7 @@ export function CropEditor({
           {[false, true].map((shape) => (
             <button
               key={String(shape)}
-              className={`btn flex-1 !py-1.5 !text-[0.66rem] ${freeform === shape ? "!border-accent !text-accent" : ""}`}
+              className={`btn flex-1 !py-1.5 !text-xs ${freeform === shape ? "!border-accent !text-accent" : ""}`}
               aria-pressed={freeform === shape}
               onClick={() => {
                 setFreeform(shape);
@@ -155,7 +155,7 @@ export function CropEditor({
         </div>
       )}
       {editing && freeform && (
-        <p role="status" className="text-[0.7rem] leading-snug text-warn">
+        <p role="status" className="text-xs leading-snug text-warn">
           Square crops tend to do better at spotting defects than wide ones. A freeform crop still works, but detection might be worse.
         </p>
       )}
@@ -195,7 +195,7 @@ export function CropEditor({
             ))}
         </div>
       </ReactCrop>
-      <p role="status" className="text-[0.7rem] leading-snug text-text-2">
+      <p role="status" className="text-xs leading-snug text-text-2">
         {!crop && !editing
           ? "The model only watches this square until you crop the camera, so frame the print with a crop."
           : squares.length > 1

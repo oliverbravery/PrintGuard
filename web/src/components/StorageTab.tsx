@@ -27,7 +27,7 @@ export function StorageTab() {
         on={reviewing}
         onChange={(on) => (on || waitingReviews === 0 ? setReviewing(on) : stopReviewing.press())}
       />
-      <span className="block text-[0.7rem] leading-relaxed text-text-2">
+      <span className="block text-xs leading-relaxed text-text-2">
         <span role="status" className="block text-warn">
           {stopReviewing.armed &&
             `Press the switch again to turn it off. ${waitingReviews} ${waitingReviews === 1 ? "print" : "prints"} waiting for review will be dismissed.`}
@@ -57,7 +57,7 @@ export function StorageTab() {
               </option>
             ))}
           </select>
-          <span className="block text-[0.7rem] leading-relaxed text-text-2">
+          <span className="block text-xs leading-relaxed text-text-2">
             PrintGuard records a frame every 5 seconds, so you can scrub through a print when you review it and add frames it didn't pick. A
             recording is deleted once you send or skip its print. An 8 hour print takes about 100 MB.
           </span>
@@ -86,7 +86,7 @@ export function StorageTab() {
                   {review.status === "ready" && " · waiting for review"}
                 </span>
               </span>
-              <span className="mono text-[0.7rem] text-text-2">{megabytes(review.recording!.bytes)}</span>
+              <span className="mono text-xs text-text-2">{megabytes(review.recording!.bytes)}</span>
               <ConfirmButton aria-label={`Delete the recording of ${monitorName(review.monitor_id)} from ${day(review.started)}`} onConfirm={() => send({ cmd: "recording.delete", ids: [review.id] })}>
                 Delete
               </ConfirmButton>
@@ -102,7 +102,7 @@ export function StorageTab() {
       {engine?.feedback_hub && (
         <div className="flex items-center justify-between gap-3 rounded border border-line-0 px-3 py-2">
           <span className="text-xs text-text-1">Hub ID</span>
-          <span className="mono text-[0.65rem] break-all text-text-2">{engine.feedback_hub}</span>
+          <span className="mono text-xs break-all text-text-2">{engine.feedback_hub}</span>
         </div>
       )}
       <div className="flex justify-end">

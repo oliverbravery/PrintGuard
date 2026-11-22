@@ -11,7 +11,7 @@ export function SnapshotLightbox({ snapshotId, caption, color, onClose }: { snap
         {url ? (
           <img src={url} alt="" className="max-h-full max-w-full object-contain" />
         ) : (
-          <span className="mono boot-cursor text-[0.68rem] uppercase tracking-[0.2em] text-text-2">loading picture</span>
+          <span className="mono boot-cursor text-xs uppercase tracking-[0.2em] text-text-2">loading picture</span>
         )}
         <span id={captionId} className="mono absolute left-6 top-6 text-sm" style={{ color }}>
           {caption}

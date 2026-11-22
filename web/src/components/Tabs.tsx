@@ -12,12 +12,14 @@ export function Tabs<T extends string>({
   tabs,
   value,
   onChange,
+  cells = false,
 }: {
   prefix: string;
   label: string;
   tabs: Tab<T>[];
   value: T;
   onChange: (id: T) => void;
+  cells?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useScrollEdges(ref, tabs.length);
@@ -43,7 +45,14 @@ export function Tabs<T extends string>({
   };
 
   return (
-    <div ref={ref} role="tablist" aria-label={label} onKeyDown={onKeyDown} className="scroll-x flex border-b border-line-0">
+    <div
+      ref={ref}
+      role="tablist"
+      aria-label={label}
+      onKeyDown={onKeyDown}
+      className={cells ? "tabs-cells" : "scroll-x flex border-b border-line-0"}
+      style={cells ? { gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` } : undefined}
+    >
       {tabs.map((t) => (
         <button
           key={t.id}
@@ -54,9 +63,7 @@ export function Tabs<T extends string>({
           aria-controls={`${prefix}-panel-${t.id}`}
           tabIndex={value === t.id ? 0 : -1}
           onClick={() => onChange(t.id)}
-          className={`-mb-px shrink-0 cursor-pointer whitespace-nowrap border-b-2 px-3 py-2.5 pointer-coarse:min-h-11 text-xs transition-colors ${
-            value === t.id ? "border-accent text-text-0" : "border-transparent text-text-2 hover:text-text-1"
-          }`}
+          className="tab"
         >
           {t.label}
         </button>

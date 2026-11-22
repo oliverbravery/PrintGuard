@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import { useStore } from "../store";
 import { Dialog } from "./Dialog";
 
 export function MonitorDialog() {
-  const { engine, send, openDialog, openDetail, isPending } = useStore();
+  const { engine, send, openDialog, isPending } = useStore();
+  const navigate = useNavigate();
   const [name, setName] = useState("");
   const [cameraId, setCameraId] = useState("");
   const [printerId, setPrinterId] = useState("");
@@ -18,9 +20,10 @@ export function MonitorDialog() {
 
   useEffect(() => {
     if (saving || monitorsWhenSent.current === null) return;
-    if (monitors > monitorsWhenSent.current) {
+    const added = engine?.monitors.at(-1);
+    if (monitors > monitorsWhenSent.current && added) {
       close();
-      openDetail(null);
+      navigate(`/monitors/${added.id}`);
     }
     monitorsWhenSent.current = null;
   }, [saving]);
@@ -45,7 +48,7 @@ export function MonitorDialog() {
           ))}
         </select>
         {!cameras.length && (
-          <p className="text-xs text-text-1">No cameras registered yet, add one from the camera registry first.</p>
+          <p className="text-sm text-text-1">No cameras registered yet, so register one on the Cameras page first.</p>
         )}
         <select className="field" aria-label="Printer" value={boundPrinterId} onChange={(e) => setPrinterId(e.target.value)}>
           <option value="">No printer (alerts only)</option>
