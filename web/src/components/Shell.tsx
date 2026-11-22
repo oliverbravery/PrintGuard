@@ -144,7 +144,7 @@ function TopBar() {
   const openDialog = useStore((s) => s.openDialog);
   return (
     <header className="topbar">
-      <Link to="/" className="topbar-brand" aria-label="PrintGuard monitors">
+      <Link to="/" className="topbar-brand">
         <Wordmark size="text-base" />
       </Link>
       <TopNav />
@@ -188,7 +188,7 @@ function Toasts() {
   }, [toasts.length, modal]);
 
   const layer = (
-    <div ref={ref} popover="manual" aria-label="Notifications" className="toasts" data-over-modal={modal ? "" : undefined}>
+    <div ref={ref} popover="manual" className="toasts" data-over-modal={modal ? "" : undefined}>
       {toasts.map((toast) => (
         <div key={toast.id} role={toast.kind === "alert" ? "alert" : "status"} className="toast rise-in" data-kind={toast.kind}>
           {toast.text}

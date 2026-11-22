@@ -185,7 +185,7 @@ export function PrintsPage() {
         )}
       </ListHead>
       {prints.map((print) => (
-        <Link key={print.id} to={`/prints/${print.id}`} aria-current={print.id === selected?.id ? "page" : undefined} className="list-row" aria-label={`View ${print.name}`}>
+        <Link key={print.id} to={`/prints/${print.id}`} aria-current={print.id === selected?.id ? "page" : undefined} className="list-row">
           <Thumbnail print={print} />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-semibold">{print.name}</span>

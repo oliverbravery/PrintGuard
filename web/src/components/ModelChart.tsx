@@ -187,7 +187,7 @@ export function ModelChart({ selected }: { selected?: ModelId }) {
           className="block w-full touch-manipulation"
           style={{ height: HEIGHT }}
           viewBox={`0 0 ${Math.max(width, 1)} ${HEIGHT}`}
-          role="img"
+          role="group"
           aria-label={`${metric.label} against latency for each model`}
           onClick={() => pinned && toggle(pinned)}
         >
