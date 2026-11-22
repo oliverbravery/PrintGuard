@@ -1,62 +1,8 @@
-import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import { camera, dashboard, emit, engine, hub, monitor, pastDoublePress, review, sent } from "./fixtures";
 import { zipSync } from "fflate";
 
 const EMPTY_ZIP = "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==";
-
-const camera = (over = {}) => ({
-  id: "c1", name: "Workshop", source: { kind: "rtsp", url: "rtsp://camera" }, printer_id: null,
-  max_fps: 30, detect_fps: 60, brightness: 1, contrast: 1, sharpness: 0, crop: null, rotation: 0,
-  target_fps: 5, achieved_fps: 5, inferring: false, in_use: true, online: true, standby: false, last_result: null, ...over,
-});
-
-const monitor = (over = {}) => ({
-  id: "m1", name: "Prusa", camera_id: "c1", printer_id: "", enabled: true, threshold: 0.6, consecutive: 3,
-  notify: true, on_defect: "pause", cooldown_s: 90, watching: true, alert: null, ...over,
-});
-
-const engine = (over = {}) => ({
-  version: "test", update: null, cameras: [camera()], printers: [], prints: [], reviews: [], monitors: [monitor()],
-  tokens: [], notifiers: [],
-  integrations: [{ id: "octoprint", label: "OctoPrint", docs_url: "", formats: [], heater_control: true, schema: { properties: {} } }],
-  settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, preheat: [] },
-  stats: { inference_device: "CPU", infer_ms: 1, capacity_fps: 1 },
-  plugins: [], plugin_permissions: [], plugin_events: {}, plugin_assets: {}, ...over,
-});
-
-async function dashboard(page: Page, state: Record<string, unknown> = {}) {
-  await page.goto("/");
-  await page.waitForFunction(() => Boolean((window as any).__pg?.getState().link));
-  await page.evaluate(
-    (state) => {
-      const win = window as any;
-      win.__sent = [];
-      win.__pg.setState({ phase: "ready", link: { send: (cmd: any) => win.__sent.push(cmd), close() {} }, ...state });
-    },
-    { engine: engine(), ...state },
-  );
-}
-
-async function hub(page: Page, onCommand: (command: any, socket: WebSocketRoute) => void = () => {}, state = engine()) {
-  const sockets: WebSocketRoute[] = [];
-  const commands: any[] = [];
-  await page.addInitScript(() => localStorage.setItem("pg.intro.seen", "1"));
-  await page.routeWebSocket(/\/api\/ws$/, (socket) => {
-    sockets.push(socket);
-    socket.onMessage((message) => {
-      const command = JSON.parse(String(message));
-      commands.push(command);
-      onCommand(command, socket);
-    });
-    socket.send(JSON.stringify({ event: "state", ...state }));
-  });
-  await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Prusa" })).toBeVisible();
-  return { sockets, commands };
-}
-
-const pastDoublePress = (page: Page) => page.waitForTimeout(400);
-const sent = (page: Page, cmd: string) => page.evaluate((cmd) => (window as any).__sent.find((c: any) => c.cmd === cmd), cmd);
-const emit = (page: Page, event: Record<string, unknown>) => page.evaluate((event) => (window as any).__pgEvent(event), event);
 
 test("a dropped hub shows in the header, frees its buttons and gets the unsaved edit again", async ({ page }) => {
   const { sockets, commands } = await hub(page);
@@ -250,9 +196,6 @@ test("a history or review sheet closes when what it shows is removed elsewhere",
   expect(await page.evaluate(() => [(window as any).__pg.getState().statsMonitorId, (window as any).__pg.getState().reviewId])).toEqual([null, null]);
 });
 
-const review = (over = {}) => ({
-  id: "r1", monitor_id: "m1", status: "ready", started: 1, ended: 2, frames: 3, bytes: 0, alerts: 1, recording: null, timeline: [], chosen: 0, sent: 0, code: null, retry_at: null, ...over,
-});
 
 test("a tile asks about its last print only", async ({ page }) => {
   await dashboard(page, { engine: engine({ reviews: [review(), review({ id: "r2", status: "dismissed" })] }) });
