@@ -4,6 +4,7 @@ import { useStore } from "../store";
 import { useSubmit } from "../submit";
 import type { AdapterConfig, AdapterMeta, Printer } from "../types";
 import { ConfirmButton } from "./ConfirmButton";
+import { Dialog } from "./Dialog";
 import { AddCell, DetailHead, ListHead, Page, Split } from "./Page";
 import { retypeReason, SchemaForm, savedSecretTitles } from "./SchemaForm";
 import { DeviceStatus, Status } from "./Status";
@@ -106,8 +107,8 @@ function PrinterEditor({ printer }: { printer: Printer }) {
   );
 }
 
-function RegisterPrinter() {
-  const { engine, send, isPending } = useStore();
+export function PrinterDialog() {
+  const { engine, send, isPending, openDialog } = useStore();
   const navigate = useNavigate();
   const integrations = engine?.integrations ?? [];
   const [provider, setProvider] = useState("");
@@ -122,7 +123,10 @@ function RegisterPrinter() {
   useEffect(() => {
     if (busy || printersWhenSent.current === null) return;
     const added = engine?.printers.at(-1);
-    if (printers > printersWhenSent.current && added) navigate(`/printers/${added.id}`, { replace: true });
+    if (printers > printersWhenSent.current && added) {
+      openDialog(null);
+      navigate(`/printers/${added.id}`);
+    }
     printersWhenSent.current = null;
   }, [busy]);
 
@@ -130,45 +134,47 @@ function RegisterPrinter() {
   const incomplete = required.some((key) => !String(config[key] ?? meta?.schema.properties[key]?.default ?? "").trim());
 
   return (
-    <form
-      className="max-w-xl space-y-4 px-4 py-4"
-      onSubmit={(event) => {
-        event.preventDefault();
-        printersWhenSent.current = printers;
-        send({ cmd: "printer.add", printer: { name: name.trim(), model: model.trim(), provider, config } });
-      }}
-    >
-      <select
-        className="field"
-        aria-label="Printer service"
-        value={provider}
-        onChange={(e) => {
-          setProvider(e.target.value);
-          setConfig({});
+    <Dialog title="Register a printer" onClose={() => openDialog(null)}>
+      <form
+        className="space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          printersWhenSent.current = printers;
+          send({ cmd: "printer.add", printer: { name: name.trim(), model: model.trim(), provider, config } });
         }}
       >
-        <option value="">Select a printer service…</option>
-        {integrations.map((i) => (
-          <option key={i.id} value={i.id}>
-            {i.label}
-          </option>
-        ))}
-      </select>
-      {meta && (
-        <>
-          <label className="block">
-            <span className="label mb-1 block">Name</span>
-            <input className="field" placeholder={`Such as ${meta.label} Ender 3`} value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
-          <PrinterModelField value={model} onChange={setModel} />
-          <SchemaForm meta={meta} value={config} onChange={setConfig} />
-          <PrinterTest id={NEW_PRINTER} provider={provider} config={config} />
-          <button type="submit" className="btn btn-primary" disabled={busy || incomplete}>
-            {busy ? "Registering…" : "Register printer"}
-          </button>
-        </>
-      )}
-    </form>
+        <select
+          className="field"
+          aria-label="Printer service"
+          value={provider}
+          onChange={(e) => {
+            setProvider(e.target.value);
+            setConfig({});
+          }}
+        >
+          <option value="">Select a printer service…</option>
+          {integrations.map((i) => (
+            <option key={i.id} value={i.id}>
+              {i.label}
+            </option>
+          ))}
+        </select>
+        {meta && (
+          <>
+            <label className="block">
+              <span className="label mb-1 block">Name</span>
+              <input className="field" placeholder={`Such as ${meta.label} Ender 3`} value={name} onChange={(e) => setName(e.target.value)} />
+            </label>
+            <PrinterModelField value={model} onChange={setModel} />
+            <SchemaForm meta={meta} value={config} onChange={setConfig} />
+            <PrinterTest id={NEW_PRINTER} provider={provider} config={config} />
+            <button type="submit" className="btn btn-primary" disabled={busy || incomplete}>
+              {busy ? "Registering…" : "Register printer"}
+            </button>
+          </>
+        )}
+      </form>
+    </Dialog>
   );
 }
 
@@ -177,13 +183,13 @@ export function PrintersPage() {
   const engine = useStore((s) => s.engine);
   const integrations = engine?.integrations ?? [];
   const printers = engine?.printers ?? [];
-  const adding = printerId === "new";
+  const openDialog = useStore((s) => s.openDialog);
   const chosen = printers.find((printer) => printer.id === printerId);
-  if (printerId && !adding && !chosen) return <Navigate to="/printers" replace />;
-  const selected = adding ? undefined : (chosen ?? printers[0]);
+  if (printerId && !chosen) return <Navigate to="/printers" replace />;
+  const selected = chosen ?? printers[0];
   const list = (
     <>
-      <ListHead title={`Printers · ${printers.length}`} action={<AddCell label="Register a printer" to="/printers/new" current={adding} />} />
+      <ListHead title={`Printers · ${printers.length}`} action={<AddCell label="Register a printer" onClick={() => openDialog("printer")} />} />
       {printers.map((printer) => (
         <Link key={printer.id} to={`/printers/${printer.id}`} aria-current={printer.id === selected?.id ? "page" : undefined} className="list-row">
           <span className="min-w-0 flex-1">
@@ -199,8 +205,8 @@ export function PrintersPage() {
     <PrinterEditor key={selected.id} printer={selected} />
   ) : (
     <>
-      <DetailHead title="Register a printer" />
-      <RegisterPrinter />
+      <DetailHead title="No printers" />
+      <p className="px-4 py-4 text-sm text-text-2">Press + Add to register one.</p>
     </>
   );
   return (

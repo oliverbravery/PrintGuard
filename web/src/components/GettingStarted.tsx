@@ -53,14 +53,14 @@ export function GettingStarted() {
       title: "Register a camera",
       why: "The video source PrintGuard watches.",
       done: engine.cameras.length > 0,
-      to: "/cameras/new",
+      dialog: "camera",
     },
     {
       n: 2,
       title: "Frame the print",
       why: "The model watches a square, so crop it to the print.",
       done: engine.cameras.some((c) => c.crop),
-      to: engine.cameras[0] ? `/cameras/${engine.cameras[0].id}` : "/cameras/new",
+      ...(engine.cameras[0] ? { to: `/cameras/${engine.cameras[0].id}` } : { dialog: "camera" as const }),
       optional: true,
     },
     {
@@ -68,7 +68,7 @@ export function GettingStarted() {
       title: "Connect a printer",
       why: "Lets PrintGuard pause or cancel on a defect.",
       done: engine.printers.length > 0,
-      to: "/printers/new",
+      dialog: "printer",
       optional: true,
     },
     {

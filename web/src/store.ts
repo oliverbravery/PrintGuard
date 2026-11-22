@@ -99,7 +99,7 @@ export interface Toast {
   text: string;
 }
 
-export type DialogKind = "monitor" | "update" | "guide" | "intro" | "report" | null;
+export type DialogKind = "monitor" | "camera" | "printer" | "update" | "guide" | "intro" | "report" | null;
 
 export interface Upload {
   id: number;

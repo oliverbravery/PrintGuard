@@ -11,6 +11,7 @@ import { useCovered } from "./Feed";
 import { NameField } from "./NameField";
 import { SaveStatus } from "./SaveStatus";
 import { Slider } from "./Slider";
+import { Dialog } from "./Dialog";
 import { AddCell, DetailHead, Page, Split } from "./Page";
 import { Segmented } from "./Segmented";
 import { Status } from "./Status";
@@ -195,12 +196,6 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
   const [deviceId, setDeviceId] = useState("");
   const [busy, setBusy] = useState(false);
 
-  useRegistered(() => {
-    setName("");
-    setUrl("");
-    setDeviceId("");
-  });
-
   useEffect(() => {
     if (tab === "browser" && !desktopApp) {
       listVideoInputs()
@@ -234,7 +229,7 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
     ...(desktopApp ? [] : ([["browser", "This browser"]] as Array<[AddTab, string]>)),
   ];
   return (
-    <div className="max-w-xl space-y-4 px-4 py-4">
+    <div className="space-y-4">
       <Segmented label="Source" options={tabs.map(([value, label]) => ({ value, label }))} value={tab} onChange={setTab} />
       {tab === "url" && (
         <form
@@ -303,32 +298,44 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
   );
 }
 
+export function CameraDialog() {
+  const { engine, send, openDialog } = useStore();
+  const navigate = useNavigate();
+  const cameras = engine?.cameras ?? [];
+  const [registeredDevice, setRegisteredDevice] = useState<string | null>(null);
+  const close = () => openDialog(null);
+  useRegistered(() => {
+    const added = cameras.find((camera) => camera.source.device_id === registeredDevice) ?? cameras.at(-1);
+    close();
+    if (added) navigate(`/cameras/${added.id}`);
+  });
+  return (
+    <Dialog title="Register a camera" onClose={close}>
+      <AddCamera
+        onDeviceAdd={(name, source) => {
+          setRegisteredDevice(source.device_id ?? null);
+          send({ cmd: "camera.add", name, source });
+        }}
+      />
+    </Dialog>
+  );
+}
+
 type Group = "cameras" | "printers";
 
 export function CamerasPage() {
   const { cameraId } = useParams();
-  const navigate = useNavigate();
-  const { engine, send, isPending } = useStore();
+  const { engine, send, isPending, openDialog } = useStore();
   const cameras = engine?.cameras ?? [];
-  const adding = cameraId === "new";
   const chosen = cameras.find((camera) => camera.id === cameraId);
   const [group, setGroup] = useState<Group>(chosen?.printer_id ? "printers" : "cameras");
-  const [registeredDevice, setRegisteredDevice] = useState<string | null>(null);
-  useRegistered(() => {
-    const added = cameras.find((camera) => camera.source.device_id === registeredDevice) ?? cameras.at(-1);
-    if (added) navigate(`/cameras/${added.id}`, { replace: true });
-  });
-  if (cameraId && !adding && !chosen) return <Navigate to="/cameras" replace />;
+  if (cameraId && !chosen) return <Navigate to="/cameras" replace />;
   const own = cameras.filter((c) => !c.printer_id);
   const fromPrinters = cameras.filter((c) => c.printer_id);
   const shown = group === "cameras" ? own : fromPrinters;
-  const selected = adding ? undefined : (chosen ?? own[0] ?? fromPrinters[0]);
+  const selected = chosen ?? own[0] ?? fromPrinters[0];
   const hasPrinters = (engine?.printers ?? []).length > 0;
   const refreshing = isPending("printer.cameras.refresh");
-  const registerDevice = (name: string, source: CameraSource) => {
-    setRegisteredDevice(source.device_id ?? null);
-    send({ cmd: "camera.add", name, source });
-  };
   const list = (
     <>
       <div className="flex *:first:min-w-0 *:first:flex-1">
@@ -344,7 +351,7 @@ export function CamerasPage() {
           onChange={setGroup}
         />
         <span className="flex border-b border-rule">
-          <AddCell label="Register a camera" to="/cameras/new" current={adding} />
+          <AddCell label="Register a camera" onClick={() => openDialog("camera")} />
         </span>
       </div>
       <TabPanel prefix="cameras" id={group}>
@@ -369,8 +376,8 @@ export function CamerasPage() {
     <CameraEditor key={selected.id} camera={selected} />
   ) : (
     <>
-      <DetailHead title="Register a camera" />
-      <AddCamera onDeviceAdd={registerDevice} />
+      <DetailHead title="No cameras" />
+      <p className="px-4 py-4 text-sm text-text-2">Press + Add to register one.</p>
     </>
   );
   return (

@@ -6,9 +6,11 @@ import { useStore } from "../store";
 import { applyTheme, GLASS, nextScheme } from "../theme";
 import { useTopModal } from "./Dialog";
 import { GLASS_TUNER, GlassTuner } from "./GlassTuner";
+import { CameraDialog } from "./CamerasPage";
 import { GuideDialog } from "./GuideDialog";
 import { IntroDialog } from "./IntroDialog";
 import { MonitorDialog } from "./MonitorDialog";
+import { PrinterDialog } from "./PrintersPage";
 import { ReportDialog } from "./ReportDialog";
 import { UpdateDialog } from "./UpdateDialog";
 import { UploadSheet } from "./UploadSheet";
@@ -246,6 +248,8 @@ export function Shell() {
       </main>
       <Dock />
       {dialog === "monitor" && <MonitorDialog />}
+      {dialog === "camera" && <CameraDialog />}
+      {dialog === "printer" && <PrinterDialog />}
       {dialog === "update" && <UpdateDialog />}
       {dialog === "guide" && <GuideDialog />}
       {dialog === "intro" && <IntroDialog />}

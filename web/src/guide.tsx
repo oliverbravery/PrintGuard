@@ -126,7 +126,7 @@ export const INTRO: GuideSection[] = [
         bar.
       </>
     ),
-    action: { label: "Register a camera", to: "/cameras/new" },
+    action: { label: "Register a camera", dialog: "camera" },
   },
 ];
 
