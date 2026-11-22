@@ -39,7 +39,6 @@ function PrinterTest({ id, provider, config }: { id: string; provider: string; c
 
 function PrinterEditor({ printer }: { printer: Printer }) {
   const { engine, send, isPending } = useStore();
-  const navigate = useNavigate();
   const [name, setName] = useState(printer.name);
   const [config, setConfig] = useState<AdapterConfig>(printer.config ?? {});
   const integrations = engine?.integrations ?? [];
@@ -57,10 +56,7 @@ function PrinterEditor({ printer }: { printer: Printer }) {
       <DetailHead title={printer.name}>
         <ConfirmButton
           disabled={isPending("printer.remove", printer.id)}
-          onConfirm={() => {
-            send({ cmd: "printer.remove", id: printer.id });
-            navigate("/printers", { replace: true });
-          }}
+          onConfirm={() => send({ cmd: "printer.remove", id: printer.id })}
         >
           {isPending("printer.remove", printer.id) ? "Removing…" : "Remove"}
         </ConfirmButton>

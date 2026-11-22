@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router";
+import { Link, Navigate, useParams } from "react-router";
 import { ACCEPT, acceptedTags, ago, formatBytes, summary } from "../prints";
 import { useStore } from "../store";
 import { tooLargeToDraw, type ToolpathSource } from "../toolpath";
@@ -45,7 +45,6 @@ async function storedGcode(print: PrintFile): Promise<ToolpathSource | null> {
 
 function PrintDetail({ print }: { print: PrintFile }) {
   const { send, isPending, updatePrint } = useStore();
-  const navigate = useNavigate();
   const removing = isPending("print.remove", print.id);
   const toggleTag = (id: string) => {
     const engine = useStore.getState().engine!;
@@ -59,10 +58,7 @@ function PrintDetail({ print }: { print: PrintFile }) {
         <span className="chip">{formatBytes(print.size)}</span>
         <ConfirmButton
           disabled={removing}
-          onConfirm={() => {
-            send({ cmd: "print.remove", id: print.id });
-            navigate("/prints", { replace: true });
-          }}
+          onConfirm={() => send({ cmd: "print.remove", id: print.id })}
         >
           {removing ? "Removing…" : "Remove"}
         </ConfirmButton>

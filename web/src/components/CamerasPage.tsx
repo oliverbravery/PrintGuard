@@ -35,7 +35,6 @@ function useRegistered(onRegistered: () => void) {
 
 function CameraEditor({ camera }: { camera: Camera }) {
   const { engine, send, isPending, updateCamera } = useStore();
-  const navigate = useNavigate();
   const owner = camera.printer_id ? engine?.printers.find((p) => p.id === camera.printer_id) : null;
   const managed = Boolean(owner) || Boolean(camera.declared);
   const removalHint = owner
@@ -52,10 +51,7 @@ function CameraEditor({ camera }: { camera: Camera }) {
         {!managed && (
           <ConfirmButton
             disabled={isPending("camera.remove", camera.id)}
-            onConfirm={() => {
-              send({ cmd: "camera.remove", id: camera.id });
-              navigate("/cameras", { replace: true });
-            }}
+            onConfirm={() => send({ cmd: "camera.remove", id: camera.id })}
           >
             {isPending("camera.remove", camera.id) ? "Removing…" : "Remove"}
           </ConfirmButton>
