@@ -51,18 +51,18 @@ function PrinterModelField({ value, onChange }: { value: string; onChange: (mode
 function PrinterEditor({ printer }: { printer: Printer }) {
   const { engine, send, isPending } = useStore();
   const [name, setName] = useState(printer.name);
-  const [model, setModel] = useState(printer.model);
+  const [model, setModel] = useState(printer.model ?? "");
   const [config, setConfig] = useState<AdapterConfig>(printer.config ?? {});
   const integrations = engine?.integrations ?? [];
   const meta = integrations.find((i) => i.id === printer.provider);
   const save = useSubmit(() => setConfig(printer.config ?? {}));
 
   useEffect(() => setName(printer.name), [printer.id, printer.name]);
-  useEffect(() => setModel(printer.model), [printer.id, printer.model]);
+  useEffect(() => setModel(printer.model ?? ""), [printer.id, printer.model]);
   useEffect(() => setConfig(printer.config ?? {}), [printer.id]);
 
   const retype = meta ? retypeReason(config, printer.config ?? {}, savedSecretTitles(meta, printer.secrets_set ?? [])) : null;
-  const dirty = name.trim() !== printer.name || model.trim() !== printer.model || JSON.stringify(config) !== JSON.stringify(printer.config ?? {});
+  const dirty = name.trim() !== printer.name || model.trim() !== (printer.model ?? "") || JSON.stringify(config) !== JSON.stringify(printer.config ?? {});
 
   return (
     <>
@@ -139,8 +139,11 @@ export function PrinterDialog() {
         className="space-y-4"
         onSubmit={(event) => {
           event.preventDefault();
+          if (!meta || busy || incomplete) return;
           printersWhenSent.current = printers;
-          send({ cmd: "printer.add", printer: { name: name.trim(), model: model.trim(), provider, config } });
+          if (send({ cmd: "printer.add", printer: { name: name.trim(), model: model.trim(), provider, config } }) === null) {
+            printersWhenSent.current = null;
+          }
         }}
       >
         <select
@@ -189,7 +192,7 @@ export function PrintersPage() {
   const selected = chosen ?? printers[0];
   const list = (
     <>
-      <ListHead title={`Printers · ${printers.length}`} action={<AddCell label="Register a printer" onClick={() => openDialog("printer")} />} />
+      <ListHead title={`Printers · ${printers.length}`} action={<AddCell label="Add printer" onClick={() => openDialog("printer")} />} />
       {printers.map((printer) => (
         <Link key={printer.id} to={`/printers/${printer.id}`} aria-current={printer.id === selected?.id ? "page" : undefined} className="list-row">
           <span className="min-w-0 flex-1">

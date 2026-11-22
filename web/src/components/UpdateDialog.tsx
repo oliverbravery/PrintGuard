@@ -1,6 +1,7 @@
 import { renderMarkdown } from "../markdown";
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
+import { webUrl } from "../urls";
 import { CopyButton } from "./CopyButton";
 import { Dialog } from "./Dialog";
 import { NewTab } from "./NewTab";
@@ -21,6 +22,8 @@ export function UpdateDialog() {
 
   const release = releases.find((entry) => entry.version === selected) ?? releases[0] ?? null;
   const date = release?.published_at ? new Date(release.published_at).toLocaleDateString() : null;
+  const releasesUrl = webUrl(update?.releases_url ?? release?.url ?? "");
+  const downloadUrl = update?.download ? webUrl(update.download) : null;
 
   return (
     <Dialog title={available ? "Update available" : "Updates"} onClose={() => openDialog(null)}>
@@ -70,23 +73,25 @@ export function UpdateDialog() {
               className="changelog max-h-[40dvh] overflow-y-auto pr-1"
               dangerouslySetInnerHTML={{ __html: renderMarkdown(release.notes || "_No release notes._", { base: release.files_url }) }}
             />
-            <a
-              href={update?.releases_url ?? release.url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-xs text-accent underline hover:opacity-80 inline-block"
-            >
-              All releases on GitHub <NewTab />
-            </a>
+            {releasesUrl && (
+              <a
+                href={releasesUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-accent underline hover:opacity-80 inline-block"
+              >
+                All releases on GitHub <NewTab />
+              </a>
+            )}
           </div>
         )}
 
         {available && (
           <div className="hairline pt-4 space-y-2">
             <span className="label block">Update the hub</span>
-            {update!.download ? (
+            {downloadUrl ? (
               <>
-                <a className="btn btn-primary inline-block" href={update!.download} target="_blank" rel="noreferrer">
+                <a className="btn btn-primary inline-block" href={downloadUrl} target="_blank" rel="noreferrer">
                   Download v{update!.latest} <NewTab />
                 </a>
                 <p className="text-xs text-text-2">

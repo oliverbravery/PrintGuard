@@ -49,8 +49,12 @@ export function ReportDialog() {
         toast("error", `Attachments are capped at ${MAX_TOTAL_BYTES / 1024 / 1024} MB per report, so ${file.name} was skipped`);
         continue;
       }
-      total += file.size;
-      added.push(await readAttachment(file));
+      try {
+        added.push(await readAttachment(file));
+        total += file.size;
+      } catch {
+        toast("error", `Could not read ${file.name}`);
+      }
     }
     setAttachments((current) => [...current, ...added]);
   };

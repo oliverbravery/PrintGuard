@@ -31,6 +31,7 @@ export const engine = (over = {}) => ({
 });
 
 export async function dashboard(page: Page, state: Record<string, unknown> = {}, route = "/") {
+  await page.routeWebSocket(/\/api\/ws$/, () => {});
   await page.goto(`/#${route}`);
   await page.waitForFunction(() => Boolean((window as any).__pg?.getState().link));
   await page.evaluate(

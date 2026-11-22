@@ -17,7 +17,7 @@ export function PrinterTags({ selected, ext, onToggle }: { selected: string[]; e
             <button
               key={printer.id}
               type="button"
-              className={`chip cursor-pointer hover:opacity-80 ${on ? "chip-accent" : ""} ${accepts ? "" : "opacity-40"}`}
+              className={`chip ${accepts ? "cursor-pointer hover:opacity-80" : "cursor-not-allowed opacity-40"} ${on ? "chip-accent" : ""}`}
               aria-pressed={on}
               disabled={!accepts}
               title={accepts ? `${on ? "Untag" : "Tag"} for ${printer.name}` : undefined}

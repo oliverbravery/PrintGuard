@@ -66,6 +66,7 @@ export function ApiTab() {
         className="space-y-2"
         onSubmit={(event) => {
           event.preventDefault();
+          if (!tokenName.trim() || isPending("token.create")) return;
           createToken.submit({ cmd: "token.create", name: tokenName.trim(), scope: tokenScope });
         }}
       >

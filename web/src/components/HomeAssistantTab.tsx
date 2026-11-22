@@ -12,8 +12,9 @@ export function HomeAssistantTab() {
   const saveBroker = useSubmit(() => setMqtt(engine?.settings.mqtt ?? {}));
   const setMqttField = (key: keyof MqttConfig, value: MqttConfig[keyof MqttConfig]) => setMqtt({ ...mqtt, [key]: value });
   const savedPassword = engine?.secrets_set?.mqtt.includes("password") ?? false;
-  const brokerProblem =
-    mqtt.enabled && !mqtt.host?.trim()
+  const brokerProblem = !mqtt.enabled
+    ? null
+    : !mqtt.host?.trim()
       ? "Enter the broker host."
       : retypeReason(mqtt, engine?.settings.mqtt ?? {}, savedPassword ? { password: "Password" } : {});
   return (
@@ -97,7 +98,7 @@ export function HomeAssistantTab() {
       <button
         className="btn btn-primary"
         disabled={isPending("settings.update") || brokerProblem !== null}
-        onClick={() => saveBroker.submit({ cmd: "settings.update", patch: { mqtt } })}
+        onClick={() => saveBroker.submit({ cmd: "settings.update", patch: { mqtt: mqtt.enabled ? mqtt : { ...(engine?.settings.mqtt ?? {}), enabled: false } } })}
       >
         {isPending("settings.update") ? "Saving…" : "Save broker settings"}
       </button>

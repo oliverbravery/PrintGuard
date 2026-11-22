@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'sha256-an2NNFC/5NpDI9sUnvp5EtciwG/5oCPC45y/XwDhsDE=' blob: 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
+      content="default-src 'none'; script-src 'sha256-GTX26voUrLqlQXk2/k0eb7i/SlErbc794WPq86CMBzs=' blob: 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
     />
     <title>PrintGuard plugin panel</title>
     <style>
@@ -25,6 +25,11 @@
           } catch {
             /* frozen on some engines; the policy above is what actually closes all but WebRTC */
           }
+        }
+        try {
+          delete Navigator.prototype.sendBeacon;
+        } catch {
+          /* as above */
         }
 
         const listeners = new Map();

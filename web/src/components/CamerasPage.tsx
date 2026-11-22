@@ -146,7 +146,8 @@ function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSou
   });
   const devices = (discovered ?? []).filter((s) => s.kind === "device");
   const register = () => {
-    const device = devices.find((d) => d.device_id === deviceId)!;
+    const device = devices.find((d) => d.device_id === deviceId);
+    if (!device || busy) return;
     onAdd(name || device.label || "Camera", { kind: "device", device_id: deviceId, label: device.label });
   };
   return (
@@ -195,31 +196,48 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState("");
   const [busy, setBusy] = useState(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (tab === "browser" && !desktopApp) {
       listVideoInputs()
-        .then(setDevices)
+        .then((inputs) => mounted.current && setDevices(inputs))
         .catch((err) => toast("error", `camera access: ${err instanceof Error ? err.message : err}`));
     }
   }, [tab]);
 
   const publish = async () => {
+    if (!deviceId || busy || isPending("camera.add")) return;
     setBusy(true);
     try {
       const path = `dev-${slug(name || "camera")}-${Date.now().toString(36)}`;
-      const { hlsPlayable } = await publishStream(path, deviceId, (reason) =>
+      const { stop, hlsPlayable } = await publishStream(path, deviceId, (reason) =>
         toast("error", `publishing stopped: ${reason}`),
       );
+      if (!mounted.current) {
+        stop();
+        return;
+      }
       if (!hlsPlayable) {
         toast("alert", "This browser records VP8, which the dashboard can't play, so this camera is monitored but has no live view. Chrome, Edge and Safari record H.264.");
       }
       await new Promise((r) => setTimeout(r, 800));
+      if (!mounted.current) {
+        stop();
+        return;
+      }
       addPublishedCamera(name || "Published camera", path);
     } catch (err) {
       toast("error", `publish failed: ${err}`);
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   };
 
@@ -236,6 +254,7 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
           className="space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
+            if (!url.trim() || isPending("camera.add")) return;
             send({ cmd: "camera.add", name: name || "Stream", source: { kind: "url", url: url.trim() } });
           }}
         >
@@ -305,7 +324,7 @@ export function CameraDialog() {
   const [registeredDevice, setRegisteredDevice] = useState<string | null>(null);
   const close = () => openDialog(null);
   useRegistered(() => {
-    const added = cameras.find((camera) => camera.source.device_id === registeredDevice) ?? cameras.at(-1);
+    const added = (registeredDevice ? cameras.find((camera) => camera.source.device_id === registeredDevice) : undefined) ?? cameras.at(-1);
     close();
     if (added) navigate(`/cameras/${added.id}`);
   });
@@ -329,6 +348,9 @@ export function CamerasPage() {
   const cameras = engine?.cameras ?? [];
   const chosen = cameras.find((camera) => camera.id === cameraId);
   const [group, setGroup] = useState<Group>(chosen?.printer_id ? "printers" : "cameras");
+  useEffect(() => {
+    if (chosen) setGroup(chosen.printer_id ? "printers" : "cameras");
+  }, [chosen?.id, chosen?.printer_id]);
   if (cameraId && !chosen) return <Navigate to="/cameras" replace />;
   const own = cameras.filter((c) => !c.printer_id);
   const fromPrinters = cameras.filter((c) => c.printer_id);
@@ -351,7 +373,7 @@ export function CamerasPage() {
           onChange={setGroup}
         />
         <span className="flex border-b border-rule">
-          <AddCell label="Register a camera" onClick={() => openDialog("camera")} />
+          <AddCell label="Add camera" onClick={() => openDialog("camera")} />
         </span>
       </div>
       <TabPanel prefix="cameras" id={group}>

@@ -32,6 +32,7 @@ function readZip(file: File): Promise<string> {
 
 export function PluginIcon({ url, name, size }: { url: string | null; name: string; size: number }) {
   const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [url]);
   if (!url || broken) {
     return (
       <span
@@ -117,9 +118,10 @@ function EnableToggle({ plugin }: { plugin: PluginRecord }) {
 const IMAGE_TYPES: Record<string, string> = { png: "png", jpg: "jpeg", jpeg: "jpeg", webp: "webp", gif: "gif", svg: "svg+xml" };
 
 function dataUrl(page: Record<string, string>, path: string | undefined): string | null {
-  const data = path ? page[path] : undefined;
+  const data = path && Object.hasOwn(page, path) ? page[path] : undefined;
   if (!data || !path) return null;
-  const kind = IMAGE_TYPES[path.split(".").pop()!.toLowerCase()] ?? "png";
+  const ext = path.split(".").pop()!.toLowerCase();
+  const kind = Object.hasOwn(IMAGE_TYPES, ext) ? IMAGE_TYPES[ext] : "png";
   return `data:image/${kind};base64,${data}`;
 }
 
@@ -286,14 +288,19 @@ function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () 
 
   useEffect(() => {
     if (!fromRepo) return;
+    setFetched(undefined);
     const stop = new AbortController();
     const url = pluginFile(plugin.source, "README.md");
     if (!url) return setFetched(null);
     fetch(url, { signal: stop.signal })
-      .then(async (answer) => setFetched(answer.ok ? await answer.text() : null))
-      .catch(() => setFetched(null));
+      .then(async (answer) => {
+        if (!stop.signal.aborted) setFetched(answer.ok ? await answer.text() : null);
+      })
+      .catch(() => {
+        if (!stop.signal.aborted) setFetched(null);
+      });
     return () => stop.abort();
-  }, [plugin.id]);
+  }, [plugin.id, plugin.source.ref]);
 
   const origin = fromRepo
     ? `${plugin.source.repo}${plugin.source.path ? `/${plugin.source.path}` : ""} @ ${String(plugin.source.ref).slice(0, 7)}`
@@ -426,12 +433,16 @@ function StoreDetail({ entry, installed }: { entry: CatalogueEntry; installed: b
       return answer.ok ? answer : null;
     };
     grab("README.md")
-      .then(async (answer) => setReadme(answer ? await answer.text() : null))
-      .catch(() => setReadme(null));
+      .then(async (answer) => {
+        if (!stop.signal.aborted) setReadme(answer ? await answer.text() : null);
+      })
+      .catch(() => {
+        if (!stop.signal.aborted) setReadme(null);
+      });
     grab("plugin.json")
       .then(async (answer) => {
         const raw = answer ? await answer.json() : null;
-        if (raw && typeof raw === "object") setManifest(readableManifest(entry, raw));
+        if (!stop.signal.aborted && raw && typeof raw === "object") setManifest(readableManifest(entry, raw));
       })
       .catch(() => {});
     return () => stop.abort();
@@ -502,9 +513,9 @@ export function PluginsTab() {
   });
 
   const opened = items.find((item) => item.id === openId);
-  if (opened?.plugin) return <InstalledDetail plugin={opened.plugin} onBack={() => setOpenId(null)} />;
+  if (opened?.plugin) return <InstalledDetail key={opened.id} plugin={opened.plugin} onBack={() => setOpenId(null)} />;
   if (opened?.entry) {
-    return <StoreDetail entry={opened.entry} installed={false} />;
+    return <StoreDetail key={opened.id} entry={opened.entry} installed={false} />;
   }
 
   const installFromRepo = () => {
@@ -587,6 +598,7 @@ export function PluginsTab() {
         className="flex gap-2"
         onSubmit={(event) => {
           event.preventDefault();
+          if (!repo.trim() || isPending("plugin.install")) return;
           installFromRepo();
         }}
       >
@@ -609,7 +621,11 @@ export function PluginsTab() {
             event.target.value = "";
             if (!chosen) return;
             if (chosen.size > MAX_ZIP_BYTES) return toast("error", `${chosen.name} is over 12 MB, the most a plugin can be`);
-            installPlugin({ kind: "file", filename: chosen.name }, await readZip(chosen));
+            try {
+              installPlugin({ kind: "file", filename: chosen.name }, await readZip(chosen));
+            } catch {
+              toast("error", `Could not read ${chosen.name}`);
+            }
           }}
         />
         <span className="text-xs text-text-2">A .zip containing plugin.json plus plugin.js or worker.js.</span>

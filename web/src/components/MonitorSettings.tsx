@@ -19,7 +19,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export function MonitorSettings({ monitor }: { monitor: Monitor }) {
   const { engine, send, isPending, updateMonitor } = useStore();
   const settingsPanels = usePluginSurface("settings", monitor.id);
-  const removing = isPending("monitor.remove");
+  const removing = isPending("monitor.remove", monitor.id);
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
   return (

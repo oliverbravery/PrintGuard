@@ -101,7 +101,7 @@ export function CropEditor({
           keepSelection
           disabled={!editing}
           onChange={(_, percent) => setDraft(percent)}
-          onComplete={(_, percent) => onChange(fromPercent(percent))}
+          onComplete={(_, percent) => percent.width > 0 && percent.height > 0 && onChange(fromPercent(percent))}
         >
           <Feed camera={camera} active={active} aspect={aspect} uncropped onFrameSize={measureFrame}>
             {squares.length > 1 &&

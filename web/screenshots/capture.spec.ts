@@ -250,8 +250,8 @@ async function openReview(page: Page): Promise<void> {
     },
     { review: REVIEW, frames: REVIEW_FRAMES, timeline: REVIEW_TIMELINE, pictures: FRAMES },
   );
-  await page.getByRole("radio", { name: "No, something went wrong" }).check();
-  await page.getByRole("button", { name: /^Frame \d+ of \d+ at .* marked Good/ }).last().click();
+  await page.getByRole("button", { name: /^Something went wrong in/ }).last().click();
+  await page.getByRole("button", { name: /^Something went wrong in/ }).nth(-2).click();
 }
 
 const HISTORY_SNAPS = [0.86, 0.91, 0.78].map((score, index) => ({ id: `h${index}`, ts: NOW / 1000 - 120 - index * 1500, score, action: index === 2 ? "none" : "pause" }));
@@ -702,8 +702,9 @@ const PLUGIN_SHOTS: PluginShot[] = [
   {
     id: "alert-sounds",
     file: "settings.png",
-    scene: { width: 1000, height: 1400, route: "/monitors/m1/edit", plugins: ["alert-sounds", "progress-reports"], mutate: surfaces },
+    scene: { width: 1000, height: 1400, route: "/monitors/m1", plugins: ["alert-sounds", "progress-reports"], mutate: surfaces },
     prepare: async (page) => {
+      await page.getByRole("tab", { name: "Configure" }).click();
       await page.locator("section").filter({ hasText: "Alert sounds" }).getByRole("switch").click();
       await page.waitForTimeout(500);
     },
@@ -712,8 +713,9 @@ const PLUGIN_SHOTS: PluginShot[] = [
   {
     id: "progress-reports",
     file: "settings.png",
-    scene: { width: 1000, height: 1400, route: "/monitors/m1/edit", plugins: ["alert-sounds", "progress-reports"], mutate: surfaces },
+    scene: { width: 1000, height: 1400, route: "/monitors/m1", plugins: ["alert-sounds", "progress-reports"], mutate: surfaces },
     prepare: async (page) => {
+      await page.getByRole("tab", { name: "Configure" }).click();
       await page.locator("section").filter({ hasText: "Progress reports" }).getByRole("switch").click();
       await page.waitForTimeout(500);
     },

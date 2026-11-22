@@ -48,7 +48,7 @@ function PrintDetail({ print }: { print: PrintFile }) {
   const removing = isPending("print.remove", print.id);
   const toggleTag = (id: string) => {
     const engine = useStore.getState().engine!;
-    const tags = acceptedTags(engine, engine.prints.find((p) => p.id === print.id)!.printer_ids, print.ext);
+    const tags = acceptedTags(engine, (engine.prints.find((p) => p.id === print.id) ?? print).printer_ids, print.ext);
     updatePrint(print.id, { printer_ids: tags.includes(id) ? tags.filter((p) => p !== id) : [...tags, id] });
   };
   return (
@@ -111,8 +111,12 @@ function DropZone() {
   return (
     <div
       className={`border border-dashed px-4 py-4 text-center transition-colors ${over ? "border-accent bg-ink-1" : "border-line-1"}`}
-      onDragOver={() => setOver(true)}
-      onDragLeave={() => setOver(false)}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes("Files")) setOver(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver(false);
+      }}
     >
       <input
         ref={input}

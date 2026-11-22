@@ -28,7 +28,11 @@ function PluginRow({ plugin, handle, visible, group }: { plugin: PluginRecord; h
   const failure = useStore((s) => s.pluginFailures[plugin.id]) ?? plugin.failure;
   const panel = plugin.files.includes("panel.html");
   const item = tree?.type === "item" ? tree : null;
-  const image = item?.image?.startsWith("data:") ? item.image : assets?.[item?.image ?? ""];
+  const image = item?.image?.startsWith("data:")
+    ? item.image
+    : item?.image && assets && Object.hasOwn(assets, item.image)
+      ? assets[item.image]
+      : undefined;
   const name = (
     <span className="flex items-center gap-2">
       <h3 className="label truncate">{plugin.manifest.name}</h3>
@@ -58,7 +62,7 @@ function PluginRow({ plugin, handle, visible, group }: { plugin: PluginRecord; h
         ) : tree ? (
           <PluginNodeView plugin={plugin} node={tree} panel={panel} />
         ) : (
-          !panel && <span className="text-sm text-text-2">{failure ?? "Starting"}</span>
+          (failure || !panel) && <span className="text-sm text-text-2">{failure ?? "Starting"}</span>
         )}
         {panel && <PluginWebview plugin={plugin} hidden={Boolean(tree)} />}
       </div>

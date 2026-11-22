@@ -1,15 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export function NameField({ name, onRename }: { name: string; onRename: (name: string) => void }) {
   const [draft, setDraft] = useState(name);
+  const dirty = useRef(false);
+  const commitRef = useRef(() => {});
 
-  useEffect(() => setDraft(name), [name]);
+  useEffect(() => {
+    dirty.current = false;
+    setDraft(name);
+  }, [name]);
 
   const commit = () => {
+    if (!dirty.current) return;
+    dirty.current = false;
     const next = draft.trim();
     if (next && next !== name) onRename(next);
     else setDraft(name);
   };
+  commitRef.current = commit;
+
+  useEffect(() => () => commitRef.current(), []);
 
   return (
     <label className="block">
@@ -17,7 +27,10 @@ export function NameField({ name, onRename }: { name: string; onRename: (name: s
       <input
         className="field"
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => {
+          dirty.current = true;
+          setDraft(e.target.value);
+        }}
         onBlur={commit}
         onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
       />

@@ -21,16 +21,13 @@ const ROUTES = [
   "/",
   "/monitors/m2",
   "/monitors/m1/history",
-  "/monitors/m1/edit",
   "/monitors/m1/review/r1",
   "/prints",
   "/prints/f1",
   "/cameras",
   "/cameras/c1",
-  "/cameras/new",
   "/printers",
   "/printers/p1",
-  "/printers/new",
   "/settings",
   "/settings/appearance",
   "/settings/alerts",
@@ -42,7 +39,7 @@ const ROUTES = [
   "/settings/storage",
 ];
 
-const DIALOGS = ["monitor", "guide", "intro", "report", "update"];
+const DIALOGS = ["monitor", "camera", "printer", "guide", "intro", "report", "update"];
 
 const VIEWPORTS = [
   { name: "phone", width: 390, height: 844 },

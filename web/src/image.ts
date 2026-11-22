@@ -86,6 +86,7 @@ export function renderVideoFrame(
 ): void {
   const vw = video.videoWidth;
   const vh = video.videoHeight;
+  if (!vw || !vh) return;
   const rotation = ((((opts.rotation ?? 0) % 360) + 360) % 360);
   const swap = rotation === 90 || rotation === 270;
   const rw = swap ? vh : vw;
@@ -94,11 +95,13 @@ export function renderVideoFrame(
   const cy = opts.crop ? opts.crop.y * rh : 0;
   const cropW = opts.crop ? opts.crop.w * rw : rw;
   const cropH = opts.crop ? opts.crop.h * rh : rh;
+  if (cropW <= 0 || cropH <= 0) return;
   const cw = canvas.parentElement?.clientWidth || cropW;
   const ch = canvas.parentElement?.clientHeight || cropH;
   const scale = Math.min(cw / cropW, ch / cropH);
   const dw = Math.round(cropW * scale);
   const dh = Math.round(cropH * scale);
+  if (dw <= 0 || dh <= 0) return;
   if (canvas.width !== dw || canvas.height !== dh) {
     canvas.width = dw;
     canvas.height = dh;

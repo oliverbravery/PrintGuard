@@ -54,15 +54,17 @@ test("a failing print is caught end to end", async ({ page, baseURL, cameraUrl }
 
   await page.getByRole("link", { name: "Cameras", exact: true }).click();
   for (const feed of FEEDS) {
-    await page.getByRole("link", { name: "+ Register a camera" }).click();
-    await page.getByPlaceholder("Name").fill(feed.camera);
-    await page.getByPlaceholder(/stream URL/).fill(`${cameraUrl}/${feed.path}`);
-    await page.getByRole("button", { name: "Register stream" }).click();
+    await page.getByRole("button", { name: "Add camera" }).click();
+    const form = page.getByRole("dialog", { name: "Register a camera" });
+    await form.getByPlaceholder("Name").fill(feed.camera);
+    await form.getByPlaceholder(/stream URL/).fill(`${cameraUrl}/${feed.path}`);
+    await form.getByRole("button", { name: "Register stream" }).click();
     await expect(page.getByRole("heading", { name: feed.camera, exact: true })).toBeVisible({ timeout: 60_000 });
   }
 
-  for (const feed of FEEDS) {
-    await page.getByRole("button", { name: "Add monitor" }).click();
+  await page.getByRole("link", { name: "Monitors", exact: true }).click();
+  for (const [index, feed] of FEEDS.entries()) {
+    await page.getByRole("button", { name: index === 0 ? "Open Add a monitor" : "Add monitor" }).click();
     const form = page.getByRole("dialog", { name: "Add monitor" });
     await form.getByPlaceholder("Monitor name").fill(feed.monitor);
     const camera = await form.locator("option", { hasText: feed.camera }).getAttribute("value");

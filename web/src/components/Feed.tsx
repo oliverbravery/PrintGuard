@@ -105,7 +105,7 @@ export function Feed({
               </span>
             )}
             {tapToPlay && (
-              <button className={`${compact ? "btn-inline" : "btn"} pointer-events-auto relative z-[3]`} onClick={() => void videoRef.current?.play()}>
+              <button className={`${compact ? "btn-inline" : "btn"} pointer-events-auto relative z-[3]`} onClick={() => void videoRef.current?.play().catch(() => undefined)}>
                 {compact ? "Play" : "Tap to play"}
               </button>
             )}

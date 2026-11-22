@@ -17,7 +17,7 @@ export function RiskMeter({ score, threshold, size = "row" }: { score: number | 
       </span>
       <span className={`block min-w-0 flex-1 ${hero ? "pb-1" : ""}`}>
         <span className={`relative block border border-line-0 bg-ink-1 ${hero ? "h-2" : "h-1.5"}`}>
-          <span className="block h-full transition-[width] duration-500" style={{ width: `${percent(Math.min(1, score ?? 0))}%`, background: colour }} />
+          <span className="block h-full transition-[width] duration-500" style={{ width: `${percent(Math.min(1, Math.max(0, score ?? 0)))}%`, background: colour }} />
           <span className="absolute -inset-y-1 w-0.5 bg-text-0" style={{ left: `${percent(threshold)}%` }} />
         </span>
         {hero && (

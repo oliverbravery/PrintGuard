@@ -734,17 +734,17 @@ a.topbar-readout:hover {
   inset: auto;
   overflow: visible;
   position-anchor: --theme-chip;
-  position-area: block-end span-inline-end;
-  position-try-fallbacks: flip-block;
-  justify-self: start;
+  position-area: block-end span-inline-start;
+  position-try-fallbacks: flip-block, flip-inline;
+  justify-self: end;
   align-self: start;
   --tuner-tail: 0.8rem;
-  margin: 0.7rem 0.75rem 0 0;
+  margin: 0.7rem 0 0 0.75rem;
   padding: 0.85rem 1rem 1rem;
   width: 18rem;
-  max-width: 100%;
+  max-width: calc(100vw - 1.5rem);
   color: var(--color-text-0);
-  transform-origin: top left;
+  transform-origin: top right;
   opacity: 0;
   transform: translateY(-0.4rem) scale(0.94);
   transition:
@@ -769,7 +769,7 @@ a.topbar-readout:hover {
 .tuner::after {
   content: "";
   position: absolute;
-  left: 0.9rem;
+  right: 0.9rem;
   top: calc(var(--tuner-tail) / -2);
   width: var(--tuner-tail);
   height: var(--tuner-tail);
@@ -790,7 +790,7 @@ a.topbar-readout:hover {
 @supports not (anchor-name: --theme-chip) {
   .tuner {
     top: 3.25rem;
-    left: 1rem;
+    right: 1rem;
   }
 
   .tuner::after {
@@ -1127,6 +1127,7 @@ dialog.modal::backdrop {
 .cell-action:disabled {
   background: var(--color-ink-1);
   color: var(--color-text-2);
+  pointer-events: none;
 }
 
 .cell-action.btn-armed {

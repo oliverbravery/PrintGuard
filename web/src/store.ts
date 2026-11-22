@@ -389,7 +389,8 @@ export const useStore = create<PgStore>((set, get) => {
           get().toast("info", `${plugin.manifest.name}: ${String(effect.text ?? "").slice(0, MAX_NOTICE_CHARS)}`);
         }
       } else if (effect.kind === "sound") {
-        const file = effect.asset ? get().pluginAssets[id]?.[effect.asset] : undefined;
+        const assets = get().pluginAssets[id];
+        const file = effect.asset && assets && Object.hasOwn(assets, effect.asset) ? assets[effect.asset] : undefined;
         if (!plugin.granted.includes("sound")) continue;
         if (effect.asset) file && playFile(file);
         else play(effect.tones ?? []);
@@ -450,6 +451,7 @@ export const useStore = create<PgStore>((set, get) => {
       pluginAssets: drop(s.pluginAssets),
       pluginTrees: drop(s.pluginTrees),
       pluginViews: drop(s.pluginViews),
+      pluginFailures: drop(s.pluginFailures),
       pluginPages: keepPage ? s.pluginPages : drop(s.pluginPages),
     }));
   };
@@ -526,7 +528,8 @@ export const useStore = create<PgStore>((set, get) => {
     const files: Record<string, string> = {};
     const text: Record<string, string> = {};
     for (const [name, data] of Object.entries(assets)) {
-      const type = types[name.split(".").pop() ?? ""];
+      const ext = name.split(".").pop() ?? "";
+      const type = Object.hasOwn(types, ext) ? types[ext] : undefined;
       if (!type) continue;
       const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
       blobs[name] = new Blob([bytes], { type });

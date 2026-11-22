@@ -115,16 +115,18 @@ export function sandboxFrame(
   title: string,
   receive: (data: any) => void,
   fail: (reason: string) => void,
-): { frame: HTMLIFrameElement; port: MessagePort; started: Promise<void> } {
+): { frame: HTMLIFrameElement; port: MessagePort; started: Promise<void>; stop: () => void } {
   const frame = document.createElement("iframe");
   const { port1, port2 } = new MessageChannel();
   frame.src = url;
   frame.sandbox.add("allow-scripts");
   frame.allow = "";
+  frame.referrerPolicy = "no-referrer";
   frame.title = title;
   port1.onmessage = (message) => receive(message.data);
+  let timer = 0;
   const started = new Promise<void>((resolve) => {
-    const timer = window.setTimeout(() => fail("sandbox did not start"), BOOT_TIMEOUT_MS);
+    timer = window.setTimeout(() => fail("sandbox did not start"), BOOT_TIMEOUT_MS);
     let loaded = false;
     frame.addEventListener("load", () => {
       if (loaded) return fail("sandbox navigated away");
@@ -134,7 +136,7 @@ export function sandboxFrame(
       resolve();
     });
   });
-  return { frame, port: port1, started };
+  return { frame, port: port1, started, stop: () => clearTimeout(timer) };
 }
 
 export interface StoreChanges {
@@ -155,6 +157,7 @@ export class PluginHost {
   private lastUpdate = "";
   private frame: HTMLIFrameElement;
   private port: MessagePort;
+  private stopBoot: () => void;
   private pending = new Map<number, { resolve: (value: any) => void; reject: (reason: Error) => void; timer: number }>();
   private booted: Promise<void>;
   private dead = false;
@@ -170,6 +173,7 @@ export class PluginHost {
     const sandbox = sandboxFrame(SANDBOX_URL, `${record.manifest.name} sandbox`, this.receive, (reason) => this.fail(reason));
     this.frame = sandbox.frame;
     this.port = sandbox.port;
+    this.stopBoot = sandbox.stop;
     this.frame.hidden = true;
     this.frame.style.display = "none";
     document.body.appendChild(this.frame);
@@ -243,6 +247,7 @@ export class PluginHost {
 
   close(): void {
     this.dead = true;
+    this.stopBoot();
     this.port.close();
     this.frame.remove();
     for (const call of this.pending.values()) clearTimeout(call.timer);

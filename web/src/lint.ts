@@ -2,7 +2,7 @@ import { parse } from "acorn";
 import { simple } from "acorn-walk";
 import { parseFragment } from "parse5";
 import type { Permission, PluginManifest } from "./types";
-import { isLocalAddress, matches, reachesLocal } from "./urls.ts";
+import { isLocalAddress, matches, reachesLocal, webUrl } from "./urls.ts";
 
 export interface Finding {
   kind: "unused" | "undeclared" | "dynamic";
@@ -87,7 +87,8 @@ function callsIn(code: string, tables: Tables, owners: string[]): { calls: Call[
       if (GLOBAL_APIS.includes(node.computed ? node.property?.value : node.property?.name)) renamed = true;
       const inner = node.object;
       if (inner?.type === "MemberExpression" && owners.includes(inner.object?.name) && inner.property?.name === "state") {
-        const reads = tables.collections[node.property?.name];
+        const prop = node.property?.name;
+        const reads = prop && Object.hasOwn(tables.collections, prop) ? tables.collections[prop] : undefined;
         if (reads) calls.push({ permission: reads, url: null, link: null, dynamic: null });
       }
     },
@@ -97,30 +98,31 @@ function callsIn(code: string, tables: Tables, owners: string[]): { calls: Call[
       called.add(callee);
       const owner = callee.object?.name;
       const method = callee.property?.name;
-      if (owner === "plugin" && method in CONTEXT_PARAMETER) {
+      if (owner === "plugin" && method && Object.hasOwn(CONTEXT_PARAMETER, method)) {
         const handler = node.arguments.at(-1);
         const inline = handler?.type === "ArrowFunctionExpression" || handler?.type === "FunctionExpression";
         const context = (parameter: any, at: number) => parameter.type === "Identifier" && (parameter.name === "ctx") === (at === CONTEXT_PARAMETER[method]);
         if (!inline || !handler.params.every(context)) renamed = true;
       }
-      if (owner === "plugin" && PLUGIN_PERMISSIONS[method]) {
+      if (owner === "plugin" && method && Object.hasOwn(PLUGIN_PERMISSIONS, method)) {
         calls.push({ permission: PLUGIN_PERMISSIONS[method], url: null, link: null, dynamic: null });
       }
       if (owner === "plugin" || owners.includes(owner)) {
         if (method === "on" && node.arguments?.[0]?.type === "Literal") {
-          const implied = tables.events[String(node.arguments[0].value)];
+          const eventName = String(node.arguments[0].value);
+          const implied = Object.hasOwn(tables.events, eventName) ? tables.events[eventName] : undefined;
           if (implied) calls.push({ permission: implied, url: null, link: null, dynamic: null });
         }
       }
       if (!owners.includes(owner)) return;
-      if (CTX_PERMISSIONS[method]) calls.push({ permission: CTX_PERMISSIONS[method], url: null, link: null, dynamic: null });
+      if (method && Object.hasOwn(CTX_PERMISSIONS, method)) calls.push({ permission: CTX_PERMISSIONS[method], url: null, link: null, dynamic: null });
       if (method === "command") {
         const named = literalField(node, "cmd");
-        const runs = named ? (tables.commands[named] ?? null) : null;
+        const runs = named && Object.hasOwn(tables.commands, named) ? tables.commands[named] : null;
         calls.push({ permission: runs, url: null, link: null, dynamic: named ? null : "a command it builds as it runs" });
         if (named && !runs) calls.push({ permission: null, url: null, link: null, dynamic: `an unknown command, ${named}` });
       }
-      if (LINK_CALLS[method]) {
+      if (method && Object.hasOwn(LINK_CALLS, method)) {
         const to = method === "call" ? literalField(node, "to") : null;
         const channel = literalField(node, "channel");
         const named = method === "call" ? (to && channel ? `${to}:${channel}` : null) : channel;
@@ -178,9 +180,12 @@ export function lint(
   if (manifest.consumes.length) wanted.add("link:consume");
   if (Object.keys(manifest.provides).length) wanted.add("link:provide");
   const local = manifest.urls.some(reachesLocal);
-  const localSignIn = [manifest.oauth.authorize_url, manifest.oauth.token_url].some((url) => url && isLocalAddress(new URL(url).hostname));
+  const localSignIn = [manifest.oauth.authorize_url, manifest.oauth.token_url].some((url) => {
+    const parsed = url ? webUrl(url) : null;
+    return parsed !== null && isLocalAddress(new URL(parsed).hostname);
+  });
   for (const event of manifest.events) {
-    if (tables.events[event]) wanted.add(tables.events[event]);
+    if (Object.hasOwn(tables.events, event)) wanted.add(tables.events[event]);
   }
 
   for (const permission of wanted) {
@@ -197,11 +202,11 @@ export function lint(
   }
   for (const call of calls) {
     if (!call.link) continue;
-    const declared = call.link.kind === "call" ? manifest.consumes.includes(call.link.name) : call.link.name in manifest.provides;
+    const declared = call.link.kind === "call" ? manifest.consumes.includes(call.link.name) : Object.hasOwn(manifest.provides, call.link.name);
     if (!declared) findings.push({ kind: "undeclared", what: call.link.name });
   }
   for (const name of new Set(secrets)) {
-    if ((!(name in manifest.secrets) && name !== "oauth") || WITHHELD_SECRETS.includes(name)) findings.push({ kind: "undeclared", what: `{{secret.${name}}}` });
+    if ((!Object.hasOwn(manifest.secrets, name) && name !== "oauth") || WITHHELD_SECRETS.includes(name)) findings.push({ kind: "undeclared", what: `{{secret.${name}}}` });
   }
   for (const what of new Set(calls.map((call) => call.dynamic).filter(Boolean) as string[])) {
     findings.push({ kind: "dynamic", what });

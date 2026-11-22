@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useStore } from "../store";
 import type { PluginRecord } from "../types";
+import { webUrl } from "../urls";
 import { NewTab } from "./NewTab";
 import { SignInAddresses } from "./PluginConsent";
 
@@ -11,6 +12,7 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
   const [draft, setDraft] = useState<Record<string, string>>({});
   const names = Object.keys(plugin.manifest.secrets);
   const provider = plugin.manifest.oauth.label;
+  const registerUrl = plugin.manifest.oauth.register_url ? webUrl(plugin.manifest.oauth.register_url) : null;
   const connected = plugin.secrets_set.includes("oauth");
   const hub = new URL(window.location.origin);
   if (hub.hostname === "localhost") hub.hostname = "127.0.0.1";
@@ -24,8 +26,8 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
         <div className="space-y-1">
           <span className="block text-xs text-text-2">
             {provider} needs an app of your own.{" "}
-            {plugin.manifest.oauth.register_url && (
-              <a className="text-accent hover:underline" href={plugin.manifest.oauth.register_url} target="_blank" rel="noreferrer">
+            {registerUrl && (
+              <a className="text-accent hover:underline" href={registerUrl} target="_blank" rel="noreferrer">
                 Create one <NewTab />
               </a>
             )}{" "}

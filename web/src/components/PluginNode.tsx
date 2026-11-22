@@ -84,7 +84,7 @@ function NodeView({ node, pluginId, mayViewCameras, act }: { node: Node; pluginI
   }
 
   if (node.type === "chip") {
-    return <span className={`chip chip-message ${TONES[node.tone ?? ""] ?? ""}`}>{node.value}</span>;
+    return <span className={`chip chip-message ${node.tone && Object.hasOwn(TONES, node.tone) ? TONES[node.tone] : ""}`}>{node.value}</span>;
   }
 
   if (node.type === "camera") {
@@ -98,7 +98,8 @@ function NodeView({ node, pluginId, mayViewCameras, act }: { node: Node; pluginI
   }
 
   if (node.type === "image") {
-    const url = pluginAssets[pluginId]?.[node.asset ?? ""];
+    const assets = pluginAssets[pluginId];
+    const url = node.asset && assets && Object.hasOwn(assets, node.asset) ? assets[node.asset] : undefined;
     return url ? <img src={url} alt={node.label ?? ""} className="max-h-40 max-w-full border border-line-0" /> : null;
   }
 
@@ -128,7 +129,7 @@ function NodeView({ node, pluginId, mayViewCameras, act }: { node: Node; pluginI
   if (node.type === "input") return <PluginInput node={node} act={act} />;
 
   if (node.type === "button") {
-    const Icon = node.icon ? ICONS[node.icon as keyof typeof ICONS] : null;
+    const Icon = node.icon && Object.hasOwn(ICONS, node.icon) ? ICONS[node.icon as keyof typeof ICONS] : null;
     return (
       <button
         className={Icon ? "btn grid w-9 place-items-center px-0" : "btn"}

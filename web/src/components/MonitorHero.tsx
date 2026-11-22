@@ -79,7 +79,7 @@ function ControlPane({ monitor }: { monitor: Monitor }) {
             <HeaterReadouts state={device} />
           </div>
           <div className="surface z-[1] lg:sticky lg:bottom-0">
-            <PrintActions printer={printer} />
+            <PrintActions key={printer.id} printer={printer} />
           </div>
         </>
       ) : (
@@ -145,7 +145,7 @@ function PreheatPaneFor({ monitor }: { monitor: Monitor }) {
   if (!printer) return <p className="px-4 py-3 text-sm text-text-1">Link a printer to this monitor to preheat it.</p>;
   if (!control) return <p className="px-4 py-3 text-sm text-text-1">{printer.name} doesn't support setting temperatures from PrintGuard.</p>;
   if (!printer.device_state) return <p className="px-4 py-3 text-sm text-text-1">Waiting for {printer.name} to report its temperatures.</p>;
-  return <PreheatPane printer={printer} />;
+  return <PreheatPane key={printer.id} printer={printer} />;
 }
 
 export function MonitorHero({ monitor }: { monitor: Monitor }) {
@@ -198,11 +198,11 @@ export function MonitorHero({ monitor }: { monitor: Monitor }) {
               id={id}
               className={pane === id ? "" : "hidden"}
             >
-              {id === "control" && <ControlPane monitor={monitor} />}
-              {id === "tune" && <TunePane monitor={monitor} />}
-              {id === "preheat" && <PreheatPaneFor monitor={monitor} />}
-              {id === "configure" && <MonitorSettings monitor={monitor} />}
-              {id === "review" && <ReviewList monitorId={monitor.id} />}
+              {pane === id && id === "control" && <ControlPane monitor={monitor} />}
+              {pane === id && id === "tune" && <TunePane monitor={monitor} />}
+              {pane === id && id === "preheat" && <PreheatPaneFor monitor={monitor} />}
+              {pane === id && id === "configure" && <MonitorSettings key={monitor.id} monitor={monitor} />}
+              {pane === id && id === "review" && <ReviewList monitorId={monitor.id} />}
             </TabPanel>
           ))}
         </div>

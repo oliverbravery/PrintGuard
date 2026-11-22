@@ -110,7 +110,7 @@ function FoldButton() {
   const Icon = fold.folded ? ChevronUp : ChevronDown;
   return (
     <button
-      className="cell-action self-stretch px-3"
+      className="cell-action grid min-w-11 place-items-center self-stretch px-3"
       aria-expanded={!fold.folded}
       aria-label={fold.folded ? "Show the fleet" : "Hide the fleet"}
       title={fold.folded ? "Show the fleet" : "Hide the fleet"}
@@ -124,7 +124,7 @@ function FoldButton() {
 function HeightButtons() {
   const panel = useParentPanel();
   if (!panel) return null;
-  const grow = (by: number) => panel.resize(`${panel.getSize().asPercentage + by}%`);
+  const grow = (by: number) => panel.resize(`${Math.min(100, Math.max(0, panel.getSize().asPercentage + by))}%`);
   return (
     <>
       <button className="btn-inline" onClick={() => grow(10)}>
@@ -154,9 +154,14 @@ function HiddenTray({ hidden }: { hidden: Tile[] }) {
 
 export function FleetLedger({ monitors, selectedId, visible, hidden }: { monitors: Monitor[]; selectedId: string | null; visible: string[]; hidden: Tile[] }) {
   const { engine, customising, setCustomising, resetLayout, openDialog } = useStore();
+  const fold = useContext(FoldContext);
   const pinned = section(engine?.settings.layout).pinned;
   const group = monitors.map((m) => m.id);
   const reorder = useReorder(visible);
+  const toggleLayout = () => {
+    if (!customising && fold?.folded) fold.toggle();
+    setCustomising(!customising);
+  };
   return (
     <section aria-labelledby="fleet-heading" className="@container border-b border-rule">
       <div className="surface sticky top-0 z-[5]">
@@ -173,7 +178,7 @@ export function FleetLedger({ monitors, selectedId, visible, hidden }: { monitor
             </>
           )}
           {!customising && <AddCell label="Add monitor" onClick={() => openDialog("monitor")} />}
-          <button className="cell-action flex items-center gap-2 self-stretch px-4 text-xs" aria-pressed={customising} onClick={() => setCustomising(!customising)}>
+          <button className="cell-action flex items-center gap-2 self-stretch px-4 text-xs" aria-pressed={customising} onClick={toggleLayout}>
             {customising ? "Done" : "Layout"}
             {!customising && <Pencil size={13} aria-hidden />}
           </button>

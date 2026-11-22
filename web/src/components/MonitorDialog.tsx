@@ -34,8 +34,11 @@ export function MonitorDialog() {
         className="space-y-3"
         onSubmit={(event) => {
           event.preventDefault();
+          if (!name.trim() || !boundCameraId || saving) return;
           monitorsWhenSent.current = monitors;
-          send({ cmd: "monitor.add", monitor: { name: name.trim(), camera_id: boundCameraId, printer_id: boundPrinterId } });
+          if (send({ cmd: "monitor.add", monitor: { name: name.trim(), camera_id: boundCameraId, printer_id: boundPrinterId } }) === null) {
+            monitorsWhenSent.current = null;
+          }
         }}
       >
         <input className="field" aria-label="Monitor name" placeholder="Monitor name" value={name} onChange={(e) => setName(e.target.value)} />

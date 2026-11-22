@@ -76,7 +76,10 @@ export function Modal({
       dialog.removeEventListener("close", onClosedByBrowser);
       dialog.removeEventListener("pointerdown", onPress);
       dialog.removeEventListener("click", onLightDismiss);
-      setOpenModals(() => openModals.splice(openModals.indexOf(dialog), 1));
+      setOpenModals(() => {
+        const index = openModals.indexOf(dialog);
+        if (index !== -1) openModals.splice(index, 1);
+      });
       dialog.close();
       focusedBeforeShowModal?.focus?.();
     };

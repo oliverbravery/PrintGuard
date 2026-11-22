@@ -1,5 +1,6 @@
 import { useId } from "react";
 import type { AdapterConfig, AdapterMeta } from "../types";
+import { webUrl } from "../urls";
 import { ExperimentalBadge } from "./ExperimentalBadge";
 import { NewTab } from "./NewTab";
 import { SecretInput } from "./SecretInput";
@@ -51,6 +52,7 @@ export function SchemaForm({
     const { [key]: _previous, ...rest } = value;
     onChange(next === undefined ? rest : { ...value, [key]: next });
   };
+  const helpUrl = webUrl(meta.setup_url ?? meta.docs_url ?? "");
   return (
     <div className="space-y-3">
       {meta.experimental && <ExperimentalBadge />}
@@ -104,9 +106,11 @@ export function SchemaForm({
           )}
         </div>
       ))}
-      <a href={meta.setup_url ?? meta.docs_url} target="_blank" rel="noreferrer" className="mono text-xs text-text-2 hover:text-accent inline-block">
-        {meta.label} {meta.setup_url ? "setup guide" : "API docs"} <NewTab />
-      </a>
+      {helpUrl && (
+        <a href={helpUrl} target="_blank" rel="noreferrer" className="mono text-xs text-text-2 hover:text-accent inline-block">
+          {meta.label} {meta.setup_url ? "setup guide" : "API docs"} <NewTab />
+        </a>
+      )}
     </div>
   );
 }

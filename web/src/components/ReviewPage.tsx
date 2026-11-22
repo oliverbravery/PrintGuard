@@ -111,7 +111,7 @@ function Progress({ review, onDone }: { review: ReviewSummary; onDone: () => voi
         <button className="btn" onClick={() => send({ cmd: "review.dismiss", id: review.id })}>
           Cancel sending
         </button>
-        <button className="btn btn-primary" disabled={isPending("review.retry")} onClick={() => send({ cmd: "review.retry", id: review.id })}>
+        <button className="btn btn-primary" disabled={isPending("review.retry", review.id)} onClick={() => send({ cmd: "review.retry", id: review.id })}>
           Try now
         </button>
       </div>
@@ -277,7 +277,7 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
             ) : (
               <span />
             )}
-            <button className="cell-action cell-action-primary" disabled={switchedOff || kept.length === 0 || over > 0 || isPending("review.send")} onClick={submit}>
+            <button className="cell-action cell-action-primary" disabled={switchedOff || kept.length === 0 || over > 0 || isPending("review.send", review.id)} onClick={submit}>
               Send {framesLabel(loaded ? kept.length : review.frames)}
             </button>
           </div>
@@ -296,9 +296,12 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
               </button>
               <button
                 className="btn btn-danger"
+                disabled={isPending("review.delete", review.id)}
                 onClick={() => {
-                  send({ cmd: "review.delete", id: review.id });
-                  navigate(list);
+                  if (send({ cmd: "review.delete", id: review.id }) !== null) {
+                    setIgnoring(false);
+                    navigate(list);
+                  }
                 }}
               >
                 Ignore

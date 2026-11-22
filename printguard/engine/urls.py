@@ -197,7 +197,7 @@ def is_local_address(host: str) -> bool:
     them global. One dot ending the host is dropped first, since ``localhost.``
     is the same place as ``localhost``.
     """
-    host = host.removesuffix(".")
+    host = host.lower().removesuffix(".")
     try:
         address = ipaddress.ip_address(host.strip("[]"))
     except ValueError:

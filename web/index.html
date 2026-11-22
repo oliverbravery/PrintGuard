@@ -24,7 +24,9 @@
           root.dataset.theme = base;
           root.style.colorScheme = base;
           if (c && c.glass) root.setAttribute("data-glass", "");
-          if (c && c.vars) for (var k in c.vars) root.style.setProperty(k, c.vars[k]);
+          if (c && c.vars)
+            for (var k in c.vars)
+              if (Object.prototype.hasOwnProperty.call(c.vars, k) && k.indexOf("--") === 0) root.style.setProperty(k, c.vars[k]);
           var bg = explicit && c.bg ? c.bg : base === "dark" ? "#090908" : "#f6f5f0";
           var m = document.querySelector('meta[name="theme-color"]');
           if (m) m.setAttribute("content", bg);

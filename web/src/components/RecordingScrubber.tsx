@@ -60,7 +60,7 @@ export function RecordingScrubber({ review, full, onAdd }: { review: Review; ful
           <span
             key={frame.id}
             className={`absolute top-0 -translate-x-1/2 ${markStyle(frame)}`}
-            style={{ left: `${((frame.ts - start) / span) * 100}%` }}
+            style={{ left: `${Math.min(100, Math.max(0, ((frame.ts - start) / span) * 100))}%` }}
           />
         ))}
       />

@@ -98,7 +98,7 @@ export function AppearanceTab() {
                 <span className="flex-1 truncate text-sm">{t.name}</span>
                 <span className="chip">{t.base}</span>
               </button>
-              <button className="btn" onClick={() => setEditing({ ...t, colors: { ...t.colors } })}>
+              <button className="btn" onClick={() => setEditing({ ...t, colors: { ...PALETTES[t.base], ...t.colors } })}>
                 Edit
               </button>
               <ConfirmButton onConfirm={() => deleteTheme(t.id)}>Delete</ConfirmButton>

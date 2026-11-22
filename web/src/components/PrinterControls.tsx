@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFocusKept } from "../a11y";
 import { formatDuration } from "../prints";
 import { useStore } from "../store";
@@ -66,7 +66,7 @@ export function PrintActions({ printer }: { printer: Printer }) {
   const { send, isPending } = useStore();
   const [action, setAction] = useState<string | null>(null);
   const state = printer.device_state;
-  const acting = isPending("printer.action");
+  const acting = isPending("printer.action", printer.id);
   const act = (name: "pause" | "resume" | "cancel") => {
     setAction(name);
     send({ cmd: "printer.action", id: printer.id, action: name });
@@ -87,15 +87,24 @@ export function PrintActions({ printer }: { printer: Printer }) {
 
 function TargetField({ name, heater, busy, onCommit }: { name: HeaterName; heater: Heater; busy: boolean; onCommit: (target: number) => boolean }) {
   const [draft, setDraft] = useState(String(Math.round(heater.target)));
+  const dirty = useRef(false);
+  const commitRef = useRef(() => {});
   useEffect(() => {
-    if (!busy) setDraft(String(Math.round(heater.target)));
+    if (!busy) {
+      dirty.current = false;
+      setDraft(String(Math.round(heater.target)));
+    }
   }, [heater.target, busy]);
   const commit = () => {
+    if (!dirty.current) return;
+    dirty.current = false;
     const target = clampTarget(name, Number(draft));
     if (draft.trim() === "" || Number.isNaN(target)) return setDraft(String(Math.round(heater.target)));
     const sent = target === Math.round(heater.target) || onCommit(target);
     setDraft(String(sent ? target : Math.round(heater.target)));
   };
+  commitRef.current = commit;
+  useEffect(() => () => commitRef.current(), []);
   return (
     <label className="flex items-center gap-1.5">
       <span className="sr-only">{name} target</span>
@@ -107,7 +116,10 @@ function TargetField({ name, heater, busy, onCommit }: { name: HeaterName; heate
         max={HEATER_MAX[name]}
         disabled={busy}
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => {
+          dirty.current = true;
+          setDraft(e.target.value);
+        }}
         onBlur={commit}
         onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
       />
@@ -119,13 +131,22 @@ function TargetField({ name, heater, busy, onCommit }: { name: HeaterName; heate
 function PresetRow({ preset, onChange, onRemove }: { preset: PreheatPreset; onChange: (next: PreheatPreset) => void; onRemove: () => void }) {
   const typed = () => ({ name: preset.name, nozzle: String(preset.nozzle), bed: String(preset.bed) });
   const [draft, setDraft] = useState(typed);
-  useEffect(() => setDraft(typed()), [preset.name, preset.nozzle, preset.bed]);
+  const dirty = useRef(false);
+  const commitRef = useRef(() => {});
+  useEffect(() => {
+    dirty.current = false;
+    setDraft(typed());
+  }, [preset.name, preset.nozzle, preset.bed]);
   const commit = () => {
+    if (!dirty.current) return;
+    dirty.current = false;
     const next = { name: draft.name.trim(), nozzle: clampTarget("nozzle", Number(draft.nozzle) || 0), bed: clampTarget("bed", Number(draft.bed) || 0) };
     if (!next.name) return setDraft(typed());
     if (next.name !== preset.name || next.nozzle !== preset.nozzle || next.bed !== preset.bed) onChange(next);
     else setDraft(typed());
   };
+  commitRef.current = commit;
+  useEffect(() => () => commitRef.current(), []);
   const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => e.key === "Enter" && e.currentTarget.blur();
   return (
     <div className="flex items-center gap-2">
@@ -134,7 +155,10 @@ function PresetRow({ preset, onChange, onRemove }: { preset: PreheatPreset; onCh
         aria-label="Preset name"
         value={draft.name}
         maxLength={20}
-        onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+        onChange={(e) => {
+          dirty.current = true;
+          setDraft({ ...draft, name: e.target.value });
+        }}
         onBlur={commit}
         onKeyDown={blurOnEnter}
       />
@@ -149,12 +173,22 @@ function PresetRow({ preset, onChange, onRemove }: { preset: PreheatPreset; onCh
           min={0}
           max={HEATER_MAX[name]}
           value={draft[name]}
-          onChange={(e) => setDraft({ ...draft, [name]: e.target.value })}
+          onChange={(e) => {
+            dirty.current = true;
+            setDraft({ ...draft, [name]: e.target.value });
+          }}
           onBlur={commit}
           onKeyDown={blurOnEnter}
         />
       ))}
-      <button className="btn btn-danger px-2" aria-label={`Remove ${preset.name}`} onClick={onRemove}>
+      <button
+        className="btn btn-danger px-2"
+        aria-label={`Remove ${preset.name}`}
+        onClick={() => {
+          dirty.current = false;
+          onRemove();
+        }}
+      >
         ×
       </button>
     </div>
@@ -200,7 +234,7 @@ export function PreheatPane({ printer }: { printer: Printer }) {
   const [committed, setCommitted] = useState<HeaterName[]>([]);
   const state = printer.device_state;
   const presets = engine?.settings.preheat ?? [];
-  const heating = isPending("printer.heat");
+  const heating = isPending("printer.heat", printer.id);
   const heat = (targets: Partial<Record<HeaterName, number>>) => send({ cmd: "printer.heat", id: printer.id, ...targets });
   const apply = (nozzle: number, bed: number) => heat({ nozzle: clampTarget("nozzle", nozzle), bed: clampTarget("bed", bed) });
   return (

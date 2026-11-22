@@ -626,10 +626,12 @@ test("a monitor surface draws on each monitor and nothing on the dashboard", asy
 test("a camera drawn twice still floats after one of the two goes away", async ({ page }) => {
   await stubFloat(page);
   await dashboardWithPlugin(page, MONITOR_PIP, PLUGIN.granted, ["monitor"]);
-
-  await page.getByRole("link", { name: "Edit", exact: true }).click();
-  await page.getByRole("link", { name: "Monitors", exact: true }).first().click();
-  await page.getByRole("button", { name: "Float Bench" }).first().click();
+  await page.evaluate(() => (location.hash = "#/monitors/m1"));
+  await page.getByRole("button", { name: "Layout", exact: true }).click();
+  await page.getByRole("button", { name: "Hide Bench" }).click();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Float Bench" })).toHaveCount(1);
+  await page.getByRole("button", { name: "Float Bench" }).click();
 
   await expect.poll(() => page.evaluate(() => (window as any).__floated)).toBe(1);
 });
@@ -716,7 +718,7 @@ test("the sounds plugin stays quiet until a monitor is switched on and a fresh a
   await dashboardWithPlugin(page, SOUNDS, ["state:read", "sound"], ["settings"]);
 
   await expect(page.locator("section", { hasText: "Picture in picture" })).toHaveCount(0);
-  await page.getByRole("link", { name: "Edit", exact: true }).click();
+  await page.getByRole("tab", { name: "Configure" }).click();
   await page.getByLabel("Sound an alert").click();
   await expect(page.getByLabel("Alert sound")).toBeVisible();
   expect(await page.evaluate(() => (window as any).__tones)).toBe(0);
@@ -958,4 +960,67 @@ test("a plugin's own page styles, scripts and posts back to the hub, and reaches
   await page.goto(`${baseURL}/plugins/demo/page`);
   await page.evaluate(() => (document.getElementById("own") as HTMLFormElement).submit());
   await expect(page).toHaveTitle("signed in as user=me");
+});
+
+test("plugin assets, item images and sounds named after Object properties are ignored", async ({ page }) => {
+  await page.addInitScript(() => {
+    const win = window as any;
+    win.__played = [];
+    win.Audio = class {
+      constructor(public src: string) {}
+      play() {
+        win.__played.push(this.src);
+        return Promise.resolve();
+      }
+    };
+  });
+  const code = `
+plugin.render((ctx) => {
+  ctx.sound("toString");
+  return {
+    type: "item",
+    image: "toString",
+    title: "Safe item",
+    actions: [{ type: "image", asset: "constructor", label: "Bogus" }],
+  };
+});`;
+  await dashboardWithPlugin(page, code, ["state:read", "sound"], ["panel"]);
+  const row = page.getByRole("region", { name: "Plugins" }).getByRole("listitem");
+  await expect(row.getByText("Safe item")).toBeVisible();
+  await expect(row.locator("img")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__played)).toEqual([]);
+});
+
+test("a panel.html has no sendBeacon, no referrer and shows its failure if it stops", async ({ page }) => {
+  const html = `<script>
+    pg.on("ready", () => {
+      pg.notify("beacon:" + typeof navigator.sendBeacon + " ref:" + document.referrer);
+    });
+    pg.on("state", () => {
+      throw new Error("panel crashed");
+    });
+  </script>`;
+  await dashboardWithPlugin(page, html, ["state:read", "notify"], ["panel"], {}, "panel.html");
+  await expect(page.getByText("beacon:undefined ref:")).toBeVisible();
+  await page.evaluate(() => {
+    const engine = (window as any).__pg.getState().engine;
+    (window as any).__pgEvent({ event: "state", ...engine });
+  });
+  await expect(page.getByRole("region", { name: "Plugins" }).getByText("panel crashed")).toBeVisible();
+});
+
+test("the linter handles malformed OAuth URLs and Object property names without crashing", async ({ page }) => {
+  await page.goto("/");
+  const findings = await page.evaluate(async () => {
+    const { lint } = await import("/src/lint.ts" as string);
+    const manifest = {
+      id: "demo", name: "Demo", version: "1.0.0", description: "", author: "", homepage: "",
+      permissions: ["oauth"], reasons: {}, surfaces: ["panel"], platforms: [], assets: [], urls: [],
+      secrets: {}, provides: {}, consumes: [],
+      oauth: { label: "Thing", authorize_url: "https://256.256.256.256/a", token_url: "not-a-url", register_url: "", scopes: [] },
+      events: ["toString"], tick_s: 0,
+    };
+    return lint(manifest, { "plugin.js": 'const s = "{{secret.constructor}}"; plugin.render((ctx) => ({ type: "text", value: s }));' }, [], {});
+  });
+  expect(findings).toContainEqual({ kind: "undeclared", what: "{{secret.constructor}}" });
 });

@@ -87,11 +87,11 @@ export function HistoryPage() {
   const history = monitorId ? historyData[monitorId] : undefined;
 
   useEffect(() => {
-    if (reconnecting || !monitorId) return;
-    fetchHistory(monitorId);
-    const refresh = setInterval(() => fetchHistory(monitorId), HISTORY_BUCKET_MS);
+    if (reconnecting || !monitor) return;
+    fetchHistory(monitor.id);
+    const refresh = setInterval(() => fetchHistory(monitor.id), HISTORY_BUCKET_MS);
     return () => clearInterval(refresh);
-  }, [monitorId, reconnecting, alertsKept]);
+  }, [monitor?.id, reconnecting, alertsKept]);
 
   const grouped = useMemo(() => (history ? groupBuckets(history.buckets, period, history.now) : []), [history, period]);
   const snaps = useMemo(

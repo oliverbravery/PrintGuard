@@ -19,7 +19,12 @@ const HLS_RETRY_MS = 3000;
 export const published = new Map<string, () => void>();
 
 function loadPublishers(): Record<string, string> {
-  return JSON.parse(readStored(PUBLISHERS_KEY) || "{}");
+  try {
+    const parsed = JSON.parse(readStored(PUBLISHERS_KEY) || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
 }
 
 function persistPublisher(path: string, deviceId: string): void {
@@ -41,7 +46,7 @@ function holdPublisherLock(path: string): Promise<(() => void) | null> {
 }
 
 export function hlsUrl(path: string): string {
-  return `/hls/${path}/index.m3u8`;
+  return `/hls/${encodeURIComponent(path)}/index.m3u8`;
 }
 
 export function playHls(video: HTMLVideoElement, url: string, onRefused?: () => void): () => void {
@@ -126,7 +131,7 @@ export async function publishStream(
   };
 
   const connect = () => {
-    const sock = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/publish/${path}`);
+    const sock = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/publish/${encodeURIComponent(path)}`);
     socket = sock;
     sock.onopen = () => {
       const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 1_000_000 });
@@ -172,7 +177,7 @@ export async function resumePublishers(cameras: Camera[], onDown?: (reason: stri
   const want = loadPublishers();
   for (const camera of cameras) {
     const path = camera.source.path;
-    if (!path || !(path in want) || published.has(path)) continue;
+    if (!path || !Object.hasOwn(want, path) || published.has(path)) continue;
     await publishStream(path, want[path], onDown).catch((failure: Error) => {
       if (failure.message !== PUBLISHED_ELSEWHERE) onDown?.(failure.message);
     });
