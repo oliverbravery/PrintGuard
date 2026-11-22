@@ -26,7 +26,6 @@ vendor's client library are the exception, covered under
 - [Logging](#logging)
 - [Configuration](#configuration)
 - [Repository layout](#repository-layout)
-- [The website](#the-website)
 
 ## The shape of it
 
@@ -901,7 +900,6 @@ printguard/
 web/                 React + Tailwind UI (presentation only)
   src/               the dashboard: the store, the engine socket and the components
   public/            plugin-sandbox.html and plugin-panel.html, the opaque-origin frames a plugin runs in, the guide's pictures and the touch icon
-  site/              the landing page published to GitHub Pages
   launch/            Playwright run from camera to alert against a running build
   tests/             Playwright tests of the browser plugin sandbox, the dashboard and README rendering
   screenshots/       renders docs/assets from fake data
@@ -922,10 +920,3 @@ pyproject.toml       the package, its dependencies and the one place the version
 LICENSE.md           the GPL-2.0 licence
 THIRD_PARTY_NOTICES.md the notices for what the image and desktop apps bundle
 ```
-
-## The website
-
-[oliverbravery.github.io/PrintGuard](https://oliverbravery.github.io/PrintGuard/) is the landing
-page in [`web/site`](../web/site), a second Vite root that shares the dashboard's stylesheet
-and takes its screenshots from `docs/assets`. The release workflow builds it with
-`npm run site:build` and publishes `web/dist-site` to GitHub Pages. The hub never serves it.

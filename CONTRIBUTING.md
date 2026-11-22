@@ -20,7 +20,6 @@ hub server runs it, and everything the engine's own logic needs from hardware, t
 uv sync                              # Python engine + hub server
 uv run printguard                    # hub on :8000 (MediaMTX is bundled into the image. For video in dev, brew install mediamtx, 1.19.0 or newer, and set MEDIAMTX_BINARY=$(which mediamtx))
 cd web && npm install && npm run dev # UI with hot reload on :5173, proxied to :8000
-cd web && npm run site               # the GitHub Pages landing page in web/site, with hot reload
 ```
 
 To work on the desktop app, run the tray build in dev or produce a local installer:
@@ -40,7 +39,7 @@ cd feedback-worker && npm ci && npm run typecheck && npm test   # the training i
 ```
 
 The **tests** check in CI runs all four, with `uv run pytest` a second time on the Python 3.14 the
-image ships and `npm run site:build` for the landing page. `typecheck` covers the Playwright suites as well as the
+image ships. `typecheck` covers the Playwright suites as well as the
 UI, and `test:sandbox` needs `npx playwright install chromium webkit` once.
 
 `tests/test_engine.py` simulates cameras and printers against a fake platform, covering
@@ -113,8 +112,8 @@ pull request, and delete anything the change makes wrong or redundant.
 
 | If you change | Update |
 |---|---|
-| Install steps, ports, image tags, headline features | [README.md](README.md), and the landing page in `web/site/Home.tsx` |
-| A supported printer service, camera source or alert channel | The lists in [README.md](README.md), `web/site/Home.tsx` and `web/src/guide.tsx` |
+| Install steps, ports, image tags, headline features | [README.md](README.md) |
+| A supported printer service, camera source or alert channel | The lists in [README.md](README.md) and `web/src/guide.tsx` |
 | The engine protocol, an event, the platform contract, the scheduler, logging, repo layout | [docs/architecture.md](docs/architecture.md) |
 | A printer integration or its setup steps, the print library, temperatures | [docs/printers.md](docs/printers.md) |
 | A camera source | [docs/cameras.md](docs/cameras.md) |
@@ -215,8 +214,7 @@ Bambu and Elegoo tests do.
    [`integrations/__init__.py`](printguard/engine/integrations/__init__.py).
 3. Pin its requests in `tests/test_adapters.py`, which has a recording HTTP function for this.
 4. Add the service to the tables in [docs/printers.md](docs/printers.md), with a `<details>`
-   block if it needs setup steps of its own, and to the lists in the README, the landing page
-   and the in-app guide.
+   block if it needs setup steps of its own, and to the lists in the README and the in-app guide.
 
 The configuration form, connection test, device polling, inference gating, defect actions,
 temperature controls and the print library all follow from the adapter. No other code changes.
@@ -239,7 +237,7 @@ Notifiers deliver defect snapshots and watchdog warnings.
    [`notifiers/__init__.py`](printguard/engine/notifiers/__init__.py).
 3. Pin its request in `tests/test_adapters.py`.
 4. Add the channel to the table in [docs/notifications.md](docs/notifications.md#channels), and
-   to the lists in the README and the landing page.
+   to the lists in the README and the in-app guide.
 
 The settings form, test button, and delivery of alerts and warnings all follow from the
 adapter.
@@ -329,7 +327,7 @@ blocking a merge. A pull request into a release branch runs **tests**, **audit**
 
 | Check | Enforces |
 |---|---|
-| **tests** | Everything under `tests/`, with `uv run pytest`, on Python 3.12 (3.12.4 is the oldest supported) and on the image's 3.14. The UI and its Playwright suites type-check, the landing page builds, and the browser plugin sandbox holds in chromium and webkit. The feedback Worker type-checks and passes its tests |
+| **tests** | Everything under `tests/`, with `uv run pytest`, on Python 3.12 (3.12.4 is the oldest supported) and on the image's 3.14. The UI and its Playwright suites type-check, and the browser plugin sandbox holds in chromium and webkit. The feedback Worker type-checks and passes its tests |
 | **audit** | `uv audit` and `npm audit` find no known vulnerability in `uv.lock` or either `package-lock.json`. A new advisory fails every open pull request until the dependency is bumped |
 | **image** | Every production image variant builds, which also builds the UI. The check builds for `amd64`, and on pull requests into `main` the standard image builds for `arm64` too, so both halves of `latest` have built before a release merges |
 | **launch** | On pull requests into `main`, the container and both desktop apps start from what would ship and catch a failing print, so a release that cannot start never goes out |
@@ -359,14 +357,13 @@ On merge, the [release workflow](.github/workflows/release.yml):
    A re-run of the workflow moves a draft that isn't published yet to the new commit and notes,
    and fails once the release is published, since that version is out and the fix needs a new
    one.
-3. deploys the website to GitHub Pages.
-4. builds the macOS and Windows desktop apps and, once both have built, attaches them to the
+3. builds the macOS and Windows desktop apps and, once both have built, attaches them to the
    draft. The macOS app is signed and notarised with the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
    `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` repository secrets, which the
    **launch** check uses too. `packaging/build.sh` signs with the certificate and never sees the
    notarisation key, which goes only to the `packaging/notarise.sh` step after it. That step fails
    if the key is empty.
-5. publishes the release, which tags the merge commit. The download links and the in-app
+4. publishes the release, which tags the merge commit. The download links and the in-app
    update check only see a release once it's published, so neither points at a release with
    no desktop builds. If a desktop build fails, re-run it and the release publishes after it.
 

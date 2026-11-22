@@ -8,10 +8,9 @@ Catches failed 3D prints on your own hardware, pauses the printer and sends you 
 [![GitHub stars](https://img.shields.io/github/stars/oliverbravery/PrintGuard?style=flat&color=ff4d00)](https://github.com/oliverbravery/PrintGuard)
 [![Licence](https://img.shields.io/badge/licence-GPL--2.0-2ea44f)](LICENSE.md)
 [![Container](https://img.shields.io/badge/ghcr.io-oliverbravery%2Fprintguard-2496ed?logo=docker&logoColor=white)](https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard)
-[![Website](https://img.shields.io/badge/website-oliverbravery.github.io-ff4d00)](https://oliverbravery.github.io/PrintGuard/)
 [![Sponsor](https://img.shields.io/github/sponsors/oliverbravery?style=flat&color=ff4d00&label=sponsors)](https://github.com/sponsors/oliverbravery)
 
-[Website](https://oliverbravery.github.io/PrintGuard/) · [Quick start](#quick-start) · [Features](#what-it-does) · [Documentation](#documentation) · [Troubleshooting](docs/troubleshooting.md) · [Contributing](CONTRIBUTING.md) · [Sponsor](#sponsor)
+[Quick start](#quick-start) · [Features](#what-it-does) · [Documentation](#documentation) · [Troubleshooting](docs/troubleshooting.md) · [Contributing](CONTRIBUTING.md) · [Sponsor](#sponsor)
 
 </div>
 

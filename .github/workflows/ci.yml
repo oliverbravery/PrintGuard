@@ -32,7 +32,6 @@ jobs:
       - name: Run the tests again on the Python the image ships
         run: uv run --isolated --locked --python 3.14 pytest
       - run: npm run typecheck --prefix web
-      - run: npm run site:build --prefix web
       - id: playwright
         run: echo "version=$(node -p 'require("./web/node_modules/@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
