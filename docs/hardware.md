@@ -88,7 +88,7 @@ at the default threshold of 0.75 held for 3 frames. Obico's scores aren't probab
 threshold was matched on separate validation frames. Latency is one CPU thread of an M1 Max on
 ONNX Runtime 1.32, so expect it to be higher on a Raspberry Pi and lower with an accelerator.
 
-![The Detection tab in Settings, with the three models charted against Obico's](assets/settings-detection.png)
+![Detection in Settings, with the three models charted against Obico's](assets/settings-detection.png)
 
 Every model gives its own probability that a frame shows a failing print, with 0.5 as its
 decision boundary, so a monitor's threshold works the same way whichever one runs. Switching waits for the frames already being
@@ -219,9 +219,8 @@ PrintGuard logs which provider is unavailable and keeps running on the CPU.
 ## Reading and pinning the runtime
 
 The **compute** readout names the hardware the model is running on, as the provider's vendor and
-the kind of device. It sits in the header on a window 1280 pixels wide or more and in the **More**
-sheet on a phone. From 640 to 1279 pixels it is only in the Detection tab in Settings, where it
-reads **Active compute**.
+the kind of device. It sits in the top bar on a window 1600 pixels wide or more, and always in
+**Detection** in Settings, where it reads **Active compute**.
 
 | Readout | Means |
 |---|---|
@@ -232,7 +231,7 @@ reads **Active compute**.
 | `onnx cpu` | ONNX Runtime's own CPU provider, where no other provider offered a device or none of the offered ones could run the model |
 
 A Windows ML or TensorRT device is named the same way as OpenVINO's, by its provider's vendor.
-Under **Runtime**, the Detection tab in Settings offers:
+Under **Runtime**, **Detection** in Settings offers:
 
 | Setting | Effect |
 |---|---|

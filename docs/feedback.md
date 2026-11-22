@@ -45,10 +45,10 @@ with no printer has no way to know a print ended, so it closes one every 24 hour
 ## Reviewing a print
 
 When a print ends its monitor shows a button to review the frames from the last print. Older prints are
-listed under **Prints** on the monitor's detailed history page. A print with no frames kept
+listed under **Prints** on the monitor's history page. A print with no frames kept
 isn't offered for review.
 
-![The review sheet with a failed print's frames labelled good, failure and real failure](assets/review.png)
+![The review page with a failed print's frames labelled good, failure and real failure beside the recording](assets/review.png)
 
 1. Answer whether the print finished without any problems. A print you rescued and resumed still
    had one.
@@ -108,8 +108,8 @@ says when there will be room.
 | One frame | 150 KB | Nothing. The hub shrinks the frame once and skips it if it's still too big |
 | Speed | 100 frames a minute for one hub, 10 new hubs a minute for one network | Nothing. The hub tries again a minute later |
 
-Daily limits reset at midnight UTC, and the review sheet shows that time in your own time zone.
-A print that is waiting has **Try now** and **Cancel sending** on its sheet. A frame the hub
+Daily limits reset at midnight UTC, and the review page shows that time in your own time zone.
+A print that is waiting has **Try now** and **Cancel sending** on its review page. A frame the hub
 skips isn't counted as sent. A frame the inbox already holds is answered as sent without being
 written again, so it doesn't count twice and the copy keeps the labels of the first send. A print
 none of whose frames could be sent goes back to waiting for a review. The hub drops control
@@ -136,7 +136,7 @@ then keeps only alert frames, for the risk history, and never prompts. The same 
 recording with its size and when it's deleted, so you can delete one or all of them, and sets how
 long recordings are kept.
 
-![The Storage tab in Settings, with the review switch, how long recordings are kept and the recording of each print](assets/settings-storage.png)
+![Storage in Settings, with the review switch, how long recordings are kept and the recording of each print](assets/settings-storage.png)
 
 Switching it off also settles the prints the hub already holds. A print waiting for a review or
 waiting to send is dismissed, and every frame that isn't an alert is deleted from the hub. A

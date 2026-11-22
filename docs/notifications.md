@@ -16,7 +16,7 @@ from filling your phone.
 
 ## Set up a channel
 
-1. Open **Settings**, then the **Alerts** tab.
+1. Open **Settings**, then **Alerts**.
 2. Enable a channel and fill in its form. Each form links the service's own setup guide or API
    reference.
 3. Press **Send test alert**, which uses what you typed and carries a blank picture where a real
@@ -90,7 +90,7 @@ with **Push notifications** on. These rules keep that from turning into a stream
 
 | Rule | Value |
 |---|---|
-| A fault has to last this long before it's announced | **Fault grace period (seconds)** in the Alerts tab. Two minutes by default, from 30 seconds to 15 minutes |
+| A fault has to last this long before it's announced | **Fault grace period (seconds)** under **Alerts** in Settings. Two minutes by default, from 30 seconds to 15 minutes |
 | A feed counts as frozen | After 30 seconds without a scored frame, and the grace period starts then |
 | A fault that is still there is announced again | Every 30 minutes for as long as it lasts |
 | A recovery is announced once the feed has held | One minute, doubling after each relapse up to 15 minutes, and back to one minute after 15 minutes healthy |

@@ -113,7 +113,7 @@ your first monitor.
 
 1. Add a camera under **Cameras**, and crop it to the print.
 2. Register your printer under **Printers** and test the connection.
-3. Enable an alert channel in **Settings**.
+3. Enable an alert channel under **Settings**, then **Alerts**.
 4. Add a monitor that binds the camera and printer. Choose whether a defect alerts you, pauses or
    cancels, and turn on its push notifications.
 
@@ -134,7 +134,8 @@ Creality, Bambu, Elegoo, Prusa and Ultimaker printers are reached over their loc
 
 ## Tune every monitor
 
-Open a monitor for its live risk score and printer controls. Each one has its own alert
+Select a monitor and its feed, live risk score and printer controls fill the top of the
+dashboard, with every other monitor listed below. Under **Tune** each one has its own alert
 threshold, the number of flagged frames in a row it takes to act, a cooldown and a response of
 alert, pause or cancel. Its history page charts the score over the last hour, 6 hours, 24 hours
 or everything kept, beside a snapshot of every alert, so you can pick values from what your own
@@ -142,7 +143,7 @@ camera saw.
 When a print ends you can label a few of its frames and [send them](docs/feedback.md) to help
 train the model.
 
-![A monitor's panel: live risk, pause, resume and cancel, temperatures, preheat presets and the monitoring settings](docs/assets/printer-detail.png)
+![The selected monitor: its feed, live risk, temperatures, pause and cancel, with the Tune and Preheat panes beside them](docs/assets/printer-detail.png)
 
 Each camera can be rotated, cropped to the part of the bed the model watches and adjusted for brightness,
 contrast and sharpness. Its detection rate can be lowered to cut the load on a shared host.
@@ -216,13 +217,13 @@ Themes are saved on the hub and follow every browser that opens it.
 </tr>
 </table>
 
-Tap the **Customise layout** chip (▦) in the header to drag monitors into any order, pin the ones that matter to the front and hide
-the rest. Cameras in the rail can be dragged and hidden the same way.
+Press **Layout** above the monitor list to put monitors in any order, by dragging or with the
+arrow buttons, pin the ones that matter to the top and hide the rest.
 
-![Customise mode: drag to reorder and hide monitors and cameras, and pin a monitor](docs/assets/customise.png)
+![Layout mode: reorder, pin and hide monitors](docs/assets/customise.png)
 
 The dashboard fits phones and tablets, works from the keyboard and with a screen reader, and
-meets WCAG 2.2 AA contrast. A guide behind the **?** in the header explains every part of it.
+meets WCAG 2.2 AA. A guide behind the **?** in the top bar explains every part of it.
 
 ## Hardware acceleration
 
@@ -249,8 +250,9 @@ Access and oauth2-proxy, and has a hardening checklist.
 
 ## Updates and support
 
-The hub checks GitHub once a day and the version chip in the header turns into an update badge,
-with the changelog for every release behind it. The bug icon beside it sends me an anonymous
+The hub checks GitHub once a day and the version in the top bar turns into an update link, with
+the changelog for every release behind it. On a phone it's under **Settings**, then **Updates**.
+The bug icon in the top bar sends me an anonymous
 report, or downloads the same diagnostics as a zip with every credential stripped.
 [docs/troubleshooting.md](docs/troubleshooting.md) lists symptoms and fixes.
 

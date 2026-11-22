@@ -61,7 +61,7 @@ plugin.render((ctx) => ({
 }));
 ```
 
-Zip the folder and install it with **Import a .zip** in the Plugins tab in Settings, then
+Zip the folder and install it with **Import a .zip** under **Plugins** in Settings, then
 enable it. The zip holds one `plugin.json` with the plugin's files beside it, at the root or in
 the one folder that holds it. A second `plugin.json` or a file listed twice is refused. While you work, point PrintGuard at your repo instead and press **Update** as you
 push.
@@ -176,7 +176,7 @@ the manifest lists in `media` shows, in the gallery.
 | Surface | Where it puts you |
 |---|---|
 | `panel` | A panel of its own on the dashboard |
-| `monitor` | Drawn on every monitor tile |
+| `monitor` | Drawn beside the selected monitor's feed and on its row in the monitor list |
 | `settings` | Drawn in every monitor's settings, under its own heading |
 
 Anything that belongs to one monitor goes in `settings`.
@@ -269,7 +269,7 @@ that.
 | `render`, `action` | Yes | No | No |
 | `on`, `serve` | Yes | `on` only | Yes |
 | `route`, `gate` | No | No | Yes |
-| Keeps top-level values | Until the dashboard reloads | Until the dashboard reloads, or the panel is redrawn, as toggling Customise does | Never, each call gets a fresh VM |
+| Keeps top-level values | Until the dashboard reloads | Until the dashboard reloads, or the panel is redrawn, as toggling **Layout** does | Never, each call gets a fresh VM |
 
 `plugin.js` and `worker.js` each run inside a function with `plugin` in scope. `import` is a
 syntax error and there's no network. Treat `plugin.js` as having no DOM. Its iframe does have a
@@ -863,7 +863,7 @@ The four in [`plugins/`](../plugins) are commented throughout, so copy the close
 
 Push the folder to a public repo and people can install it by name.
 
-The Plugins tab reads a plugin's code against its manifest before anyone enables it, and says
+**Plugins** in Settings reads a plugin's code against its manifest before anyone enables it, and says
 where a permission is asked for and never used, or used and never asked for. Clear those first.
 
 For a review and a catalogue listing, open a pull request adding the folder under `plugins/` in

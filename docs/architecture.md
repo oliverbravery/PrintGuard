@@ -589,7 +589,7 @@ monitor has `notify` on, so the watchdog suppresses flapping rather than repeati
 source that reconnects and drops
 again is still the same warning, and each announced recovery doubles how long the
 next one must hold before it is announced, up to fifteen minutes. The notification and the
-dashboard's toast both wait on the grace period, and only the tile's online state changes as the
+dashboard's toast both wait on the grace period, and only the monitor's online state changes as the
 fault happens. Re-attaching a failed camera runs on its own timer, so a longer grace period never delays recovery. A stall
 starts once an online camera has gone `STALL_GRACE_S` without a completed inference and ends
 only when one completes again, so re-attaching the camera neither restarts its grace period
@@ -898,7 +898,7 @@ printguard/
     bambu_camera.py  Bambu A1/P1 chamber-camera reader (proprietary port-6000 protocol)
     desktop.py       macOS and Windows tray app around the hub
 web/                 React + Tailwind UI (presentation only)
-  src/               the dashboard: the store, the engine socket and the components
+  src/               the dashboard: the store, the engine socket, the router and the components
   public/            plugin-sandbox.html and plugin-panel.html, the opaque-origin frames a plugin runs in, the guide's pictures and the touch icon
   launch/            Playwright run from camera to alert against a running build
   tests/             Playwright tests of the browser plugin sandbox, the dashboard and README rendering

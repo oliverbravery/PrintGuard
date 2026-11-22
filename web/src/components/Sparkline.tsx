@@ -14,14 +14,13 @@ export function Sparkline({ points, threshold }: { points: ScorePoint[]; thresho
           .join(" ")
       : "";
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-20" preserveAspectRatio="none">
+    <svg aria-hidden viewBox={`0 0 ${W} ${H}`} className="h-10 w-full" preserveAspectRatio="none">
       <line
         x1="0"
         x2={W}
         y1={H - threshold * H}
         y2={H - threshold * H}
-        stroke="var(--color-bad)"
-        strokeOpacity="0.5"
+        stroke="var(--color-text-2)"
         strokeWidth="1"
         strokeDasharray="5 4"
       />
@@ -30,11 +29,6 @@ export function Sparkline({ points, threshold }: { points: ScorePoint[]; thresho
           <path d={`${path} L${W},${H} L0,${H} Z`} fill={colour} fillOpacity="0.08" stroke="none" />
           <path d={path} fill="none" stroke={colour} strokeWidth="1.5" />
         </>
-      )}
-      {points.length < 2 && (
-        <text x={W / 2} y={H / 2 + 3} textAnchor="middle" fill="var(--color-text-2)" style={{ font: "10px var(--font-mono)" }}>
-          awaiting results
-        </text>
       )}
     </svg>
   );

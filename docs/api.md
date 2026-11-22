@@ -71,7 +71,7 @@ Scopes are cumulative:
 | `control` | Everything in `read`, plus pause, resume and cancel, setting a heater target, and starting a file from the print library |
 | `manage` | Everything in `control`, plus adding, editing and removing cameras, printers, monitors and print files, changing settings, testing services and discovering cameras |
 
-Issue tokens from the **API** tab in Settings. Name a token, choose its scope and
+Issue tokens from **API and MCP** in Settings. Name a token, choose its scope and
 press **Generate**. The secret, a string starting `pg_`, is only shown once:
 
 ```http
@@ -300,7 +300,7 @@ The hub publishes every monitor to your MQTT broker as its own Home Assistant de
 [MQTT discovery](https://www.home-assistant.io/integrations/mqtt/#device-discovery). It needs
 the MQTT integration set up in Home Assistant and no custom component.
 
-1. Open **Settings**, then the **Home Assistant** tab.
+1. Open **Settings**, then **Home Assistant**.
 2. Turn on **Publish to an MQTT broker** and enter the broker's host.
 3. Add a username and password if the broker wants them, and **Use TLS** if it serves it.
 4. Press **Save broker settings**, which waits for a host and, if you change the host or port,

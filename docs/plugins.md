@@ -45,9 +45,9 @@ Four plugins are in the catalogue, and their source is in [`plugins/`](../plugin
 
 ## Installing a plugin
 
-![The Plugins tab in Settings, with one plugin installed, three more in the catalogue, a box for a repository and a button to import a zip](assets/plugins.png)
+![Plugins in Settings, with one plugin installed, three more in the catalogue, a box for a repository and a button to import a zip](assets/plugins.png)
 
-The Plugins tab in Settings lists what you have installed and what the catalogue offers.
+**Plugins** in Settings lists what you have installed and what the catalogue offers.
 
 | From | How |
 |---|---|
@@ -217,7 +217,7 @@ tokens go in and do not come out. A plugin with `printer:manage` or `settings` c
 printer or alert channel with its saved key, at the address it was saved with.
 
 Its own credentials work the same way. A plugin that needs a key shows a field for it on its
-page in the Plugins tab, once it's enabled. Paste the value there and PrintGuard holds it and fills it in as the
+page under **Plugins** in Settings, once it's enabled. Paste the value there and PrintGuard holds it and fills it in as the
 plugin's requests leave.
 
 Be clear on what that buys. The value never enters the sandbox, the plugin's stored data, the

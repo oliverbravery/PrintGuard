@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Link, useNavigate, useParams } from "react-router";
 import { fromBase64, renderMarkdown } from "../markdown";
 import { pluginFile, repositoryFiles, runsHere } from "../plugins";
 import { useStore } from "../store";
@@ -175,7 +176,6 @@ function PluginPage({
   fallback,
   manifest,
   origin,
-  onBack,
   meta,
   extra,
   children,
@@ -191,7 +191,6 @@ function PluginPage({
   fallback: string;
   manifest: PluginManifest;
   origin: string;
-  onBack: () => void;
   meta?: ReactNode;
   extra?: ReactNode;
   children?: ReactNode;
@@ -201,9 +200,9 @@ function PluginPage({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <button className="btn" onClick={onBack}>
+        <Link to="/settings/plugins" className="btn">
           Back to all plugins
-        </button>
+        </Link>
         {extra}
       </div>
       <div className="flex items-start gap-4">
@@ -329,7 +328,6 @@ function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () 
       fallback={manifest.description}
       manifest={manifest}
       origin={origin}
-      onBack={onBack}
       extra={
         <ConfirmButton
           onConfirm={() => {
@@ -411,7 +409,7 @@ function readableManifest(entry: CatalogueEntry, raw: Record<string, unknown>): 
   };
 }
 
-function StoreDetail({ entry, installed, onBack }: { entry: CatalogueEntry; installed: boolean; onBack: () => void }) {
+function StoreDetail({ entry, installed }: { entry: CatalogueEntry; installed: boolean }) {
   const [readme, setReadme] = useState<string | null | undefined>(undefined);
   const [manifest, setManifest] = useState<PluginManifest>(bareManifest(entry));
 
@@ -455,7 +453,6 @@ function StoreDetail({ entry, installed, onBack }: { entry: CatalogueEntry; inst
       fallback={entry.description ?? ""}
       manifest={manifest}
       origin={`${entry.repo}${entry.path ? `/${entry.path}` : ""} @ ${entry.ref.slice(0, 7)}`}
-      onBack={onBack}
     />
   );
 }
@@ -465,7 +462,9 @@ export function PluginsTab() {
   const [repo, setRepo] = useState("");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const { pluginId: openId } = useParams();
+  const navigate = useNavigate();
+  const setOpenId = (id: string | null) => navigate(id ? `/settings/plugins/${id}` : "/settings/plugins");
   const file = useRef<HTMLInputElement>(null);
   const plugins = engine?.plugins ?? [];
   const labels = engine?.plugin_platforms ?? {};
@@ -500,7 +499,7 @@ export function PluginsTab() {
   const opened = items.find((item) => item.id === openId);
   if (opened?.plugin) return <InstalledDetail plugin={opened.plugin} onBack={() => setOpenId(null)} />;
   if (opened?.entry) {
-    return <StoreDetail entry={opened.entry} installed={false} onBack={() => setOpenId(null)} />;
+    return <StoreDetail entry={opened.entry} installed={false} />;
   }
 
   const installFromRepo = () => {
@@ -512,8 +511,7 @@ export function PluginsTab() {
   return (
     <div className="space-y-4">
       <div>
-        <span className="label block">Plugins</span>
-        <span className="mt-1 block text-xs leading-relaxed text-text-2">
+        <span className="block text-sm text-text-2">
           Third-party code, installed switched off. Verified ones match the catalogue by hash. Read the rest before you
           enable them.
         </span>

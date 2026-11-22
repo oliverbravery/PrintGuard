@@ -19,8 +19,8 @@ Connecting a print service, sending it files and setting its temperatures.
 
 A camera and a printer are registered once each, then bound together by a monitor. One
 printer connection can back several monitors, and a monitor without a printer still watches
-and alerts. Each of the three carries a name you can change later, from **Edit** in the camera
-or printer registry and from a monitor's settings panel.
+and alerts. Each of the three carries a name you can change later, on the **Cameras** or
+**Printers** page or in a monitor's settings.
 
 ```mermaid
 flowchart LR
@@ -37,7 +37,7 @@ channels.
 
 ## Register a printer
 
-Open the printer registry, choose the service, fill in the form and press **Test connection**
+Open **Printers**, then **+ Register a printer**, choose the service, fill in the form and press **Test connection**
 before saving. A printer with a starred field left blank is not saved, and the error names the
 field. A key or password the service rejects fails the test with that as the reason, and so does
 an address that answers but not as the service's API does, or one that redirects.
@@ -184,7 +184,7 @@ The integration is experimental until it has been tried on more of these models.
 
 ## Sending prints
 
-The print library holds sliced files on the hub. Open **Prints** in the header and drop files in
+The print library holds sliced files on the hub. Open **Prints** and drop files in
 or browse for them.
 
 ![The print library: three sliced files with their slicer, print time and filament, with the printers each is tagged for](assets/prints.png)
@@ -266,9 +266,10 @@ it generated, and keeps the files of a print it could not read, saying so in the
 
 ## Temperatures and preheat
 
-A linked printer's nozzle and bed temperatures sit on its monitor's tile and in the monitor's
-panel, where a running print also gets a progress bar and the time left. The panel takes a
-target for either heater, applied on Enter or when you leave the field, and a row of preheat presets that set both at once.
+A linked printer's nozzle and bed temperatures sit on its monitor's row in the monitor list and
+beside the selected monitor's feed, where a running print also gets a progress bar and the time
+left. The **Preheat** pane takes a target for either heater, applied on Enter or when you leave
+the field, and a grid of presets that set both at once.
 **Edit** beside them changes the presets, which every printer shares, and **Off** turns every
 heater off.
 

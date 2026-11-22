@@ -345,10 +345,10 @@ untested, as is the `latest-nvidia` image.
 
 ## Staying up to date
 
-The hub checks GitHub releases at start and then once a day, and the header's version chip turns
-into an update badge. Open it to read the changelog for any release, then update. The check sends nothing about
-you, and **Automatically check for updates** in the **Updates** tab in Settings turns that
-check off.
+The hub checks GitHub releases at start and then once a day, and the version in the top bar turns
+into an update link, with the same under **Updates** in Settings on a phone. Open it to read the
+changelog for any release, then update. The check sends nothing about you, and **Automatically
+check for updates** under **Updates** in Settings turns that check off.
 
 ```bash
 docker compose pull && docker compose up -d --wait

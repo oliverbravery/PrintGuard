@@ -47,33 +47,27 @@ export function MonitorEditPage() {
           <Toggle label="Push notifications" on={monitor.notify} onChange={(v) => updateMonitor(monitor.id, { notify: v })} />
         </Section>
         <Section title="Camera">
-          <label className="block">
-            <span className="label mb-1 block">Camera</span>
-            <select className="field" value={monitor.camera_id} onChange={(e) => updateMonitor(monitor.id, { camera_id: e.target.value })}>
+          <select className="field" aria-label="Camera" value={monitor.camera_id} onChange={(e) => updateMonitor(monitor.id, { camera_id: e.target.value })}>
               <option value="">No camera</option>
               {(engine?.cameras ?? []).map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
               ))}
-            </select>
-          </label>
+          </select>
           <Link to={monitor.camera_id ? `/cameras/${monitor.camera_id}` : "/cameras"} className="btn-inline">
             Manage cameras
           </Link>
         </Section>
         <Section title="Printer">
-          <label className="block">
-            <span className="label mb-1 block">Printer</span>
-            <select className="field" value={monitor.printer_id} onChange={(e) => updateMonitor(monitor.id, { printer_id: e.target.value })}>
+          <select className="field" aria-label="Printer" value={monitor.printer_id} onChange={(e) => updateMonitor(monitor.id, { printer_id: e.target.value })}>
               <option value="">No printer (alerts only)</option>
               {(engine?.printers ?? []).map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
                 </option>
               ))}
-            </select>
-          </label>
+          </select>
           <Link to={monitor.printer_id ? `/printers/${monitor.printer_id}` : "/printers"} className="btn-inline">
             Manage printers
           </Link>

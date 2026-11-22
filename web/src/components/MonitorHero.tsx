@@ -12,6 +12,7 @@ import { RiskMeter } from "./RiskMeter";
 import { SaveStatus } from "./SaveStatus";
 import { Segmented } from "./Segmented";
 import { Slider } from "./Slider";
+import { Sparkline } from "./Sparkline";
 import { DeviceStatus, monitorState, Status } from "./Status";
 import { TabPanel, Tabs } from "./Tabs";
 
@@ -63,6 +64,9 @@ function ControlPane({ monitor }: { monitor: Monitor }) {
           </Link>
         </div>
         <RiskMeter score={score} threshold={monitor.threshold} size="hero" />
+        <div className="mt-2">
+          <Sparkline points={history[monitor.id] ?? []} threshold={monitor.threshold} />
+        </div>
         {monitor.alert && (
           <p className="mono mt-2 text-xs text-bad">
             {[`defect at ${(monitor.alert.score * 100).toFixed(0)}%`, alertOutcome(monitor.alert.action)].filter(Boolean).join(", ")}

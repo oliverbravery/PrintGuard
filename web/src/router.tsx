@@ -21,7 +21,7 @@ export const router = createHashRouter([
       { path: "prints/:printId?", element: <PrintsPage /> },
       { path: "cameras/:cameraId?", element: <CamerasPage /> },
       { path: "printers/:printerId?", element: <PrintersPage /> },
-      { path: "settings/:section?", element: <SettingsPage /> },
+      { path: "settings/:section?/:pluginId?", element: <SettingsPage /> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],
   },

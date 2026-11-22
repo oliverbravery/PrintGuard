@@ -136,7 +136,7 @@ table and the nav line at the top of every page.
 Writing style for docs and release notes:
 
 - British English, concise and factual, with no filler, no salesmanship and no emoji in prose.
-- Only punctuation you would type. No em dashes and no arrows, so write "the Plugins tab in
+- Only punctuation you would type. No em dashes and no arrows, so write "Plugins in
   Settings" rather than drawing a path with symbols.
 - Start a new sentence instead of hanging a list or an explanation off a colon.
 - Prefer a table or a diagram over a long paragraph. Mermaid renders on GitHub, so use it for

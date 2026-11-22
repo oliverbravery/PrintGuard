@@ -41,11 +41,11 @@ alerting twice.
 
 Open a monitor from the dashboard to change these. They save as you move them.
 
-![A monitor's panel: live risk, printer controls, temperatures, preheat presets and the monitoring settings](assets/printer-detail.png)
+![The selected monitor: its feed, live risk, temperatures, pause and cancel, with the Tune and Preheat panes beside them](assets/printer-detail.png)
 
 | Setting | Default | Range | What it does |
 |---|---|---|---|
-| **Watch this monitor** | On | | Turns the monitor off without deleting it. A switched-off monitor reads **off** on its tile |
+| **Watch this monitor** | On | | Turns the monitor off without deleting it. A switched-off monitor reads **off** in the monitor list |
 | **Camera** | The one chosen when the monitor is made | Any registered camera, or none | The camera whose frames the monitor scores. With none the monitor doesn't watch |
 | **Printer** | The one chosen when the monitor is made | Any registered printer, or none | The printer the monitor follows and can pause or cancel. With none it only alerts |
 | **Alert threshold** | 0.75 | 0.05 to 0.95 | The score a frame has to reach to count as a defect |
@@ -77,7 +77,7 @@ These settings live on the camera, under **Cameras**, so every monitor using tha
 them. They apply to the live view, the frames the model scores, the snapshots in your alerts and
 the frames the [API](api.md) returns.
 
-![A camera open for editing in the camera registry, with its name, brightness, contrast, sharpness, detection rate and rotation](assets/camera-editor.png)
+![A camera open on the Cameras page, with its name, brightness, contrast, sharpness, detection rate and rotation](assets/camera-editor.png)
 
 | Setting | Default | Range | What it does |
 |---|---|---|---|
@@ -106,11 +106,11 @@ rate, since the consecutive count is in frames.
 
 ## Risk history
 
-A monitor's panel shows the live score on a gauge beside its last 240 readings, which is 48
+The selected monitor shows the live score on a bar above its last 240 readings, which is 48
 seconds at best since the dashboard hears of five results a second at most.
-**View detailed history** opens the full page.
+**History** beside it, or on the monitor's row in the list, opens the full page.
 
-![A monitor's detailed history: stat tiles, the risk chart with a gap where it wasn't watching, two prints kept and three risky moments](assets/history.png)
+![A monitor's history page: stat tiles, the risk chart with a gap where it wasn't watching, two prints kept and three risky moments](assets/history.png)
 
 | Part | Shows |
 |---|---|
@@ -136,7 +136,7 @@ a button to review the frames from the last print, where you can label them and 
 detection model. Nothing is sent unless you press **Send**.
 [Training frames](feedback.md) covers what's kept, what's sent and how to switch the prompt off.
 
-![The review sheet with a failed print's frames labelled good, failure and real failure](assets/review.png)
+![The review page with a failed print's frames labelled good, failure and real failure beside the recording](assets/review.png)
 
 ## Choosing values
 

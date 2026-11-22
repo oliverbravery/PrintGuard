@@ -17,8 +17,8 @@ Where PrintGuard gets video from, and how to add each kind of camera.
 
 ## Camera sources
 
-Open **Cameras** in the header. Printer webcams have their own tab, and **Register new** adds
-the other three.
+Open **Cameras**. Printer webcams have their own tab, and **+ Register a camera** adds the other
+three.
 
 | Source | What it is | Keeps watching with every window closed |
 |---|---|---|
@@ -136,7 +136,7 @@ Rename it from **Edit**, then set it up for the model. Rotation, the crop, brigh
 contrast, sharpness and the detection rate are all in
 [tuning the camera](monitoring.md#tuning-the-camera). Then bind it to a monitor.
 
-![A camera open for editing in the camera registry, with its name, brightness, contrast, sharpness, detection rate and rotation](assets/camera-editor.png)
+![A camera open on the Cameras page, with its name, brightness, contrast, sharpness, detection rate and rotation](assets/camera-editor.png)
 
 A camera that no monitor is watching and nobody is viewing goes into standby after about ten
 seconds and stops being decoded. That covers an idle printer, a monitor you switched off and a
