@@ -1,5 +1,6 @@
 import { createHashRouter, Navigate } from "react-router";
 import { CamerasPage } from "./components/CamerasPage";
+import { DrawFailure } from "./components/DrawFailure";
 import { HistoryPage } from "./components/HistoryPage";
 import { MonitorEditPage } from "./components/MonitorEditPage";
 import { MonitorsPage } from "./components/MonitorsPage";
@@ -12,6 +13,7 @@ import { Shell } from "./components/Shell";
 export const router = createHashRouter([
   {
     element: <Shell />,
+    errorElement: <DrawFailure />,
     children: [
       { index: true, element: <MonitorsPage /> },
       { path: "monitors/:monitorId", element: <MonitorsPage /> },
