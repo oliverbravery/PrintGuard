@@ -97,7 +97,8 @@ scored as overlapping squares the height of
 the crop, each overlapping the next by at least a fifth, and a frame is as risky as its worst
 square. The crop editor draws the squares, and each one adds the cost of scoring a frame, so a
 crop twice as wide as it is tall halves the detection rate your hardware can sustain. Past 4 to 1
-only the middle is watched. Rotation is applied first, so you draw the crop on the picture as you see it.
+only the middle is watched. Rotation is applied first, so you draw the crop on the picture as you see it,
+and turning a camera by 90° keeps its crop the same size and in the same place.
 A crop that runs off the frame is cut back to the part inside it.
 
 Detection normally runs as often as the hardware and the camera allow. Lower **Detection rate**

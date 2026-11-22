@@ -6,7 +6,7 @@ import type { Camera, CameraSource } from "../types";
 import { publishStream, published } from "../stream";
 import { cameraStatus, sourceLabel } from "../cameras";
 import { ConfirmButton } from "./ConfirmButton";
-import { CropEditor } from "./CropEditor";
+import { CropEditor, frameAspect, turnedCrop, type FrameSize } from "./CropEditor";
 import { useCovered } from "./Feed";
 import { NameField } from "./NameField";
 import { SaveStatus } from "./SaveStatus";
@@ -44,6 +44,11 @@ function CameraEditor({ camera }: { camera: Camera }) {
       : null;
   const detectFpsCeiling = Math.min(UNCAPPED_DETECT_FPS, Math.ceil(camera.max_fps));
   const covered = useCovered();
+  const [frame, setFrame] = useState<FrameSize | null>(null);
+  const rotate = (rotation: number) => {
+    const turned = (rotation - camera.rotation) % 180 !== 0;
+    updateCamera(camera.id, turned && camera.crop ? { rotation, crop: turnedCrop(camera.crop, frameAspect(frame, camera.rotation)) } : { rotation });
+  };
   return (
     <>
       <DetailHead title={camera.name}>
@@ -59,7 +64,7 @@ function CameraEditor({ camera }: { camera: Camera }) {
       </DetailHead>
       <div className="grid xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <div className="min-w-0 border-b border-line-0 xl:border-r">
-          <CropEditor camera={camera} active={!covered} onChange={(crop) => updateCamera(camera.id, { crop })} />
+          <CropEditor camera={camera} active={!covered} frame={frame} onFrame={setFrame} onChange={(crop) => updateCamera(camera.id, { crop })} />
           <div className="mono flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line-0 px-4 py-2 text-xs">
             <Status tone={camera.online ? "ok" : camera.standby ? "idle" : "bad"}>{cameraStatus(camera)}</Status>
             <span className="min-w-0 truncate text-text-1">{sourceLabel(camera.source)}</span>
@@ -102,7 +107,7 @@ function CameraEditor({ camera }: { camera: Camera }) {
             label="Rotation"
             options={[0, 90, 180, 270].map((deg) => ({ value: String(deg), label: `${deg}°` }))}
             value={String(camera.rotation ?? 0)}
-            onChange={(deg) => updateCamera(camera.id, { rotation: Number(deg) })}
+            onChange={(deg) => rotate(Number(deg))}
           />
         </div>
       </div>

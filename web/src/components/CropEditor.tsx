@@ -10,14 +10,14 @@ const SQUARE_OVERLAP = 0.2;
 
 const WHOLE_FRAME: Crop = { x: 0, y: 0, w: 1, h: 1 };
 
-function squareIn(region: Crop, frameAspect: number): Crop {
-  const w = Math.min(region.w, region.h / frameAspect);
-  const h = w * frameAspect;
+function squareIn(region: Crop, aspect: number): Crop {
+  const w = Math.min(region.w, region.h / aspect);
+  const h = w * aspect;
   return { x: region.x + (region.w - w) / 2, y: region.y + (region.h - h) / 2, w, h };
 }
 
-function isSquare(region: Crop, frameAspect: number): boolean {
-  return Math.abs(region.w * frameAspect - region.h) <= 0.01 * region.h;
+function isSquare(region: Crop, aspect: number): boolean {
+  return Math.abs(region.w * aspect - region.h) <= 0.01 * region.h;
 }
 
 function squareStarts(long: number, short: number): number[] {
@@ -29,10 +29,28 @@ function squareStarts(long: number, short: number): number[] {
   return Array.from({ length: count }, (_, index) => (long - span) / 2 + index * step);
 }
 
-function scoredSquares(crop: Crop, frameAspect: number): Crop[] {
-  const width = crop.w * frameAspect;
-  if (width >= crop.h) return squareStarts(width, crop.h).map((start) => ({ x: crop.x + start / frameAspect, y: crop.y, w: crop.h / frameAspect, h: crop.h }));
+function scoredSquares(crop: Crop, aspect: number): Crop[] {
+  const width = crop.w * aspect;
+  if (width >= crop.h) return squareStarts(width, crop.h).map((start) => ({ x: crop.x + start / aspect, y: crop.y, w: crop.h / aspect, h: crop.h }));
   return squareStarts(crop.h, width).map((start) => ({ x: crop.x, y: crop.y + start, w: crop.w, h: width }));
+}
+
+export interface FrameSize {
+  w: number;
+  h: number;
+}
+
+export function frameAspect(frame: FrameSize | null, rotation: number): number {
+  const { w, h } = frame ?? { w: 16, h: 9 };
+  return rotation === 90 || rotation === 270 ? h / w : w / h;
+}
+
+export function turnedCrop(crop: Crop, aspectBeforeTurn: number): Crop {
+  const w = crop.w * aspectBeforeTurn;
+  const h = crop.h / aspectBeforeTurn;
+  const fit = Math.min(1, 1 / w, 1 / h);
+  const within = (start: number, size: number) => Math.min(Math.max(start, 0), 1 - size);
+  return { x: within(crop.x + (crop.w - w * fit) / 2, w * fit), y: within(crop.y + (crop.h - h * fit) / 2, h * fit), w: w * fit, h: h * fit };
 }
 
 function toPercent(crop: Crop): PercentCrop {
@@ -43,31 +61,40 @@ function fromPercent(crop: PercentCrop): Crop {
   return { x: crop.x / 100, y: crop.y / 100, w: crop.width / 100, h: crop.height / 100 };
 }
 
-export function CropEditor({ camera, active, onChange }: { camera: Camera; active: boolean; onChange: (crop: Crop | null) => void }) {
+export function CropEditor({
+  camera,
+  active,
+  frame,
+  onFrame,
+  onChange,
+}: {
+  camera: Camera;
+  active: boolean;
+  frame: FrameSize | null;
+  onFrame: (frame: FrameSize) => void;
+  onChange: (crop: Crop | null) => void;
+}) {
   const crop = camera.crop ?? null;
   const [editing, setEditing] = useState(false);
   const controls = useFocusKept<HTMLDivElement>();
   const [draft, setDraft] = useState<PercentCrop | null>(null);
   const [freeform, setFreeform] = useState(false);
-  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const aspect = frameAspect(frame, camera.rotation);
+  const watched = toPercent(crop ?? squareIn(WHOLE_FRAME, aspect));
+  const region = editing && draft ? fromPercent(draft) : (crop ?? squareIn(WHOLE_FRAME, aspect));
+  const squares = crop || editing ? scoredSquares(region, aspect) : [region];
 
-  const swap = camera.rotation === 90 || camera.rotation === 270;
-  const frameAspect = dims ? (swap ? dims.h / dims.w : dims.w / dims.h) : 16 / 9;
-  const watched = toPercent(crop ?? squareIn(WHOLE_FRAME, frameAspect));
-  const region = editing && draft ? fromPercent(draft) : (crop ?? squareIn(WHOLE_FRAME, frameAspect));
-  const squares = crop || editing ? scoredSquares(region, frameAspect) : [region];
-
-  const measureFrame = (size: { w: number; h: number }) => {
-    setDims(size);
+  const measureFrame = (size: FrameSize) => {
+    onFrame(size);
     setDraft(null);
   };
 
   return (
     <div ref={controls}>
-      <div className="relative">
+      <div className="relative grid aspect-video place-items-center bg-ink-1 [container-type:size]">
         <ReactCrop
           className={`ReactCrop--no-animate select-none ${editing ? "touch-none" : ""}`}
-          style={{ display: "block" }}
+          style={{ display: "block", width: `min(100cqw, ${aspect * 100}cqh)` }}
           crop={editing && draft ? draft : watched}
           aspect={freeform ? undefined : 1}
           minWidth={MIN_SIZE_PX}
@@ -76,7 +103,7 @@ export function CropEditor({ camera, active, onChange }: { camera: Camera; activ
           onChange={(_, percent) => setDraft(percent)}
           onComplete={(_, percent) => onChange(fromPercent(percent))}
         >
-          <Feed camera={camera} active={active} aspect={frameAspect} uncropped onFrameSize={measureFrame}>
+          <Feed camera={camera} active={active} aspect={aspect} uncropped onFrameSize={measureFrame}>
             {squares.length > 1 &&
               squares.map((square, index) => (
                 <span
@@ -93,7 +120,7 @@ export function CropEditor({ camera, active, onChange }: { camera: Camera; activ
             className="btn absolute top-3 right-3 z-[5]"
             onClick={() => {
               setDraft(watched);
-              setFreeform(!isSquare(fromPercent(watched), frameAspect));
+              setFreeform(!isSquare(fromPercent(watched), aspect));
               setEditing(true);
             }}
           >
@@ -112,7 +139,7 @@ export function CropEditor({ camera, active, onChange }: { camera: Camera; activ
                 onClick={() => {
                   setFreeform(shape);
                   if (shape) return;
-                  const square = squareIn(region, frameAspect);
+                  const square = squareIn(region, aspect);
                   setDraft(toPercent(square));
                   onChange(square);
                 }}
