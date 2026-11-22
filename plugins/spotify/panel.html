@@ -1,7 +1,8 @@
 <!--
-  The whole plugin. A panel draws itself, so this is markup, styles and script
-  rather than a tree of nodes, and `pg` is the same context a node-tree plugin
-  gets on `ctx`.
+  The whole plugin. It draws nothing of its own: pg.view hands the dashboard an
+  item, which PrintGuard draws as a row like a monitor's, with the cover where a
+  camera's frame would be, the track beside it and the transport at the end.
+  A press on one of those buttons comes back here as an action event.
 
   There is no network in here. Every request goes out through pg.http, which
   PrintGuard makes on the plugin's behalf against the addresses the manifest
@@ -9,108 +10,33 @@
   named with. {{secret.oauth}} is the access token PrintGuard holds from the
   sign-in, filled in as the request leaves, so this file never sees one.
 -->
-<style>
-  /* PrintGuard injects its theme tokens on :root before this, and the tile the
-     panel sits in already paints the background, so nothing here sets a colour
-     of its own. */
-  /* The tile centres the panel, and the padding below it lifts the stack a
-     little above the middle. */
-  body {
-    align-items: center;
-    color: var(--color-text-0);
-    display: flex;
-    flex-direction: column;
-    font-family: var(--font-body);
-    gap: 12px;
-    padding-bottom: 26px;
-    text-align: center;
-  }
-  #cover {
-    border-radius: 6px;
-    height: 132px;
-    object-fit: cover;
-    width: 132px;
-  }
-  #cover:not([src]) {
-    background: color-mix(in srgb, var(--color-text-2) 20%, transparent);
-  }
-  .now {
-    align-items: center;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    max-width: 100%;
-  }
-  #title {
-    font-size: 0.9rem;
-    font-weight: 600;
-  }
-  #artist,
-  #note {
-    color: var(--color-text-2);
-    font-size: 0.72rem;
-  }
-  #title,
-  #artist {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .controls {
-    display: flex;
-    gap: 6px;
-    margin-top: 6px;
-  }
-  button {
-    background: color-mix(in srgb, var(--color-text-0) 8%, transparent);
-    border: 1px solid var(--color-line-0);
-    border-radius: 4px;
-    color: var(--color-text-1);
-    cursor: pointer;
-    font-family: var(--font-display);
-    font-size: 0.7rem;
-    padding: 5px 11px;
-  }
-  button:hover:not(:disabled) {
-    border-color: var(--color-accent);
-    color: var(--color-accent);
-  }
-  button:disabled {
-    cursor: default;
-    opacity: 0.45;
-  }
-</style>
-
-<img id="cover" alt="" />
-<div class="now">
-  <span id="title">Not connected</span>
-  <span id="artist">Connect Spotify in the Plugins tab in Settings.</span>
-  <div class="controls">
-    <button id="prev" title="Previous">◀◀</button>
-    <button id="toggle" title="Play">▶</button>
-    <button id="next" title="Next">▶▶</button>
-  </div>
-  <span id="note"></span>
-</div>
-
 <script>
   const PLAYER = "https://api.spotify.com/v1/me/player";
   const POLL_MS = 5000;
-  const PREMIUM_NOTE = "Spotify only lets Premium accounts drive the player, so these do nothing on a free one.";
+  const PREMIUM_NOTE = "Playback controls need Spotify Premium.";
 
-  const el = (id) => document.getElementById(id);
+  const shown = { title: "Not connected", description: "Connect Spotify in the Plugins tab in Settings.", image: "" };
   const state = { playing: false, cover: "", premium: true };
 
   // Whether the transport buttons do anything. Spotify answers 403 on a free
-  // account whatever scopes were granted, so the panel says so once it knows
+  // account whatever scopes were granted, so the row says so once it knows
   // rather than leaving three buttons that quietly fail.
   const signedIn = () => pg.secrets.includes("oauth");
 
-  const setControls = () => {
-    el("toggle").textContent = state.playing ? "❚❚" : "▶";
-    el("toggle").title = state.playing ? "Pause" : "Play";
-    el("note").textContent = state.premium ? "" : PREMIUM_NOTE;
-    for (const id of ["prev", "toggle", "next"]) el(id).disabled = !state.premium || !signedIn() || rejected;
+  // The row is redrawn whole every time anything on it changes.
+  const draw = () => {
+    const live = state.premium && signedIn() && !rejected;
+    pg.view({
+      type: "item",
+      image: shown.image,
+      title: shown.title,
+      description: state.premium ? shown.description : PREMIUM_NOTE,
+      actions: [
+        { type: "button", icon: "previous", label: "Previous", action: "previous", disabled: !live },
+        { type: "button", icon: state.playing ? "pause" : "play", label: state.playing ? "Pause" : "Play", action: "toggle", disabled: !live },
+        { type: "button", icon: "next", label: "Next", action: "next", disabled: !live },
+      ],
+    });
   };
 
   const poll = () => pg.http({ url: PLAYER, headers: { Authorization: "Bearer {{secret.oauth}}" }, tag: "player" });
@@ -123,19 +49,19 @@
     setTimeout(poll, 400);
   };
 
-  el("toggle").onclick = () => {
-    state.playing = !state.playing;
-    setControls();
-    if (state.playing) send({ method: "PUT", url: "https://api.spotify.com/v1/me/player/play" });
-    else send({ method: "PUT", url: "https://api.spotify.com/v1/me/player/pause" });
-  };
-  el("prev").onclick = () => send({ method: "POST", url: "https://api.spotify.com/v1/me/player/previous" });
-  el("next").onclick = () => send({ method: "POST", url: "https://api.spotify.com/v1/me/player/next" });
+  pg.on("action", ({ name }) => {
+    if (name === "toggle") {
+      state.playing = !state.playing;
+      draw();
+      send({ method: "PUT", url: `${PLAYER}/${state.playing ? "play" : "pause"}` });
+    } else if (name === "previous") send({ method: "POST", url: `${PLAYER}/previous` });
+    else if (name === "next") send({ method: "POST", url: `${PLAYER}/next` });
+  });
 
-  const shown = (item, playing) => {
-    state.playing = playing;
-    el("title").textContent = item.name;
-    el("artist").textContent = (item.artists || []).map((artist) => artist.name).join(", ");
+  const playing = (item, isPlaying) => {
+    state.playing = isPlaying;
+    shown.title = item.name;
+    shown.description = (item.artists || []).map((artist) => artist.name).join(", ");
     // The panel may show pictures it was handed but may not fetch one, so the
     // cover comes back through pg.http as bytes and becomes a data URL here.
     const art = (item.album.images || [])[0];
@@ -143,30 +69,30 @@
       state.cover = art.url;
       pg.http({ url: art.url, binary: true, tag: "cover" });
     }
-    setControls();
+    draw();
   };
 
   const idle = (message, title = "Nothing playing") => {
     state.cover = "";
-    el("cover").removeAttribute("src");
-    el("title").textContent = title;
-    el("artist").textContent = message;
-    setControls();
+    shown.image = "";
+    shown.title = title;
+    shown.description = message;
+    draw();
     pg.background("");
   };
 
   pg.on("http", (event) => {
     if (event.tag === "control") {
       state.premium = event.status !== 403;
-      setControls();
+      draw();
     } else if (event.tag === "cover") {
-      const image = `data:image/jpeg;base64,${event.body}`;
-      el("cover").src = image;
-      pg.background(image);
+      shown.image = `data:image/jpeg;base64,${event.body}`;
+      draw();
+      pg.background(shown.image);
     } else if (event.tag === "player") {
       if (event.status === 401) reject();
       else if (event.status === 204 || !event.body || !event.body.item) idle("Start something on any of your devices.");
-      else shown(event.body.item, event.body.is_playing === true);
+      else playing(event.body.item, event.body.is_playing === true);
     }
   });
 
@@ -189,10 +115,10 @@
   };
 
   const sync = () => {
-    setControls();
     if (signedIn() && !rejected && polling === null) {
       poll();
       polling = setInterval(poll, POLL_MS);
+      draw();
     } else if (!signedIn() && (polling !== null || rejected)) {
       rejected = false;
       stopPolling();
@@ -203,6 +129,7 @@
   // Watching the sign-in on a timer, since pg.on("state") would need the
   // state:read permission that nothing else here has a use for.
   pg.on("ready", () => {
+    draw();
     sync();
     setInterval(sync, 1000);
   });
