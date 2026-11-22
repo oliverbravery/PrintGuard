@@ -57,7 +57,7 @@ export function PluginIcon({ url, name, size }: { url: string | null; name: stri
   );
 }
 
-function Runs({ platforms }: { platforms: string[] | undefined }) {
+function Runs({ platforms, needs }: { platforms: string[] | undefined; needs?: string }) {
   const engine = useStore((s) => s.engine);
   const labels = engine?.plugin_platforms ?? {};
   const host = engine?.host ?? "";
@@ -71,6 +71,7 @@ function Runs({ platforms }: { platforms: string[] | undefined }) {
         </span>
       ))}
       {!here && <span className="chip chip-bad">Not on {labels[host] ?? host}</span>}
+      {needs && <span className="chip chip-bad">Needs PrintGuard {needs}</span>}
     </div>
   );
 }
@@ -83,7 +84,7 @@ function InstallButton({ entry, installed }: { entry: CatalogueEntry; installed:
   return (
     <button
       className="btn btn-primary shrink-0"
-      disabled={installed || !here || isPending("plugin.install")}
+      disabled={installed || !here || entry.supported === false || isPending("plugin.install")}
       onClick={() => installPlugin({ kind: "github", repo: entry.repo, path: entry.path ?? "", ref: entry.ref })}
     >
       {installed ? "Installed" : "Install"}
@@ -156,6 +157,7 @@ function PluginCard({ item, onOpen }: { item: StoreItem; onOpen: () => void }) {
             {name}
           </button>
           {attention && <span className="chip chip-bad">needs attention</span>}
+          {entry?.supported === false && <span className="chip chip-bad">needs v{entry.min_printguard}</span>}
         </span>
         <span className="clamp-2 block text-xs leading-snug text-text-2">{description}</span>
       </div>
@@ -170,6 +172,7 @@ function PluginPage({
   author,
   version,
   platforms,
+  needs,
   action,
   media,
   readme,
@@ -185,6 +188,7 @@ function PluginPage({
   author: string;
   version: string;
   platforms: string[] | undefined;
+  needs?: string;
   action?: ReactNode;
   media: { src: string; href?: string }[];
   readme: { text: string; base?: string; skip?: string[]; sources?: Record<string, string>; imagePrefixes: string[] } | null | undefined;
@@ -213,7 +217,7 @@ function PluginPage({
             {author}
             {version && ` · v${version}`}
           </span>
-          <Runs platforms={platforms} />
+          <Runs platforms={platforms} needs={needs} />
         </div>
         {action}
       </div>
@@ -440,6 +444,7 @@ function StoreDetail({ entry, installed }: { entry: CatalogueEntry; installed: b
       author={entry.author ?? ""}
       version={entry.version ?? ""}
       platforms={entry.platforms}
+      needs={entry.supported === false ? entry.min_printguard : undefined}
       action={<InstallButton entry={entry} installed={installed} />}
       media={(entry.media ?? []).flatMap((shot) => {
         const src = pluginFile(entry, shot);

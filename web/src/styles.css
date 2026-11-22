@@ -138,7 +138,7 @@ body {
 
 :root[data-glass] {
   --painted-surface: var(--glass-surface, rgb(0 0 0 / 0.1));
-  --painted-glass: blur(30px) saturate(180%);
+  --painted-glass: blur(30px);
   --painted-ink: var(--glass-ink, #ffffff);
   --painted-muted: var(--glass-muted, rgb(255 255 255 / 0.85));
   --painted-contrast: var(--glass-contrast, rgb(0 0 0));
@@ -176,13 +176,22 @@ body {
 
 :root[data-glass] .panel,
 :root[data-glass] .surface,
-:root[data-glass] .app-main,
+:root[data-glass] .sheet {
+  backdrop-filter: var(--painted-glass);
+}
+
+:root[data-glass] .panel,
+:root[data-glass] .surface,
 :root[data-glass] .sheet,
+:root[data-glass] .app-main,
 :root[data-glass] .topbar,
 :root[data-glass] .dock {
   background: var(--painted-surface) !important;
-  backdrop-filter: var(--painted-glass);
   border-color: var(--painted-edge);
+}
+
+:root[data-glass] [data-painted]::before {
+  filter: blur(28px) saturate(180%);
 }
 
 :root[data-glass] .btn:not(.btn-primary),

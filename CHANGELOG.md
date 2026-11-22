@@ -12,6 +12,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 ### Added
 
 - Two new detection models, Light and Standard. On frames from 30 hubs none of the models was trained on, Standard catches 10 of 20 failed prints where the old model caught 1, with the same 1 in 70 good prints alarmed. Pick one when you first open the dashboard or in Settings under Detection, where a chart compares them with Obico's.
+- Plugins sit in rows of their own under your monitors, and a plugin can draw its row with a picture, a title and buttons in the dashboard's own style.
+- A plugin can name the oldest PrintGuard it runs on, and an older hub won't install it. Spotify 1.1.0 needs 3.0.0.
 
 ### Changed
 

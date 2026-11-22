@@ -74,6 +74,10 @@ export class PluginPanelHost {
     this.port.postMessage({ t: "event", event });
   }
 
+  act(name: string, arg: unknown): void {
+    this.port.postMessage({ t: "action", name, arg });
+  }
+
   private fail(reason: string): void {
     if (this.dead) return;
     log("warn", `plugin ${this.id} (panel.html) stopped: ${reason}`);

@@ -396,7 +396,7 @@ const spotifyRequests = (page: import("@playwright/test").Page) =>
 
 const spotifyPanel = async (page: import("@playwright/test").Page, secretsSet: string[]) => {
   await dashboardWithPlugin(page, SPOTIFY_PANEL, ["net", "oauth", "background"], ["panel"], {}, "panel.html", secretsSet);
-  return page.frameLocator("iframe[title='Picture in picture panel']");
+  return page.getByRole("region", { name: "Plugins" });
 };
 
 test("the Spotify panel asks Spotify nothing until it is signed in, and stops when it is disconnected", async ({ page }) => {
@@ -521,7 +521,44 @@ test("an installed plugin draws its panel with a real camera feed", async ({ pag
   const panel = page.locator("section", { hasText: "Picture in picture" });
   await expect(panel.getByRole("button", { name: "Workshop" })).toBeVisible();
   await expect(panel.locator("video")).toBeAttached();
-  await expect(panel.getByText("verified")).toBeVisible();
+  await expect(panel.getByText("third party")).toHaveCount(0);
+});
+
+test("an item draws as a row with its picture, title and actions, and a press reaches plugin.js", async ({ page }) => {
+  const code = `
+plugin.action((name, arg, ctx) => { ctx.store.pressed = name; });
+plugin.render((ctx) => ({
+  type: "item",
+  image: "https://elsewhere.example/cover.png",
+  title: ctx.store.pressed ? "Pressed " + ctx.store.pressed : "Nothing pressed",
+  description: "From plugin.js",
+  actions: [{ type: "button", icon: "play", label: "Play", action: "play" }, { type: "button", label: "Stop", action: "stop", disabled: true }],
+}));`;
+  await dashboardWithPlugin(page, code);
+  const row = page.getByRole("region", { name: "Plugins" }).getByRole("listitem");
+  await expect(row.getByText("Nothing pressed")).toBeVisible();
+  await expect(row.getByText("From plugin.js")).toBeVisible();
+  await expect(row.locator("img")).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "Stop" })).toBeDisabled();
+
+  await row.getByRole("button", { name: "Play" }).click();
+  await expect(row.getByText("Pressed play")).toBeVisible();
+});
+
+test("a panel.html hands its row to the dashboard with pg.view and hears presses as action events", async ({ page }) => {
+  const html = `<p>drawn by the panel</p>
+<script>
+  const draw = (title) => pg.view({ type: "item", title, actions: [{ type: "button", label: "Ping", action: "ping", arg: 7 }] });
+  pg.on("action", (event) => draw("Heard " + event.name + " " + event.arg));
+  draw("From the panel");
+</script>`;
+  await dashboardWithPlugin(page, html, ["state:read"], ["panel"], {}, "panel.html");
+  const row = page.getByRole("region", { name: "Plugins" }).getByRole("listitem");
+  await expect(row.getByText("From the panel")).toBeVisible();
+  await expect(page.locator("iframe[title='Picture in picture panel']")).toBeHidden();
+
+  await row.getByRole("button", { name: "Ping" }).click();
+  await expect(row.getByText("Heard ping 7")).toBeVisible();
 });
 
 test("a camera node is refused when the feed permission is not granted", async ({ page }) => {

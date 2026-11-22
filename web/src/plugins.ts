@@ -253,14 +253,38 @@ export class PluginHost {
 const CONTAINERS = ["row", "col"];
 const LEAVES = ["text", "chip", "camera", "image", "float", "button", "select", "input", "toggle"];
 const MAX_NODES = 400;
+const MAX_IMAGE_CHARS = 3 * 1024 * 1024;
+const IMAGE_URL = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/;
 
-function normalise(raw: unknown, budget = { left: MAX_NODES }): PluginNode | null {
+export const BUTTON_ICONS = ["play", "pause", "stop", "previous", "next", "refresh"] as const;
+
+export function imageUrl(raw: unknown): string | null {
+  const image = String(raw ?? "");
+  return image.length <= MAX_IMAGE_CHARS && IMAGE_URL.test(image) ? image : null;
+}
+
+function itemImage(raw: unknown): string | undefined {
+  if (typeof raw !== "string" || !raw) return undefined;
+  return raw.startsWith("data:") ? (imageUrl(raw) ?? undefined) : raw.slice(0, 120);
+}
+
+function children(raw: unknown, budget: { left: number }): PluginNode[] {
+  return (Array.isArray(raw) ? raw : []).map((child) => normalise(child, budget, false)).filter(Boolean) as PluginNode[];
+}
+
+export function normalise(raw: unknown, budget = { left: MAX_NODES }, root = true): PluginNode | null {
   if (!raw || typeof raw !== "object" || budget.left-- <= 0) return null;
   const node = raw as Record<string, unknown>;
   const type = String(node.type ?? "");
-  if (CONTAINERS.includes(type)) {
-    const children = Array.isArray(node.children) ? node.children : [];
-    return { type, children: children.map((child) => normalise(child, budget)).filter(Boolean) as PluginNode[] } as PluginNode;
+  if (CONTAINERS.includes(type)) return { type, children: children(node.children, budget) };
+  if (type === "item" && root) {
+    return {
+      type,
+      title: String(node.title ?? "").slice(0, 120),
+      description: node.description === undefined ? undefined : String(node.description).slice(0, 200),
+      image: itemImage(node.image),
+      actions: children(node.actions, budget),
+    };
   }
   if (!LEAVES.includes(type)) return null;
   return {
@@ -275,6 +299,8 @@ function normalise(raw: unknown, budget = { left: MAX_NODES }): PluginNode | nul
     kind: node.kind === "number" ? "number" : undefined,
     placeholder: node.placeholder === undefined ? undefined : String(node.placeholder).slice(0, 60),
     on: node.on === true,
+    icon: BUTTON_ICONS.find((icon) => icon === node.icon),
+    disabled: node.disabled === true,
     action: node.action === undefined ? undefined : String(node.action).slice(0, 60),
     arg: node.arg,
     options: Array.isArray(node.options)

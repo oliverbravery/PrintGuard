@@ -812,6 +812,17 @@ const withCatalogue = async (page: Page) => {
   await emit(page, { event: "catalogue", plugins: [CATALOGUED_SIGN_IN] });
 };
 
+test("a catalogued plugin that needs a newer PrintGuard says so and can't be installed", async ({ page }) => {
+  await withCatalogue(page);
+  await emit(page, { event: "catalogue", plugins: [{ ...CATALOGUED_SIGN_IN, min_printguard: "9.0.0", supported: false }] });
+  await expect(page.getByText("needs v9.0.0")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Install", exact: true }).first()).toBeDisabled();
+
+  await page.getByRole("button", { name: "Player", exact: true }).click();
+  await expect(page.getByText("Needs PrintGuard 9.0.0")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Install", exact: true })).toBeDisabled();
+});
+
 test("the store page of a plugin that signs in draws before its manifest has arrived", async ({ page }) => {
   await withCatalogue(page);
   await page.getByRole("button", { name: "Player", exact: true }).click();
@@ -1573,7 +1584,7 @@ test("a theme started from dark keeps dark text on its accent", async ({ page })
   expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--color-on-accent"))).toBe("#090908");
 });
 
-test("glass keeps status colours readable and distinct over a bright picture, blurs behind the page and forgets a picture that fails to load", async ({ page }) => {
+test("glass keeps status colours readable and distinct over a bright picture, blurs what scrolls under a sticky header and forgets a picture that fails to load", async ({ page }) => {
   await dashboard(page);
   await emit(page, { event: "state", ...engine({ settings: { ...engine().settings, theme: "glass" } }) });
   const { lowestRatio, colours } = await page.evaluate(async () => {
@@ -1604,7 +1615,8 @@ test("glass keeps status colours readable and distinct over a bright picture, bl
   expect(lowestRatio).toBeGreaterThanOrEqual(4.5);
   expect(new Set(colours).size).toBe(4);
   expect(colours).not.toContain("rgb(255, 255, 255)");
-  await expect(page.locator("main")).not.toHaveCSS("backdrop-filter", "none");
+  await expect(page.locator("main")).toHaveCSS("backdrop-filter", "none");
+  await expect(page.locator("main .surface.sticky").first()).not.toHaveCSS("backdrop-filter", "none");
 
   const tint = await page.evaluate(async () => {
     const loaded = performance.getEntriesByType("resource").find((entry) => entry.name.includes("/src/theme.ts"))!.name;

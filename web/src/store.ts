@@ -4,7 +4,7 @@ import { section } from "./layout";
 import { log } from "./log";
 import type { Finding } from "./lint";
 import { PluginPanelHost } from "./panel";
-import { commandAllowed, LINK_ACTIONS, outboundLink, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget, type StoreChanges } from "./plugins";
+import { commandAllowed, imageUrl, LINK_ACTIONS, normalise, outboundLink, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget, type StoreChanges } from "./plugins";
 import { play, playFile } from "./sound";
 import { readStored, writeStored } from "./storage";
 import { published, resumePublishers, stopPublishing } from "./stream";
@@ -16,8 +16,6 @@ import { withPreview, type ParsedToolpath } from "./toolpath";
 import type { AdapterConfig, Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, LayoutSection, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, PrintFile, Review, ScorePoint, UpdateRelease } from "./types";
 
 const HISTORY_LIMIT = 240;
-const MAX_BACKGROUND_CHARS = 3 * 1024 * 1024;
-const BACKGROUND_IMAGE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/;
 const DOWNLOAD_URL_LIFETIME_MS = 60_000;
 const MAX_NOTICE_CHARS = 200;
 const UPDATE_DEBOUNCE_MS = 250;
@@ -151,7 +149,7 @@ interface PgStore {
   pluginFailures: Record<string, string>;
   catalogue: CatalogueEntry[] | null;
   pluginPages: Record<string, Record<string, string>>;
-  pluginAct(id: string, action: string, arg: unknown): void;
+  pluginAct(id: string, action: string, arg: unknown, toPanel?: boolean): void;
   checkPlugin(id: string): void;
   mountPanel(id: string, container: HTMLElement | null): void;
   fetchCatalogue(): void;
@@ -397,8 +395,10 @@ export const useStore = create<PgStore>((set, get) => {
         else play(effect.tones ?? []);
       } else if (effect.kind === "background") {
         if (!plugin.granted.includes("background")) continue;
-        const image = String(effect.image ?? "");
-        showBackground(image.length <= MAX_BACKGROUND_CHARS && BACKGROUND_IMAGE.test(image) ? { id, image } : null);
+        const image = imageUrl(effect.image);
+        showBackground(image ? { id, image } : null);
+      } else if (effect.kind === "view") {
+        if (plugin.files.includes("panel.html")) set((s) => ({ pluginTrees: { ...s.pluginTrees, [id]: normalise(effect.tree) } }));
       } else if (effect.kind === "log") {
         log("info", `plugin ${id}:`, effect.text);
       }
@@ -407,7 +407,10 @@ export const useStore = create<PgStore>((set, get) => {
 
   const handlers = {
     onView: (id: string, tree: PluginNode | null, targets: Record<string, PluginNode | null>) =>
-      set((s) => ({ pluginTrees: { ...s.pluginTrees, [id]: tree }, pluginViews: { ...s.pluginViews, [id]: targets } })),
+      set((s) => ({
+        pluginTrees: s.engine?.plugins.find((p) => p.id === id)?.files.includes("panel.html") ? s.pluginTrees : { ...s.pluginTrees, [id]: tree },
+        pluginViews: { ...s.pluginViews, [id]: targets },
+      })),
     onEffects: perform,
     onStore: (id: string, { written, removed }: StoreChanges) => {
       if (!removed.length && !Object.keys(written).length) return;
@@ -782,7 +785,8 @@ export const useStore = create<PgStore>((set, get) => {
     catalogue: null,
     pluginPages: {},
 
-    pluginAct(id, action, arg) {
+    pluginAct(id, action, arg, toPanel = false) {
+      if (toPanel) return panels.get(id)?.act(action, arg);
       const plugin = get().engine?.plugins.find((p) => p.id === id);
       const host = hosts.get(id);
       if (plugin && host) void host.act(action, arg, pluginState(plugin), pluginTargets(plugin));

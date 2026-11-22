@@ -189,7 +189,7 @@ Events, engine to UI:
 | `releases` | The changelog history the update dialog browses |
 | `token_created` | A new API token's secret, delivered only to the transport that asked, never to the others and never written to the log |
 | `report_sent`, `report_bundle` | Bug report outcome, and the downloadable diagnostics zip |
-| `plugin_code`, `plugin_page`, `catalogue`, `plugin_effect` | A plugin's source for its sandbox, the page files a zip install carries, the reviewed-plugin catalogue, and an effect a dashboard performs for a plugin that has no screen of its own |
+| `plugin_code`, `plugin_page`, `catalogue`, `plugin_effect` | A plugin's source for its sandbox, the page files a zip install carries, the reviewed-plugin catalogue with each entry marked `supported` when this hub is at least its `min_printguard`, and an effect a dashboard performs for a plugin that has no screen of its own |
 | `plugin_oauth` | The provider URL the dashboard opens to start a plugin's sign-in |
 | `http`, `socket` | An answer to a plugin's own request, and a frame on a socket it is holding, both addressed to the plugin that asked |
 | `call`, `answer`, `message` | One plugin's question to another, the reply, and a message published on a channel other plugins listen to |
@@ -708,14 +708,16 @@ already drives the config forms.
 flowchart LR
     engine["engine (state, commands)"] -- "permitted state" --> panel & page & worker
     panel["plugin.js<br/>plugin-sandbox.html<br/>opaque-origin iframe"] -- "node tree + effects" --> ui["UI draws it"]
-    page["panel.html<br/>plugin-panel.html<br/>opaque-origin iframe"] -- "its own markup + effects" --> ui
+    page["panel.html<br/>plugin-panel.html<br/>opaque-origin iframe"] -- "its own markup, or a node tree + effects" --> ui
     worker["worker.js<br/>QuickJS in wasm<br/>no fs, no sockets, fuel-capped"] -- "effects" --> runtime["hub runtime checks them"]
     runtime -- "checked effects" --> engine
     ui -- "checked effects" --> engine
 ```
 
 Both frames set `default-src 'none'`. A plugin ships either `plugin.js`, which
-returns a node tree the dashboard draws, or `panel.html`, which draws itself inside its frame.
+returns a node tree the dashboard draws, or `panel.html`, which draws itself inside its frame or
+hands a node tree over with `pg.view` and hears presses on it as `action` events. Either way the
+panel surface is a row under the monitors, and an `item` node draws it like a monitor's.
 
 Four things keep a frame from sending out what it is handed, and
 [`sandboxFrame`](../web/src/plugins.ts) is the one place both hosts get them from.

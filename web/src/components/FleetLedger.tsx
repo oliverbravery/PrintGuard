@@ -19,7 +19,7 @@ function counted(count: number, noun: string): string {
 
 const COLUMNS = "grid-cols-[6.5rem_minmax(0,1fr)_auto] @3xl:grid-cols-[8rem_minmax(0,1.3fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,1fr)]";
 
-function Cell({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+export function Cell({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <div className={`flex min-w-0 flex-col justify-center gap-1 border-l border-line-0 px-3 py-2 ${className}`}>{children}</div>;
 }
 

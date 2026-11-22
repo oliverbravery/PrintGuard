@@ -282,6 +282,13 @@ async function openHistory(page: Page): Promise<void> {
   await page.getByRole("button", { name: /^Snapshot at/ }).first().waitFor();
 }
 
+const showPlugins = async (page: Page) => {
+  const divider = page.getByRole("separator");
+  await divider.press("ArrowUp");
+  await divider.press("ArrowUp");
+  await divider.evaluate((handle) => handle.blur());
+};
+
 const SCENES: Scene[] = [
   { name: "review", width: 1360, height: 860, theme: "dark", route: "/monitors/m2/review/r1", mutate: (e) => void (e.reviews = [REVIEW]), prepare: openReview },
   { name: "history", width: 1360, height: 860, theme: "dark", route: "/monitors/m2/history", mutate: (e) => void (e.reviews = PRINTS_KEPT), prepare: openHistory },
@@ -315,8 +322,8 @@ const SCENES: Scene[] = [
       await page.waitForFunction(() => Array.from(document.images).every((i) => i.complete));
     },
   },
-  { name: "plugins-live", width: 1360, height: 720, theme: "dark", plugins: ["spotify", "picture-in-picture"], mutate: live },
-  { name: "glass", width: 1360, height: 720, theme: "dark", plugins: ["spotify", "picture-in-picture"], tuner: true, mutate: live },
+  { name: "plugins-live", width: 1360, height: 900, theme: "dark", plugins: ["spotify", "picture-in-picture"], mutate: live, prepare: showPlugins },
+  { name: "glass", width: 1360, height: 900, theme: "dark", plugins: ["spotify", "picture-in-picture"], tuner: true, mutate: live, prepare: showPlugins },
 ];
 
 const surfaces = (e: EngineState) => {
@@ -683,7 +690,8 @@ const PLUGIN_SHOTS: PluginShot[] = [
     id: "spotify",
     file: "dashboard.jpg",
     jpeg: true,
-    scene: { width: 1200, height: 700, plugins: ["spotify", "picture-in-picture"], mutate: live },
+    scene: { width: 1200, height: 900, plugins: ["spotify", "picture-in-picture"], mutate: live },
+    prepare: showPlugins,
   },
   {
     id: "picture-in-picture",

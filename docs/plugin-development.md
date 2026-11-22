@@ -74,7 +74,7 @@ and `version` are required, and a key PrintGuard does not recognise is dropped.
 ```
 my-plugin/
   plugin.json     the manifest
-  plugin.js       draws a panel from nodes     (optional)
+  plugin.js       draws its row from nodes     (optional)
   panel.html      draws its own panel instead  (optional)
   worker.js       runs in the background       (optional)
   alarm.mp3       anything it ships            (optional)
@@ -91,6 +91,7 @@ A plugin needs at least one of the three source files.
   "id": "bed-clearance",
   "name": "Bed clearance",
   "version": "1.0.0",
+  "min_printguard": "3.0.0",
   "description": "One line about what it does.",
   "author": "you",
   "homepage": "https://github.com/you/bed-clearance",
@@ -117,6 +118,7 @@ A plugin needs at least one of the three source files.
 |---|---|
 | `id` | Required. 3 to 40 lowercase letters, digits or hyphens, starting and ending with a letter or digit |
 | `version` | Required. Up to 32 letters, digits, underscores, dots, hyphens or plus signs |
+| `min_printguard` | The oldest PrintGuard it runs on, such as `3.0.0`. An older hub refuses to install it, and the catalogue marks it |
 | `name` | Cut at 80 characters. Falls back to the id |
 | `description` | Cut at 400 characters |
 | `author` | Cut at 80 characters |
@@ -175,7 +177,7 @@ the manifest lists in `media` shows, in the gallery.
 
 | Surface | Where it puts you |
 |---|---|
-| `panel` | A panel of its own on the dashboard |
+| `panel` | A row of its own under **Plugins**, below the monitors |
 | `monitor` | Drawn beside the selected monitor's feed and on its row in the monitor list |
 | `settings` | Drawn in every monitor's settings, under its own heading |
 
@@ -314,6 +316,20 @@ plugin.render((ctx) => ({
 
 That needs `state:read` and `monitor:control`.
 
+For a panel, return an [`item`](#nodes) and PrintGuard draws it as a row like a monitor's, with a
+picture where a camera's frame goes, a title and a description beside it and your buttons at the
+end. It lines up with the monitors on every screen size.
+
+```js
+plugin.render((ctx) => ({
+  type: "item",
+  image: "spool.png",
+  title: `${ctx.store.left || 0} g left`,
+  description: "PLA, Galaxy Black",
+  actions: [{ type: "button", icon: "refresh", label: "Weigh again", action: "weigh" }],
+}));
+```
+
 ### panel.html
 
 A node tree matches the dashboard, which is what most plugins want. Add a `panel.html` and you
@@ -352,6 +368,8 @@ refused, so use `addEventListener`. A `<script src>` is refused too, as is `impo
 | `pg.store` | Your own data. It saves when you assign the whole object, so `pg.store = { ...pg.store, on: true }` |
 | `pg.theme` | The dashboard's colours and fonts, by custom property name |
 | `pg.asset(name)` | A URL for a file you shipped, good inside your panel only. Audio and video from it play only with `sound` |
+| `pg.view(tree)` | Hands the dashboard a node tree to draw in place of your page, such as an `item` |
+| `pg.on("action", fn)` | Called with `{ name, arg }` when someone presses a node your `pg.view` drew |
 
 The dashboard's colours and fonts are also set as the custom properties it uses itself, so
 `var(--color-accent)` is the accent the user picked. The background is transparent and the
@@ -359,6 +377,24 @@ panel is as tall as it draws itself, up to 900px.
 
 A panel can show a picture but not fetch one. Pull it through `pg.http` with `binary: true` and
 it arrives base64 encoded, ready to be a `data:` URL.
+
+A panel that only needs a row can draw it with `pg.view` and keep its page empty. The dashboard
+draws the tree in your page's place with its own fonts and components, and keeps running your
+script out of sight.
+
+```html
+<script>
+  const draw = (playing) =>
+    pg.view({
+      type: "item",
+      title: playing ? "Playing" : "Paused",
+      actions: [{ type: "button", icon: playing ? "pause" : "play", label: playing ? "Pause" : "Play", action: "toggle" }],
+    });
+  let playing = false;
+  pg.on("action", ({ name }) => name === "toggle" && draw((playing = !playing)));
+  pg.on("ready", () => draw(playing));
+</script>
+```
 
 ### worker.js
 
@@ -497,7 +533,8 @@ single frame. A monitor waits for a streak, so this will be twitchier. Count con
 | `camera` | `camera_id` |
 | `image` | `asset`, `label` |
 | `float` | `camera_id`, `label`, `value` |
-| `button` | `label`, `action`, `arg` |
+| `button` | `label`, `action`, `arg`, `icon`, `disabled` |
+| `item` | `title`, `description`, `image`, `actions` |
 | `select` | `value`, `options`, `action`, `label` |
 | `input` | `value`, `action`, `label`, `kind`: `text` or `number`, `placeholder`, `secret` |
 | `toggle` | `on`, `action`, `label` |
@@ -506,7 +543,13 @@ A `false` or `null` child is dropped, which is how a node appears only once some
 switched on. A node of any other type is dropped too.
 
 A `button` press calls `action` with the node's `action` name and `arg`, and a `select` change
-calls it with the option chosen.
+calls it with the option chosen. A button with an `icon` of `play`, `pause`, `stop`, `previous`,
+`next` or `refresh` shows that icon, and its `label` becomes what a screen reader says.
+
+An `item` is your panel's row. `image` is drawn where a monitor's camera frame is, and is an
+image you shipped, named as it is in `assets`, or a base64 `data:` URL of a PNG, JPEG, WebP or
+GIF. `title` and `description` sit beside it and `actions` is a list of nodes drawn at the end,
+usually buttons. It only counts as the whole view, so an `item` inside another node is dropped.
 An `input` commits on blur or Enter, and a `toggle` hands you `true` or `false`. An `input` and
 a `select` draw their `label` above the field, so give them one.
 
@@ -857,7 +900,7 @@ The four in [`plugins/`](../plugins) are commented throughout, so copy the close
 | [`picture-in-picture`](../plugins/picture-in-picture) | `plugin.js` | Take the `monitor` surface and return one `float` node per monitor. It is the whole plugin in five lines |
 | [`alert-sounds`](../plugins/alert-sounds) | `plugin.js` | Add a switch and a sound picker to each monitor's settings, watch each monitor's `alert` between renders and sound its own tones. Its main view returns nothing |
 | [`progress-reports`](../plugins/progress-reports) | `plugin.js`, `worker.js` | Share one store between two halves. The panel half adds a switch and an interval to each monitor's settings, and the worker counts `result` and `alert` events and sends the tally through `notify.send` on its own timer |
-| [`spotify`](../plugins/spotify) | `panel.html` | Draw its own panel, sign in with `oauth`, poll an API through `pg.http`, fetch the cover with `binary: true` and put it behind the dashboard |
+| [`spotify`](../plugins/spotify) | `panel.html` | Hand the dashboard its row with `pg.view` and hear presses as `action` events, sign in with `oauth`, poll an API through `pg.http`, fetch the cover with `binary: true` and put it behind the dashboard |
 
 ## Publishing
 

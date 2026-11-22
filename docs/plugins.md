@@ -23,14 +23,15 @@ what they can reach. [Writing plugins](plugin-development.md) covers making one.
 
 ## What plugins are
 
-A plugin can draw a panel on your dashboard, run a job on the hub, or both. They get
+A plugin can draw a row on your dashboard, run a job on the hub, or both. They get
 fine-grained permissions to an internal API, so you can add features without waiting on a
 release.
 
-![The Spotify plugin's panel beside two monitors, with the cover art behind the dashboard](assets/plugins-live.png)
+![The Spotify plugin's row under two monitors, with the cover art behind the dashboard](assets/plugins-live.png)
 
-A panel joins the dashboard's layout, so it drags, pins and hides with the monitors. A plugin
-can also draw on every monitor tile or add its own heading to every monitor's settings.
+Its row sits under **Plugins** below your monitors and joins the dashboard's layout, so it
+drags, pins and hides with them. A plugin can also draw on every monitor's row or add its own
+heading to every monitor's settings.
 
 ## The shipped plugins
 
@@ -41,7 +42,7 @@ Four plugins are in the catalogue, and their source is in [`plugins/`](../plugin
 | [Picture in picture](../plugins/picture-in-picture) | Puts a button on every monitor that floats its camera above your other windows | `state:read`, `camera:view` |
 | [Alert sounds](../plugins/alert-sounds) | Sounds a horn, a bell or an alarm when a defect is caught, on the monitors you pick | `state:read`, `sound` |
 | [Progress reports](../plugins/progress-reports) | Sends how far a print has got and how many defects it has seen, as often as you ask while the monitor is watching | `state:read`, `alert:send` |
-| [Spotify](../plugins/spotify) | Puts the current cover behind the dashboard, with the track and the transport in a panel | `net`, `oauth`, `background` |
+| [Spotify](../plugins/spotify) | Puts the current cover behind the dashboard, with the track and its playback controls in a row under your monitors | `net`, `oauth`, `background` |
 
 ## Installing a plugin
 
@@ -64,7 +65,8 @@ Every installed plugin has the same page, opened from its card. A README is show
 only, so any HTML in it beyond text, links, images, tables and code is dropped.
 
 The catalogue is filtered by where your hub runs, and an install from a repository or a zip is
-refused if the plugin names other platforms.
+refused if the plugin names other platforms. A plugin that needs a newer PrintGuard than yours is
+marked in the catalogue and refused from any source until you update.
 
 ## Verified and third party
 

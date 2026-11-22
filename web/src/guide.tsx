@@ -296,7 +296,7 @@ export const GUIDE: GuideSection[] = [
     shot: "plugins",
     body: (
       <>
-        Add a panel to the dashboard or a job on the hub, from the catalogue, a GitHub repo or a zip.
+        Add a row to the dashboard or a job on the hub, from the catalogue, a GitHub repo or a zip.
         Plugins are third-party code, so they run in a sandbox with only what you grant them.{" "}
         <strong>Picture in picture</strong>, <strong>Alert sounds</strong>, <strong>Progress reports</strong>{" "}
         and <strong>Spotify</strong> are in the catalogue.{" "}
