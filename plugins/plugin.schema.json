@@ -376,7 +376,7 @@
           },
           {
             "const": "result",
-            "description": "Carries monitor_id, camera_id, score, prediction, margin, ms, ts."
+            "description": "Carries monitor_id, camera_id, score, prediction, ms, ts."
           },
           {
             "const": "alert",

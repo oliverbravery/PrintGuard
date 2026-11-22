@@ -59,6 +59,7 @@ CHECKS: dict[str, Callable[[Any], Any]] = {
     "notifiers": _channels,
     "update_check": _true_or_false,
     "mqtt": _broker,
+    "model": _one_of("model", "legacy", "light", "standard"),
     "inference_runtime": _one_of("inference runtime", "auto", "litert", "onnx"),
     "catalogue_url": _address,
     "fault_grace_s": clamp_grace,

@@ -1,0 +1,31 @@
+{
+  "name": "Legacy",
+  "architecture": "ShuffleNetV2-x1.0 prototypical network encoder",
+  "source": "https://github.com/oliverbravery/Edge-FDM-Fault-Detection",
+  "output": "embedding",
+  "input": {
+    "layout": "NCHW",
+    "shape": [
+      1,
+      3,
+      224,
+      224
+    ],
+    "dtype": "float32"
+  },
+  "preprocessing": {
+    "resize_shortest_edge_px": 256,
+    "center_crop_px": 224,
+    "color": "grey",
+    "normalise_mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "normalise_std": [
+      0.229,
+      0.224,
+      0.225
+    ]
+  }
+}

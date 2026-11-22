@@ -1,4 +1,4 @@
-"""Selectable LiteRT and ONNX inference for the hub platform."""
+"""Selectable detection models on LiteRT or ONNX Runtime for the hub platform."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import asyncio
 import ctypes
 import importlib
 import importlib.util
+import json
 import logging
 import os
 import sys
@@ -16,17 +17,18 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from functools import partial
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 import numpy as np
 import onnxruntime as ort
 from ai_edge_litert.interpreter import Interpreter
 
+from ..engine import vision
+
 InferenceRuntime = Literal["auto", "litert", "onnx"]
 Model = Callable[[np.ndarray], np.ndarray]
 
 BENCHMARK_RUNS = 10
-BENCHMARK_TENSOR = np.zeros((1, 3, 224, 224), dtype=np.float32)
 SCALING_GAIN = 1.1
 PLUGIN_MODULES = ("onnxruntime_ep_nv_tensorrt_rtx", "onnxruntime_ep_openvino")
 CUDA_RUNTIME_LIBRARY = "nvidia/cuda_runtime/lib/libcudart.so.12"
@@ -113,17 +115,17 @@ def _device_label(device: ort.OrtEpDevice) -> str:
     return f"{device.ep_vendor} {device.device.type.name}"
 
 
-def _throughput(model: Model, workers: int) -> float:
+def _throughput(model: Model, tensor: np.ndarray, workers: int) -> float:
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        if not all(np.isfinite(embedding).all() for embedding in pool.map(lambda _: model(BENCHMARK_TENSOR), range(workers))):
-            raise ValueError("it returned a non-finite embedding")
+        if not all(np.isfinite(output).all() for output in pool.map(lambda _: model(tensor), range(workers))):
+            raise ValueError("it returned a non-finite output")
         started = time.perf_counter()
-        list(pool.map(lambda _: [model(BENCHMARK_TENSOR) for _ in range(BENCHMARK_RUNS)], range(workers)))
+        list(pool.map(lambda _: [model(tensor) for _ in range(BENCHMARK_RUNS)], range(workers)))
         elapsed = time.perf_counter() - started
     return workers * BENCHMARK_RUNS / elapsed
 
 
-def _measure_concurrency(model: Model) -> tuple[int, float]:
+def _measure_concurrency(model: Model, shape: tuple[int, ...]) -> tuple[int, float]:
     """Returns the worker count where throughput stops growing, and that throughput.
 
     Concurrency is measured rather than derived from the core count because how far
@@ -133,9 +135,10 @@ def _measure_concurrency(model: Model) -> tuple[int, float]:
     lands on the host's real ceiling in a handful of measurements.
     """
     ceiling = os.cpu_count() or 2
+    tensor = np.zeros(shape, dtype=np.float32)
     best, best_fps, workers = 1, 0.0, 1
     while True:
-        fps = _throughput(model, workers)
+        fps = _throughput(model, tensor, workers)
         if fps < best_fps * SCALING_GAIN:
             return best, best_fps
         best, best_fps = workers, fps
@@ -203,8 +206,9 @@ class OnnxInference:
 
     def _benchmark(self, session: ort.InferenceSession) -> None:
         self._session = session
-        self._input_name = session.get_inputs()[0].name
-        self.measured = _measure_concurrency(self.run)
+        model_input = session.get_inputs()[0]
+        self._input_name = model_input.name
+        self.measured = _measure_concurrency(self.run, tuple(model_input.shape))
         session.enable_fallback()
 
     def _register_plugins(self) -> None:
@@ -248,7 +252,7 @@ class OnnxInference:
             _register_library(provider.name, library)
 
     def run(self, tensor: np.ndarray) -> np.ndarray:
-        """Returns the model embedding for one preprocessed frame."""
+        """Returns the model's first output for one preprocessed frame."""
         return self._session.run(None, {self._input_name: tensor})[0][0].copy()
 
     def close(self) -> None:
@@ -280,12 +284,13 @@ class LiteRtInference:
         self._model = model_path.read_bytes()
         self._interpreters = threading.local()
         probe = Interpreter(model_content=self._model, num_threads=1)
-        self._input_index = probe.get_input_details()[0]["index"]
+        model_input = probe.get_input_details()[0]
+        self._input_index = model_input["index"]
         self._output_index = probe.get_output_details()[0]["index"]
-        self.measured = _measure_concurrency(self.run)
+        self.measured = _measure_concurrency(self.run, tuple(int(side) for side in model_input["shape"]))
 
     def run(self, tensor: np.ndarray) -> np.ndarray:
-        """Returns the model embedding for one preprocessed frame."""
+        """Returns the model's first output for one preprocessed frame."""
         interpreter = getattr(self._interpreters, "interpreter", None)
         if interpreter is None:
             interpreter = Interpreter(model_content=self._model, num_threads=1)
@@ -300,22 +305,40 @@ class LiteRtInference:
         self._interpreters = threading.local()
 
 
+def load_assets(model_dir: Path) -> vision.Assets:
+    """Reads a model's preprocessing and scoring from its folder.
+
+    Args:
+        model_dir: The folder holding one model's ``metadata.json``, and
+            ``prototypes.json`` for a model that gives an embedding.
+
+    Returns:
+        The model's assets.
+    """
+    meta: dict[str, Any] = json.loads((model_dir / "metadata.json").read_text())
+    protos = json.loads((model_dir / "prototypes.json").read_text())["prototypes"] if meta["output"] == "embedding" else None
+    return vision.assets_from_dicts(meta, protos)
+
+
 class Inference:
-    """Runs the requested model runtime at the concurrency it measurably sustains.
+    """Runs one model on the requested runtime at the concurrency it measurably sustains.
 
     Attributes:
+        assets: How the model's frames are prepared and its output read.
         skipped: One message for each accelerator that was offered and passed
             over, whichever runtime was chosen in the end.
     """
 
     def __init__(self, model_dir: Path, runtime: InferenceRuntime) -> None:
+        self.assets = load_assets(model_dir)
         candidates: list[OnnxInference | LiteRtInference] = []
         if runtime in ("auto", "onnx"):
-            candidates.append(OnnxInference(model_dir / "encoder_float32.onnx"))
+            candidates.append(OnnxInference(model_dir / "model.onnx"))
         if runtime in ("auto", "litert"):
-            candidates.append(LiteRtInference(model_dir / "encoder_float32.tflite"))
+            candidates.append(LiteRtInference(model_dir / "model.tflite"))
         logger.info(
-            "inference benchmark: %s",
+            "inference benchmark of the %s model: %s",
+            self.assets.name,
             ", ".join(
                 f"{candidate.device} {candidate.measured[1]:.1f} fps across {candidate.measured[0]} workers"
                 for candidate in candidates
@@ -335,19 +358,28 @@ class Inference:
         self._idle = asyncio.Event()
         self._idle.set()
 
-    async def run(self, tensor: np.ndarray) -> np.ndarray:
-        """Returns the model embedding for one preprocessed frame."""
+    async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
+        """Prepares one RGB frame for the model, runs it and scores the output.
+
+        The frame counts as in flight from the start, so a switch to another
+        model waits for it rather than closing this one under it.
+
+        Returns:
+            The ``vision.classify`` result.
+        """
         self._running += 1
         self._idle.clear()
         try:
-            return await asyncio.get_running_loop().run_in_executor(self._pool, self._selected.run, tensor)
+            tensor = await asyncio.to_thread(vision.preprocess, rgb, self.assets)
+            output = await asyncio.get_running_loop().run_in_executor(self._pool, self._selected.run, tensor)
+            return vision.classify(output, self.assets)
         finally:
             self._running -= 1
             if not self._running:
                 self._idle.set()
 
     async def drained(self) -> None:
-        """Waits until every frame sent to ``run`` has come back, so closing cannot cut one short."""
+        """Waits until every frame sent to ``infer`` has come back, so closing cannot cut one short."""
         await self._idle.wait()
 
     def close(self) -> None:

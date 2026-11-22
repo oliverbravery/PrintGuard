@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
-import json
 import logging
 import os
 import re
@@ -28,7 +27,7 @@ import httpx
 import numpy as np
 import websockets
 from av.video.reformatter import VideoReformatter
-from ..engine import logs, vision
+from ..engine import logs
 from ..engine.adapters import redirect_message
 from ..engine.platform import PLUGIN_HEADER, Frame, Notice, Redirects
 from ..engine.reports import scrub_url, url_secrets
@@ -774,9 +773,6 @@ class ServerPlatform:
         self._inference: Inference | None = None
         self.workers = 1
         self.inference_device = "Initialising"
-        meta = json.loads((model_dir / "metadata.json").read_text())
-        protos = json.loads((model_dir / "prototypes.json").read_text())["prototypes"]
-        self.assets = vision.assets_from_dicts(meta, protos)
         self._client = httpx.AsyncClient(follow_redirects=True)
         self._public_client = httpx.AsyncClient(transport=PublicOnlyTransport())
         self._mediamtx_client = httpx.AsyncClient(trust_env=False)
@@ -794,13 +790,13 @@ class ServerPlatform:
             logger.warning("plugins are disabled by PRINTGUARD_PLUGINS=off")
 
     async def configure(self, settings: dict[str, Any]) -> None:
-        """Selects the requested inference runtime.
+        """Loads the detection model the settings name on the requested runtime.
 
-        The runtime it replaces is closed once every frame already sent to it
+        The model it replaces is closed once every frame already sent to it
         has come back, including one a ``classify`` call made outside the scheduler.
         """
         runtime = settings["inference_runtime"]
-        inference = await asyncio.to_thread(Inference, self._model_dir, runtime)
+        inference = await asyncio.to_thread(Inference, self._model_dir / settings["model"], runtime)
         previous = self._inference
         self._inference = inference
         self.workers = inference.workers
@@ -810,7 +806,8 @@ class ServerPlatform:
             previous.close()
         self._notices += [Notice(message) for message in inference.skipped]
         logger.info(
-            "inference ready: %s via %s (%d workers, %.0f fps)",
+            "inference ready: the %s model on %s via %s (%d workers, %.0f fps)",
+            inference.assets.name,
             self.inference_device,
             inference.runtime if runtime == "auto" else runtime,
             self.workers,
@@ -832,9 +829,8 @@ class ServerPlatform:
         return notices
 
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
-        """Runs the model through the selected hardware provider."""
-        tensor = await asyncio.to_thread(vision.preprocess, rgb, self.assets)
-        return vision.classify(await self._inference.run(tensor), self.assets)
+        """Scores a frame with the loaded model through the selected hardware provider."""
+        return await self._inference.infer(rgb)
 
     async def discover_cameras(self) -> list[dict[str, Any]]:
         """Lists the host's video devices and active MediaMTX paths as attachable sources.

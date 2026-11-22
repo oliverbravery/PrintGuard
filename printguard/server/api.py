@@ -162,6 +162,7 @@ class ProviderTest(BaseModel):
 class SettingsPatch(_FiniteNumbers):
     notifiers: dict[str, FiniteObject] | None = None
     mqtt: FiniteObject | None = None
+    model: Literal["legacy", "light", "standard"] | None = None
     inference_runtime: Literal["auto", "litert", "onnx"] | None = None
     preheat: list[FiniteObject] | None = None
     fault_grace_s: float | None = None
@@ -216,9 +217,8 @@ class _ReadModel(BaseModel):
 
 
 class LastResult(_ReadModel):
-    prediction: Literal["success", "failure", "unknown"] | None = None
-    distances: dict[str, float] | None = None
-    margin: float | None = None
+    prediction: Literal["success", "failure"] | None = None
+    defect_score: float | None = None
 
 
 class CameraOut(_ReadModel):
