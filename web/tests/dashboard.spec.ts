@@ -93,7 +93,7 @@ test("picking a detection model in Settings sends it and marks it in use", async
   await light.click();
   await expect.poll(() => commands.filter((c) => c.cmd === "settings.update").map((c) => c.patch)).toEqual([{ model: "light" }]);
   await expect(light).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("img", { name: "Failed prints caught against latency for each model" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Failed prints caught against latency for each model" })).toBeVisible();
 });
 
 test("a rename still waiting to send is dropped when its monitor or camera is deleted", async ({ page }) => {
@@ -1372,7 +1372,7 @@ const library = (prints: unknown[]) => {
 test("the print library does not squeeze its list into a strip on a phone held sideways", async ({ page }) => {
   await page.setViewportSize({ width: 667, height: 375 });
   await dashboard(page, library([printFile({ id: "a", name: "First" }), printFile({ id: "b", name: "Second" }), printFile({ id: "c", name: "Third" })]), "/prints");
-  await expect(page.getByRole("link", { name: /^View / })).toHaveCount(3);
+  await expect(page.getByRole("link", { name: /^(First|Second|Third) / })).toHaveCount(3);
   const squeezed = await page.evaluate(() =>
     [...document.querySelectorAll("main *")].filter(
       (el) => ["auto", "scroll"].includes(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight + 1 && el.clientHeight < 200,
@@ -1405,14 +1405,14 @@ test("removing or sending one file leaves the other files' buttons alone", async
   await page.getByRole("button", { name: "Confirm" }).click();
   await expect(page.getByRole("button", { name: "Removing…" })).toBeVisible();
 
-  await page.getByRole("link", { name: "View Vase" }).click();
+  await page.getByRole("link", { name: /^Vase / }).click();
   await expect(page.getByText("2h 0m", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Remove", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Print", exact: true }).click();
   await page.getByRole("button", { name: "Start print" }).click();
   await expect(page.getByRole("button", { name: "Sending…" })).toBeVisible();
 
-  await page.getByRole("link", { name: "View Benchy" }).click();
+  await page.getByRole("link", { name: /^Benchy / }).click();
   await expect(page.getByRole("button", { name: "Print", exact: true })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Removing…" })).toBeVisible();
 });

@@ -14,7 +14,7 @@ import { Toolpath } from "./Toolpath";
 
 function Thumbnail({ print }: { print: PrintFile }) {
   return (
-    <span className="grid size-12 shrink-0 place-items-center overflow-hidden border border-line-0 bg-ink-1">
+    <span aria-hidden className="grid size-12 shrink-0 place-items-center overflow-hidden border border-line-0 bg-ink-1">
       {print.thumbnail ? (
         <img src={`api/prints/${print.id}/thumbnail`} alt="" className="h-full w-full object-contain" />
       ) : (
