@@ -11,7 +11,7 @@ export function Status({ tone, children, className = "" }: { tone: Tone; childre
       <span aria-hidden className="text-xs">
         {GLYPHS[tone]}
       </span>
-      {children}
+      <span>{children}</span>
     </span>
   );
 }
