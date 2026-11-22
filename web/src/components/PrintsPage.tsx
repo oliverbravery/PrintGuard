@@ -191,7 +191,7 @@ export function PrintsPage() {
       ))}
       {!prints.length && (
         <p className="px-4 py-4 text-sm text-text-2">
-          {filter ? "Nothing is tagged for this printer." : "Nothing uploaded yet. Sliced files you drop here stay on the hub."}
+          {filter ? "No files are tagged for this printer yet." : "Nothing uploaded yet. Sliced files you drop here are stored on your hub."}
         </p>
       )}
     </>
@@ -206,7 +206,7 @@ export function PrintsPage() {
           ) : (
             <>
               <DetailHead title="No file open" />
-              <p className="px-4 py-4 text-sm text-text-2">Open a sliced file from the library to see its toolpath.</p>
+              <p className="px-4 py-4 text-sm text-text-2">Pick a sliced file from the library to inspect its toolpath in 3D.</p>
             </>
           )
         }

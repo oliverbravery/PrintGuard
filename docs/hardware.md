@@ -6,8 +6,7 @@
 
 </div>
 
-Which image to pull, which detection model to run, how PrintGuard picks a model runtime, and how to
-give it a GPU.
+What hardware you actually need, which Docker image to pull, how the three detection models compare, and how PrintGuard picks a runtime or uses a GPU.
 
 - [How much hardware you need](#how-much-hardware-you-need)
 - [Image variants](#image-variants)
@@ -21,40 +20,27 @@ give it a GPU.
 
 ## How much hardware you need
 
-The largest detection model is about 13 MB, not a large model. A Raspberry Pi 4 runs every model on
-its CPU, and any modern x86 mini PC handles several cameras. Inference is only one part of the load.
-Decoding video costs more than classifying it, so frame rate and resolution matter more than
-raw model throughput.
+Not much. Even the largest detection model is under 13 MB, so a Raspberry Pi 4 can run all three models on its CPU, and a cheap x86 mini PC handles multiple cameras easily. On my Raspberry Pi 5 inside Docker with camera adjustments enabled, Standard runs at around 40 fps and Light around 60 fps, peaking at about 500 MB of RAM. Usually video decoding is heavier than running the model itself, so high camera resolutions and frame rates matter more than raw model speed.
 
-PrintGuard never needs a fixed frame rate. The scheduler measures what the host can
-sustain and shares that capacity across the cameras in use, so adding a camera lowers each
-camera's rate rather than falling behind. See
-[scheduling inference](architecture.md#scheduling-inference).
+PrintGuard doesn't require a fixed frame rate. The scheduler measures how fast your machine can actually run inference and splits that budget fairly across active cameras, so adding another camera just lowers each camera's detection rate smoothly instead of letting a queue pile up. See [scheduling inference](architecture.md#scheduling-inference) for how that works.
 
 > [!TIP]
-> The dashboard's **capacity** and **latency** readouts show what your host actually
-> sustains. If capacity sits far above the sum of your cameras' rates, you have headroom
-> for more cameras.
+> Keep an eye on the **Capacity** and **Latency** readouts in the top bar (or **Settings** -> **Detection**). If capacity is well above the combined frame rate of your cameras, you've got plenty of headroom to add more.
 
 ## Image variants
 
-Every release publishes three variants. All three carry the same engine and UI, and differ only
-in the acceleration runtime they bundle.
+Every release builds three Docker image variants. They all run the exact same PrintGuard engine and dashboard; the only difference is the GPU runtime bundled inside.
 
-| Tag | Platforms | Adds | Use it when |
+| Tag | Architectures | Extra runtime | When to use it |
 |---|---|---|---|
-| `latest` | `amd64`, `arm64` | Nothing. Smallest download | Default choice, including Raspberry Pi 4/5 |
-| `latest-intel` | `amd64` | Intel's current GPU compute runtime | You pass `--device /dev/dri` for an Arc card, or an iGPU from Tiger Lake (11th gen) onwards |
-| `latest-nvidia` | `amd64` | TensorRT RTX execution provider and the CUDA 12 runtime | You have an RTX 30 series or newer and the NVIDIA Container Toolkit |
+| `latest` | `amd64`, `arm64` | None (smallest image) | Almost everyone, including Raspberry Pi 4 and 5 |
+| `latest-intel` | `amd64` | Intel's current GPU compute runtime | When passing `--device /dev/dri` for an Intel Arc card or an 11th-gen (Tiger Lake) or newer iGPU |
+| `latest-nvidia` | `amd64` | TensorRT RTX execution provider and CUDA 12 runtime | When you have an NVIDIA RTX 30 series (or newer) GPU with the NVIDIA Container Toolkit installed |
 
-Each variant is also tagged `X.Y.Z` and `X.Y`, with the same suffix, for example
-`X.Y.Z-intel`. Pin `X.Y` if you want patch updates without surprises.
+Every variant also gets versioned tags like `X.Y.Z` and `X.Y` (e.g. `3.0.0-intel` or `3.0-nvidia`). Pin `X.Y` if you want bugfix patches without jumping major versions unexpectedly.
 
 > [!NOTE]
-> The Intel GPU compute runtime is roughly 370 MB of compiler and driver libraries that do
-> nothing unless a GPU device is passed in, which is why it lives in its own tag rather
-> than the default image. Intel CPU acceleration through OpenVINO is in the standard
-> `amd64` image and needs no extra tag.
+> Intel's GPU compute runtime adds roughly 370 MB of drivers and compilers that sit unused unless you pass a GPU device into the container, which is why it lives on its own tag. Intel CPU acceleration through OpenVINO is already built into the standard `amd64` image with no special tag needed.
 
 ## Choosing a variant
 
@@ -68,87 +54,61 @@ flowchart TD
     gpu -- "NVIDIA RTX 30+ with Container Toolkit" --> nvidia["latest-nvidia"]
 ```
 
-If you run the desktop app on macOS or Windows you don't choose a variant, since the app
-carries the runtimes for your platform.
+If you're using the macOS or Windows desktop app, you don't need to pick a variant: the app already ships with the right runtimes for your OS.
 
 ## Detection models
 
-PrintGuard ships three detection models and runs the one you pick, either when you first open the
-dashboard or later in Settings, under **Detection**, where a chart compares them with Obico's.
+PrintGuard 3.0 bundles three detection models. You pick one during the first-run walkthrough and can switch any time under **Settings** -> **Detection**, right alongside an interactive benchmark chart comparing them against Obico's open models.
 
-| Model | What it is | Size | Latency | Failed prints caught | Good prints alarmed |
+| Model | Architecture | Size | Latency | Failed prints caught | Good prints alarmed |
 |---|---|---|---|---|---|
-| **Standard** | ConvNeXt-Atto, distilled. The default | 12.9 MB | 28.7 ms | 10 of 20 | 1 of 70 |
+| **Standard** | ConvNeXt-Atto, distilled (default) | 12.9 MB | 28.7 ms | 10 of 20 | 1 of 70 |
 | **Light** | MobileNetV4-Conv-Small, distilled | 9.5 MB | 11.2 ms | 5 of 20 | 1 of 70 |
-| **Legacy** | The ShuffleNetV2 prototype encoder PrintGuard used before 3.0.0 | 4.8 MB | 5.3 ms | 1 of 20 | 1 of 70 |
-| Obico, Dec 2025 | Obico's YOLOv2 Spaghetti Detective, for comparison | 193 MB | 360 ms | 3 of 20 | 0 of 70 |
+| **Legacy** | ShuffleNetV2 prototype network (used before 3.0.0) | 4.8 MB | 5.3 ms | 1 of 20 | 1 of 70 |
+| Obico, Dec 2025 | Obico's YOLOv2 Spaghetti Detective (for comparison) | 193 MB | 360 ms | 3 of 20 | 0 of 70 |
 
-The scores come from 1,534 frames from 30 PrintGuard hubs that no model was trained on, alerting
-at the default threshold of 0.75 held for 3 frames. Obico's scores aren't probabilities, so its
-threshold was matched on separate validation frames. Latency is one CPU thread of an M1 Max on
-ONNX Runtime 1.32, so expect it to be higher on a Raspberry Pi and lower with an accelerator.
+These numbers come from 1,534 curated frames across 30 PrintGuard hubs that none of the models had seen during training, using PrintGuard's default alert rule (0.75 for 3 frames in a row). Because Obico's outputs aren't calibrated probabilities, its threshold was tuned on a separate validation set to match precision. Latency was measured on a single M1 Max CPU thread using ONNX Runtime 1.32, so expect higher milliseconds on a Pi and lower numbers with a GPU or NPU.
 
 ![Detection in Settings, with the three models charted against Obico's](assets/settings-detection.png)
 
-Every model gives its own probability that a frame shows a failing print, with 0.5 as its
-decision boundary, so a monitor's threshold works the same way whichever one runs. Switching waits for the frames already being
-scored, then loads the new model and benchmarks it again. Pick **Light** when the **capacity**
-readout with Standard sits below what your cameras need.
+All three models output a calibrated probability from 0 to 1 with 0.5 as the boundary, so your existing monitor thresholds behave consistently whichever one you pick. Switching models finishes any frames already in flight, loads the new weights and re-runs the startup benchmark. If your **Capacity** readout with Standard drops below what your cameras need, switch to **Light**.
 
 ## Model runtimes
 
-PrintGuard carries each model twice, once for each runtime, and picks between them:
+PrintGuard bundles every model in two formats, one for each inference engine, and lets your hardware decide which is quicker:
 
-| Runtime | What it is | Path used |
+| Runtime | What it is | Hardware path |
 |---|---|---|
-| [LiteRT](https://github.com/google-ai-edge/LiteRT) | Google's on-device runtime, formerly TensorFlow Lite | Optimised CPU |
-| [ONNX Runtime](https://onnxruntime.ai) | Cross-platform runtime with pluggable execution providers | The best execution provider the host offers |
+| [LiteRT](https://github.com/google-ai-edge/LiteRT) | Google's on-device runtime (formerly TensorFlow Lite) | Optimised CPU |
+| [ONNX Runtime](https://onnxruntime.ai) | Cross-platform runtime with pluggable accelerators | Best available execution provider on the host |
 
-**Automatic** is the default. On start, and again whenever you change the model or the runtime,
-PrintGuard benchmarks the model on both runtimes for concurrent throughput on the machine it is
-actually running on and keeps the faster one. The log shows which model, what won and by how much,
-for example on an M1 Max:
+**Automatic** is the default. On startup (and whenever you change models or runtime settings), PrintGuard benchmarks both runtimes on your actual machine for concurrent throughput and sticks with the winner. You can see the benchmark result in the logs, for example on an M1 Max:
 
 ```
 inference benchmark of the Standard model: Apple Core ML 173.2 fps across 1 workers, LiteRT CPU 195.4 fps across 8 workers
 inference ready: the Standard model on LiteRT CPU via litert (8 workers, 195 fps)
 ```
 
-The same benchmark also decides how many frames PrintGuard infers at once. It doubles the workers
-while each step still adds a tenth to throughput and stops at the host's real ceiling, which is
-usually below the core count. An accelerator serialises on one device, a runtime's Python binding may hold the
-interpreter lock, and a container may be under a CPU quota. Measuring covers all three, and
-the result is the `workers` term the scheduler divides by latency to get
-[capacity](architecture.md#scheduling-inference).
+That same benchmark also works out how many inference workers to run in parallel. It doubles the worker count as long as each step adds at least 10% more throughput, stopping at your machine's real ceiling (which is often lower than the raw core count because GPUs serialise work, Python bindings can contend on the GIL, or Docker CPU quotas cap you). That measured worker count is what the scheduler divides by latency to compute [capacity](architecture.md#scheduling-inference).
 
 ## Execution providers by platform
 
-ONNX Runtime takes the first device its providers offer that can run the model, preferring a
-GPU, then an NPU, then the CPU. Nothing here sets an NPU up, so one is used only where its
-provider offers it. What is available depends on the platform:
+ONNX Runtime picks the first device offered by its providers that can actually run the model, preferring GPU -> NPU -> CPU. PrintGuard doesn't install NPU drivers for you, so NPUs are used only where the OS provider exposes them.
 
 | Platform | Provider | Notes |
 |---|---|---|
-| macOS, desktop app | Core ML | Uses CPU, GPU and the Neural Engine |
-| Windows 11 24H2 or newer, desktop app | Windows ML | Installs the certified Intel, NVIDIA, AMD or Qualcomm provider on first launch. Needs the [Windows App Runtime](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads) 2.x and uses DirectML without it |
-| Older Windows, desktop app | DirectML | Runs on the GPU through its DirectX 12 driver, with no provider install, and reads `microsoft gpu`. Stays on the CPU without a driver |
-| Linux `amd64`, standard image | OpenVINO | Intel CPU path out of the box, and the GPU needs `latest-intel` and `/dev/dri` |
-| Linux `amd64`, `latest-nvidia` | TensorRT RTX | Needs the NVIDIA Container Toolkit on the host |
-| Linux `arm64`, standard image | ONNX Runtime's own CPU provider | No accelerator. Raspberry Pi 4/5 and similar |
+| macOS (desktop app) | Core ML | Automatically splits work across CPU, GPU and Neural Engine |
+| Windows 11 24H2+ (desktop app) | Windows ML | Downloads the certified Intel, NVIDIA, AMD or Qualcomm provider on first launch. Requires [Windows App Runtime](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads) 2.x; falls back to DirectML without it |
+| Older Windows (desktop app) | DirectML | Uses DirectX 12 GPU drivers with no extra install (shows as `microsoft gpu`), falling back to CPU if no driver is available |
+| Linux `amd64` (standard image) | OpenVINO | Uses the OpenVINO CPU path out of the box; GPU needs `latest-intel` plus `/dev/dri` |
+| Linux `amd64` (`latest-nvidia`) | TensorRT RTX | Requires the NVIDIA Container Toolkit on the host |
+| Linux `arm64` (standard image) | ONNX Runtime CPU | CPU only (Raspberry Pi 4/5 and similar ARM boards) |
 
-If no accelerator is usable, PrintGuard keeps working on the CPU. On an `amd64` image that is
-OpenVINO's CPU path, which the `latest-nvidia` image carries too, and elsewhere it is ONNX
-Runtime's own CPU provider. That covers an accelerator that is offered but can't build or run
-the model, such as a GPU out of memory or a driver the provider rejects. The log names the device
-and the reason in a warning that it `cannot run the model, so detection is not using it`, and the
-dashboard shows the same warning as a startup warning, kept until the hub restarts. **compute**
-names the device used instead. It applies with the runtime pinned
-to ONNX too. On **Automatic** the CPU path still has to beat LiteRT in the benchmark, so
-**compute** may read `litert cpu` instead.
+If no accelerator works, PrintGuard keeps running on CPU without crashing. On `amd64` images that means OpenVINO's CPU path (even on `latest-nvidia`); elsewhere it's ONNX Runtime's built-in CPU provider. That also covers accelerators that show up but fail to compile or run the model (for example a GPU out of memory or an incompatible driver). When that happens, PrintGuard logs `<device> cannot run the model, so detection is not using it` with the reason, displays a startup warning on the dashboard until restart, and reports the fallback device under **Compute**. Even when ONNX Runtime is pinned, that fallback applies; on **Automatic**, the CPU path still has to beat LiteRT, so **Compute** may show `litert cpu` instead.
 
 ## Intel GPU
 
-Use the Intel image and pass the render device:
+Pull the `-intel` tag and pass through `/dev/dri`:
 
 ```bash
 docker run -d --name printguard --restart unless-stopped \
@@ -159,7 +119,7 @@ docker run -d --name printguard --restart unless-stopped \
   ghcr.io/oliverbravery/printguard:latest-intel
 ```
 
-Compose:
+Or in Docker Compose:
 
 ```yaml
     image: ghcr.io/oliverbravery/printguard:latest-intel
@@ -167,30 +127,21 @@ Compose:
       - /dev/dri:/dev/dri
 ```
 
-On Unraid, set the repository to `ghcr.io/oliverbravery/printguard:latest-intel` and add
-the template's **Intel GPU** device, which is under the advanced view.
+On Unraid, change the repository to `ghcr.io/oliverbravery/printguard:latest-intel` and enable the **Intel GPU** device under the template's advanced view.
 
-The image carries Intel's own current compute runtime rather than the distribution's, which
-covers Arc and Battlemage cards and every iGPU from Tiger Lake (11th gen) onwards. Intel
-provides no current driver for Gen8 to Gen11 graphics, so a pre-Tiger-Lake iGPU has no GPU
-path and inference stays on the OpenVINO CPU path.
+The image bundles Intel's current upstream compute runtime rather than Debian's older packages, covering Arc and Battlemage cards plus every iGPU from 11th-gen (Tiger Lake) onwards. Intel no longer provides current compute drivers for older Gen8 to Gen11 integrated graphics, so pre-Tiger-Lake iGPUs stay on OpenVINO's CPU path.
 
-The **compute** readout names the hardware in use, so it reads `intel gpu` once the GPU
-is running the model, and `intel cpu` while OpenVINO is on the processor. The log lists
-everything the providers offered at start:
+Check the **Compute** readout to confirm it's active: it reads `intel gpu` when using the GPU and `intel cpu` when running on the processor. At startup, the logs also print every device the providers detected:
 
 ```
 execution providers offer: Intel GPU, Intel CPU
 ```
 
-A GPU missing from that line is one the driver never handed over. Check that the device is
-passed in with `--device /dev/dri` and that the tag ends in `-intel`.
+If your GPU is missing from that line, the container didn't get access to the driver. Double-check `--device /dev/dri` and make sure you're running the `-intel` tag.
 
 ## NVIDIA GPU
 
-Needs an RTX 30 series card or newer and the
-[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
-on the host:
+Requires an RTX 30 series (or newer) GPU and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) installed on your host:
 
 ```bash
 docker run -d --name printguard --restart unless-stopped \
@@ -201,45 +152,37 @@ docker run -d --name printguard --restart unless-stopped \
   ghcr.io/oliverbravery/printguard:latest-nvidia
 ```
 
-Compose:
+Or in Docker Compose:
 
 ```yaml
     image: ghcr.io/oliverbravery/printguard:latest-nvidia
     runtime: nvidia
 ```
 
-On Unraid, set the repository to the `-nvidia` tag and add `--runtime=nvidia --gpus all` to
-**Extra Parameters**.
+On Unraid, set the repository to the `-nvidia` tag and put `--runtime=nvidia --gpus all` in **Extra Parameters**.
 
-The image asks the Container Toolkit for every GPU on the host and carries the CUDA 12
-runtime the provider needs, so the toolkit is the only thing to install. To pick one card,
-set `NVIDIA_VISIBLE_DEVICES` to its UUID or index. If the toolkit cannot hand the GPU over,
-PrintGuard logs which provider is unavailable and keeps running on the CPU.
+The image already bundles the CUDA 12 runtime, so the Container Toolkit on the host is the only prerequisite. If you have multiple cards and want to pin one, set `NVIDIA_VISIBLE_DEVICES` to its UUID or index. If the toolkit can't hand the GPU to the container, PrintGuard logs the reason and falls back cleanly to CPU.
 
 ## Reading and pinning the runtime
 
-The **compute** readout names the hardware the model is running on, as the provider's vendor and
-the kind of device. It sits in the top bar on a window 1600 pixels wide or more, and always in
-**Detection** in Settings, where it reads **Active compute**.
+The **Compute** readout tells you what hardware is actually running inference (shown in the top bar on wide screens 1600px and up, and always under **Settings** -> **Detection** as **Active compute**):
 
-| Readout | Means |
+| Readout | Meaning |
 |---|---|
-| `intel gpu`, `intel npu` | OpenVINO on that device |
-| `intel cpu` | OpenVINO on the processor, whoever made it |
-| `litert cpu` | LiteRT on the processor |
-| `apple core ml` | Core ML on a Mac, which shares the model between the CPU, GPU and Neural Engine itself |
-| `onnx cpu` | ONNX Runtime's own CPU provider, where no other provider offered a device or none of the offered ones could run the model |
+| `intel gpu`, `intel npu` | OpenVINO running on an Intel GPU or NPU |
+| `intel cpu` | OpenVINO running on the CPU (even on AMD chips) |
+| `litert cpu` | LiteRT running on the CPU |
+| `apple core ml` | Core ML on macOS (manages CPU, GPU and Neural Engine automatically) |
+| `onnx cpu` | ONNX Runtime's generic CPU provider, when no other provider was available or able to run the model |
 
-A Windows ML or TensorRT device is named the same way as OpenVINO's, by its provider's vendor.
-Under **Runtime**, **Detection** in Settings offers:
+Windows ML and TensorRT devices follow the same `<vendor> <device>` naming style.
 
-| Setting | Effect |
+Under **Settings** -> **Detection**, **Runtime** lets you choose:
+
+| Option | Behaviour |
 |---|---|
-| **Automatic** | Benchmark both runtimes on start and keep the faster |
-| **LiteRT** | Always use LiteRT |
-| **ONNX Runtime** | Always use ONNX Runtime and its best provider |
+| **Automatic** | Benchmark both runtimes on startup and stick with the faster one |
+| **LiteRT** | Force LiteRT |
+| **ONNX Runtime** | Force ONNX Runtime with its best available provider |
 
-Pinning skips the comparison between runtimes, not the benchmark, so the one you pin is
-still measured for how many workers it sustains. Pin a runtime when a benchmark result surprises
-you. If a GPU you expect is not being used, [Troubleshooting](troubleshooting.md) has the
-checks.
+Pinning a runtime skips the head-to-head comparison, though PrintGuard still benchmarks your chosen runtime to pick the best worker count. Pin a runtime if the automatic benchmark gives a surprising result on your machine. If a GPU you expect isn't being picked up, check [Troubleshooting](troubleshooting.md).

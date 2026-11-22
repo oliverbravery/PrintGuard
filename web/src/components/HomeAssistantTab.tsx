@@ -88,8 +88,9 @@ export function HomeAssistantTab() {
           </div>
           <Toggle label="Use TLS" on={!!mqtt.tls} onChange={(on) => setMqttField("tls", on)} />
           <span className="block text-sm text-text-2">
-            Each monitor becomes a Home Assistant device with defect, score, state and snapshot, an enable switch and
-            printer pause, resume and cancel, all through MQTT discovery. Anyone with broker access can control PrintGuard.
+            Each monitor shows up as a Home Assistant device via MQTT discovery, with its defect sensor, score, state,
+            latest snapshot, enable switch and printer pause, resume and cancel controls. Keep in mind that anyone with
+            access to your broker can control PrintGuard.
           </span>
         </div>
       )}
@@ -107,7 +108,7 @@ export function HomeAssistantTab() {
         </span>
       )}
       <span className="block text-sm text-text-2">
-        Broker settings open a live connection, so they apply when you press Save.
+        Broker settings open a live connection, so changes apply once you click Save.
       </span>
     </div>
   );

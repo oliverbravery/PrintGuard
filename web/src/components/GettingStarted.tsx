@@ -51,14 +51,14 @@ export function GettingStarted() {
     {
       n: 1,
       title: "Register a camera",
-      why: "The video source PrintGuard watches.",
+      why: "Add the camera feed you want PrintGuard to watch.",
       done: engine.cameras.length > 0,
       dialog: "camera",
     },
     {
       n: 2,
       title: "Frame the print",
-      why: "The model watches a square, so crop it to the print.",
+      why: "Crop the feed tightly around the print bed so the model focuses on the print.",
       done: engine.cameras.some((c) => c.crop),
       ...(engine.cameras[0] ? { to: `/cameras/${engine.cameras[0].id}` } : { dialog: "camera" as const }),
       optional: true,
@@ -66,7 +66,7 @@ export function GettingStarted() {
     {
       n: 3,
       title: "Connect a printer",
-      why: "Lets PrintGuard pause or cancel on a defect.",
+      why: "Let PrintGuard pause or cancel prints automatically when something fails.",
       done: engine.printers.length > 0,
       dialog: "printer",
       optional: true,
@@ -74,7 +74,7 @@ export function GettingStarted() {
     {
       n: 4,
       title: "Set up alerts",
-      why: "Get a snapshot on your phone when a defect holds.",
+      why: "Get a snapshot on your phone as soon as a defect is spotted.",
       done: Object.keys(savedChannels(engine)).length > 0,
       to: "/settings/alerts",
       optional: true,
@@ -82,7 +82,7 @@ export function GettingStarted() {
     {
       n: 5,
       title: "Add a monitor",
-      why: "Bind a camera and start watching.",
+      why: "Link a camera and printer together to start watching.",
       done: engine.monitors.length > 0,
       dialog: "monitor",
     },
@@ -96,8 +96,8 @@ export function GettingStarted() {
         <div className="border-b border-rule px-4 py-4">
           <h2 className="text-xl font-bold tracking-[-0.02em]">Get PrintGuard watching</h2>
         <p className="mt-1 text-sm text-text-1">
-          Register a camera and add a monitor to start watching. Connect a printer and alerts for the
-          full safety net.
+          Add a camera and create a monitor to get started. Connect a printer and an alert channel too
+          if you want auto-pause and phone notifications.
         </p>
         <Progress label="Setup progress" value={doneCount} total={steps.length} className="mt-4" />
         </div>

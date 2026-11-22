@@ -248,8 +248,8 @@ class BambuAdapter(IntegrationAdapter):
     docs_url = "https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md"
     setup_url = "https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode"
     setup_hint = (
-        "On the printer, enable LAN Only Mode then Developer Mode (Settings > Network) so it takes "
-        "a pause. The access code is shown there; the serial number is under Settings > Device."
+        "On the printer, enable LAN Only Mode and Developer Mode (Settings > Network) so PrintGuard "
+        "can pause prints. The access code is shown there, and the serial number is under Settings > Device."
     )
     experimental = False
     formats = ("3mf",)

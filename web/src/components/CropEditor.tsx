@@ -164,15 +164,15 @@ export function CropEditor({
       )}
       {editing && freeform && (
         <p role="status" className="border-t border-line-0 px-4 py-2 text-xs leading-snug text-warn">
-          Square crops tend to do better at spotting defects than wide ones. A freeform crop still works, but detection might be worse.
+          Square crops generally catch defects better than wide ones. Freeform crops still work, though accuracy can drop a bit.
         </p>
       )}
       <p role="status" className="border-t border-line-0 px-4 py-2 text-xs leading-snug text-text-2">
         {!crop && !editing
-          ? "The model only watches this square until you crop the camera, so frame the print with a crop."
+          ? "Until you set a crop, the model only watches this centre square. Crop tightly around your build plate for the best results."
           : squares.length > 1
-            ? `The model scores this crop as ${squares.length} overlapping squares, which takes ${squares.length} times the work. Frame it tightly around the print.`
-            : "The model watches this crop, so frame it tightly around the print."}
+            ? `The model splits this wide crop into ${squares.length} overlapping squares, which takes ${squares.length}x the work. Keep it tight around the print.`
+            : "The model only watches inside this crop, so frame it tightly around your print."}
       </p>
     </div>
   );

@@ -33,8 +33,8 @@ export function StorageTab() {
             `Press the switch again to turn it off. ${waitingReviews} ${waitingReviews === 1 ? "print" : "prints"} waiting for review will be dismissed.`}
         </span>
         {reviewing
-          ? "PrintGuard keeps a few frames from each print on this hub so you can label them and send them to help train the detection model. Nothing is sent unless you review a print and press Send. Turning this off deletes the frames kept so far."
-          : "PrintGuard keeps only alert frames while this is off, for the risk history. It doesn't ask you to review a print and nothing is sent."}{" "}
+          ? "PrintGuard keeps a few frames from each print locally so you can label them and send them to me to help train future detection models. Nothing ever leaves your hub unless you review a print and click Send. Turning this off deletes any frames kept so far."
+          : "While this is off, PrintGuard only keeps alert snapshots for risk history. It won't prompt you to review prints and nothing is sent."}{" "}
         <a className="text-accent underline hover:opacity-80" href="https://github.com/oliverbravery/PrintGuard/blob/main/docs/feedback.md" target="_blank" rel="noreferrer">
           What's sent <NewTab />
         </a>
@@ -58,8 +58,8 @@ export function StorageTab() {
             ))}
           </select>
           <span className="block text-xs leading-relaxed text-text-2">
-            PrintGuard records a frame every 5 seconds, so you can scrub through a print when you review it and add frames it didn't pick. A
-            recording is deleted once you send or ignore its print. An 8 hour print takes about 100 MB.
+            PrintGuard saves one frame every 5 seconds so you can scrub through a finished print and add frames it missed.
+            Recordings are deleted automatically once you send or ignore the print. An 8-hour print uses about 100 MB.
           </span>
         </>
       )}

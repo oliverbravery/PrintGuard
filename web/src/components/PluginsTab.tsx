@@ -240,7 +240,7 @@ function PluginPage({
       )}
 
       {readme === undefined ? (
-        <span className="block text-xs text-text-2">Reading its page…</span>
+        <span className="block text-xs text-text-2">Loading details…</span>
       ) : readme ? (
         <div
           className="changelog text-xs"
@@ -353,7 +353,7 @@ function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () 
             )}
           </div>
           {plugin.failure && <span className="block text-xs text-bad">Stopped: {plugin.failure}</span>}
-          {!accepted && <span className="block text-xs text-warn">Waiting on permissions you have not accepted.</span>}
+          {!accepted && <span className="block text-xs text-warn">Waiting for you to review and accept its permissions.</span>}
         </div>
       }
     >
@@ -517,8 +517,8 @@ export function PluginsTab() {
     <div className="space-y-4">
       <div>
         <span className="block text-sm text-text-2">
-          Third-party code, installed switched off. Verified ones match the catalogue by hash. Read the rest before you
-          enable them.
+          Plugins are third-party code and always install switched off. Verified plugins match PrintGuard's catalogue by
+          hash; check the code before enabling anything else.
         </span>
       </div>
 
@@ -612,7 +612,7 @@ export function PluginsTab() {
             installPlugin({ kind: "file", filename: chosen.name }, await readZip(chosen));
           }}
         />
-        <span className="text-xs text-text-2">A zipped folder with plugin.json and plugin.js or worker.js.</span>
+        <span className="text-xs text-text-2">A .zip containing plugin.json plus plugin.js or worker.js.</span>
       </div>
     </div>
   );

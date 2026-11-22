@@ -6,26 +6,26 @@
 
 </div>
 
-Start at the [README](../README.md) to install PrintGuard. These pages cover everything after that.
+Start with the [README](../README.md) to get PrintGuard installed. Everything after that lives here.
 
-| Page | Read it when you want to |
+| Page | Read this if you want to |
 |---|---|
-| [Printers](printers.md) | Connect OctoPrint, Klipper, Elegoo, Prusa, Bambu Lab or Ultimaker, send it a print or set its temperatures |
-| [Cameras](cameras.md) | Add a printer webcam, a stream URL, a USB camera or a phone |
-| [Monitoring](monitoring.md) | Tune a monitor's thresholds, frame its camera and read its risk history |
-| [Notifications](notifications.md) | Set up an alert channel, or quieten a camera that keeps dropping out |
-| [Training frames](feedback.md) | Send labelled frames to help train the model, and see what's sent and the limits |
-| [Hardware](hardware.md) | Pick a detection model and an image variant, understand the model runtimes, and use a GPU or NPU |
-| [Deployment](deployment.md) | Reach a hub from outside your LAN without exposing it, harden it and back it up |
-| [API & MCP](api.md) | Drive the hub from a script, an agent or Home Assistant, with scoped access tokens |
-| [Plugins](plugins.md) | Install a plugin and understand what it can reach |
-| [Writing plugins](plugin-development.md) | Write a plugin and publish it to the catalogue |
-| [Architecture](architecture.md) | Understand how the engine, the hub and the dashboard fit together, or change the code |
-| [Troubleshooting](troubleshooting.md) | Fix a symptom like a dead feed, a failing printer test or a port already in use |
-| [Contributing](../CONTRIBUTING.md) | Set up a dev environment, run the tests, add an integration or notifier |
+| [Printers](printers.md) | Connect OctoPrint, Klipper, Creality, Elegoo, Prusa, Bambu Lab or Ultimaker, send prints or control temperatures |
+| [Cameras](cameras.md) | Add a printer webcam, stream URL, USB webcam or your phone/laptop camera |
+| [Monitoring](monitoring.md) | Dial in thresholds, crop and tune a camera, or read risk history |
+| [Notifications](notifications.md) | Set up an alert channel or stop a flaky Wi-Fi camera from spamming disconnect alerts |
+| [Training frames](feedback.md) | Share labelled frames after a print to help train future models, and see exactly what's sent |
+| [Hardware](hardware.md) | Pick between the Standard, Light and Legacy models, choose an image tag or enable GPU/NPU acceleration |
+| [Deployment](deployment.md) | Access your hub safely from outside your home network, harden it or back up its data |
+| [API & MCP](api.md) | Connect Home Assistant over MQTT, or control PrintGuard from a script or AI agent with scoped tokens |
+| [Plugins](plugins.md) | Install plugins and see how permissions and the sandbox keep them locked down |
+| [Writing plugins](plugin-development.md) | Build your own plugin and submit it to the catalogue |
+| [Architecture](architecture.md) | See how the engine, hub and dashboard fit together before changing the code |
+| [Troubleshooting](troubleshooting.md) | Fix a dead feed, a failing printer connection or a port conflict |
+| [Contributing](../CONTRIBUTING.md) | Set up a local dev environment, run tests or add a new printer or alert channel |
 
-## Conventions in these docs
+## A few terms used throughout these docs
 
-- The hub is PrintGuard running as a server, either the Docker container or the desktop app. The dashboard is the page it serves.
-- A camera is a video source and a printer is a connection to a print service. A monitor binds one of each, the printer optionally, and carries the detection thresholds.
-- Commands shown as `docker run` assume the standard image. Compose users can apply the same options in [`docker-compose.yaml`](../docker-compose.yaml).
+- The **hub** is the PrintGuard server itself (either the Docker container or the desktop app). The **dashboard** is the web interface it serves.
+- A **camera** is any video source and a **printer** is a connection to a print service. A **monitor** links one camera and (optionally) one printer together, along with its detection thresholds and alert actions.
+- Any `docker run` commands assume the default image. If you're using Docker Compose, apply the same flags in [`docker-compose.yaml`](../docker-compose.yaml).

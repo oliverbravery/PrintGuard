@@ -32,7 +32,7 @@ export function AlertsTab() {
         step={30}
         format={String}
         onChange={(v) => updateSettings({ fault_grace_s: v })}
-        hint="How long a camera or printer fault has to last before it pushes a notification. Raise it for a wireless camera that drops out and comes straight back."
+        hint="How long a camera or printer fault has to last before PrintGuard sends a warning. Bump this up if a Wi-Fi camera occasionally drops out and reconnects."
       />
       <span className="label block">Notification channels</span>
       {channels.map((meta) => {
@@ -81,7 +81,7 @@ export function AlertsTab() {
         );
       })}
       <span className="block text-sm text-text-2">
-        Defect alerts (with snapshots) go to every enabled channel for monitors with push notifications on.
+        Defect alerts (with a snapshot) go to every enabled channel for monitors that have push notifications switched on.
       </span>
       <button
         className="btn btn-primary"
@@ -96,7 +96,7 @@ export function AlertsTab() {
         </span>
       )}
       <span className="block text-sm text-text-2">
-        Channels hold credentials, so they apply when you press Save.
+        Channels store credentials, so changes apply once you click Save.
       </span>
     </div>
   );

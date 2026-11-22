@@ -11,23 +11,23 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Added
 
-- Two new detection models, Light and Standard. On frames from 30 hubs none of the models was trained on, Standard catches 10 of 20 failed prints where the old model caught 1, with the same 1 in 70 good prints alarmed. Pick one when you first open the dashboard or in Settings under Detection, where a chart compares them with Obico's.
-- Plugins sit in rows of their own under your monitors, and a plugin can draw its row with a picture, a title and buttons in the dashboard's own style.
-- A plugin can name the oldest PrintGuard it runs on, and an older hub won't install it. Spotify 1.1.0 needs 3.0.0.
+- Two new detection models, **Standard** and **Light**, trained on over 9,000 real frames submitted by the community. Tested on 30 hubs none of the models had seen before, Standard catches 10 of 20 failed prints compared to 1 of 20 for the old dissertation model, with the same single false alarm out of 70 good prints. You can pick a model during first-run setup or switch any time under **Settings** -> **Detection**, which also charts them against Obico's open models.
+- Plugins now get their own rows under the fleet, and can render cards with an image, title and buttons in the dashboard's native style.
+- Plugins can declare a `min_printguard` version in their manifest so older hubs refuse to install ones they can't run (Spotify 1.1.0 now requires 3.0.0).
 
 ### Changed
 
-- The dashboard is redesigned. The selected monitor's feed and controls sit at the top with the rest listed below, which you can resize or hide, and Prints, Cameras, Printers and Settings each have their own page.
-- Hubs run Standard after updating. It's about 5x slower than the old model on a CPU, so pick Light, or Legacy for the old model, if the capacity readout falls below what your cameras need.
-- The runtime setting has moved from Advanced in Settings to Detection.
-- Creality and Ultimaker printers are no longer marked experimental.
-- Each monitor has Configure and Review tabs. Review lists its finished prints, and you flag the frames where something went wrong instead of saying whether the print failed.
-- A printer's model is set on the printer instead of on each review, and ignoring a print deletes it to free space.
-- The image and the desktop apps are about 45 MB larger, since they carry the new models.
+- Full dashboard redesign. Selecting a monitor puts its live feed, risk score and printer controls front and centre at the top, with the rest of your fleet listed below (which you can resize or collapse). Prints, Cameras, Printers and Settings each move onto their own full pages instead of cramped dialogs.
+- Standard is now the default model after updating. Because it's around 5x heavier on CPU than the old model, switch to **Light** (or **Legacy**) in Settings if your host's capacity readout drops below what your cameras need.
+- The inference runtime picker has moved from **Advanced** into **Settings** -> **Detection**.
+- Creality and Ultimaker integrations are no longer marked experimental.
+- Monitor settings and end-of-print review now live in **Configure** and **Review** tabs on each monitor. Reviewing a print is simpler too: just flag the frames where something went wrong instead of answering a separate pass/fail question for the whole print.
+- Printer model is now set once on the printer itself instead of being asked on every review, and clicking **Ignore** on a review deletes its kept frames and recording to free up disk space.
+- The Docker image and desktop apps are roughly 45 MB larger to bundle the new models.
 
 ### Removed
 
-- Classify results and a camera's `last_result` no longer carry `distances` or `margin`, and `result` events no longer carry `margin`, since only Legacy has prototypes to measure them against. Read `defect_score` instead.
+- Classification results and `last_result` no longer include `distances` or `margin`, and `result` events no longer include `margin` (those were specific to Legacy's prototype classifier). Read `defect_score` instead.
 
 ## [2.6.7] - 2026-11-14
 

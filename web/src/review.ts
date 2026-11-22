@@ -1,6 +1,6 @@
 import type { ReviewSummary } from "./types";
 
-export const LIMIT_REASON = "This runs on a free service with a fixed amount of room, so there's a daily limit.";
+export const LIMIT_REASON = "The training inbox runs on a small free-tier bucket I pay for out of pocket, so there's a daily limit.";
 export const FRAMES_PER_DAY = 60;
 
 export function recordedFrameKey(reviewId: string, index: number): string {

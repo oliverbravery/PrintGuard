@@ -83,7 +83,7 @@ function ControlPane({ monitor }: { monitor: Monitor }) {
           </div>
         </>
       ) : (
-        <p className="surface z-[1] border-b border-rule px-4 py-3 text-sm text-text-1 lg:sticky lg:bottom-0">Bind a printer to pause or cancel a failing print.</p>
+        <p className="surface z-[1] border-b border-rule px-4 py-3 text-sm text-text-1 lg:sticky lg:bottom-0">Link a printer to pause or cancel failing prints automatically.</p>
       )}
     </>
   );
@@ -100,7 +100,7 @@ function TunePane({ monitor }: { monitor: Monitor }) {
           min={0.05}
           max={0.95}
           step={0.01}
-          hint="The score a frame must reach to count as a defect. Raise to cut false alarms. Lower to catch subtler failures."
+          hint="The risk score a frame needs to hit to count as a defect. Raise it to cut false alarms, or lower it to catch subtler failures."
           onChange={(v) => updateMonitor(monitor.id, { threshold: v })}
         />
       </Block>
@@ -112,7 +112,7 @@ function TunePane({ monitor }: { monitor: Monitor }) {
           max={30}
           step={1}
           format={String}
-          hint="Flagged frames in a row before it acts. Raise to ride out brief blips. Lower to react faster."
+          hint="How many flagged frames in a row it takes before PrintGuard acts. Raise it to ignore brief blips, or lower it to react faster."
           onChange={(v) => updateMonitor(monitor.id, { consecutive: v })}
         />
       </Block>
@@ -127,7 +127,7 @@ function TunePane({ monitor }: { monitor: Monitor }) {
           max={600}
           step={10}
           format={String}
-          hint="Quiet gap after acting before it can act again. Raise to avoid repeat alerts on one failure."
+          hint="How long to wait after acting before triggering again, so one failure doesn't spam repeat alerts."
           onChange={(v) => updateMonitor(monitor.id, { cooldown_s: v })}
         />
       </Block>
@@ -142,8 +142,8 @@ function PreheatPaneFor({ monitor }: { monitor: Monitor }) {
   const engine = useStore((s) => s.engine);
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
   const control = engine?.integrations.find((i) => i.id === printer?.provider)?.heater_control ?? false;
-  if (!printer) return <p className="px-4 py-3 text-sm text-text-1">Bind a printer to this monitor to preheat it.</p>;
-  if (!control) return <p className="px-4 py-3 text-sm text-text-1">{printer.name} doesn't let PrintGuard set its temperatures.</p>;
+  if (!printer) return <p className="px-4 py-3 text-sm text-text-1">Link a printer to this monitor to preheat it.</p>;
+  if (!control) return <p className="px-4 py-3 text-sm text-text-1">{printer.name} doesn't support setting temperatures from PrintGuard.</p>;
   if (!printer.device_state) return <p className="px-4 py-3 text-sm text-text-1">Waiting for {printer.name} to report its temperatures.</p>;
   return <PreheatPane printer={printer} />;
 }

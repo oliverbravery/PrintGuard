@@ -22,8 +22,8 @@ export function DetectionTab() {
         <option value="onnx">ONNX Runtime</option>
       </select>
       <span className="block text-sm text-text-2">
-        Automatic benchmarks the model on both runtimes and keeps the faster. ONNX Runtime can use Core ML,
-        Windows ML, OpenVINO or NVIDIA hardware. LiteRT runs on the CPU.
+        Automatic benchmarks both runtimes at startup and keeps whichever is faster. ONNX Runtime can use Core ML,
+        Windows ML, OpenVINO or NVIDIA GPUs, while LiteRT runs on CPU.
       </span>
       <dl className="grid grid-cols-3 border border-line-0">
         {[

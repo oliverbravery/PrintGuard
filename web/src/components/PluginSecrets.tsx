@@ -57,7 +57,7 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
       ))}
       {names.length > 0 && (
         <span className="block text-xs text-text-2">
-          PrintGuard fills these in. The plugin never reads them back.
+          PrintGuard injects these into requests for you, so the plugin itself can never read them back.
         </span>
       )}
       {provider && (

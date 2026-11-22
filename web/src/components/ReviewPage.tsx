@@ -214,12 +214,13 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
         <details className="text-sm text-text-2">
           <summary className="cursor-pointer py-1 hover:text-text-1 pointer-coarse:py-3">What's sent</summary>
           <p className="mt-1.5 leading-relaxed">
-            The frames shown here with the labels you gave them, each frame's risk score, time and whether it was an alert, a near miss
-            or an ordinary frame, a random ID for the print and for each frame, this monitor's alert threshold, the type of printer
-            connection, the printer model if its printer has one, the PrintGuard version and a random ID for this hub. No names or camera URLs.
-            The inbox sees your IP address, as any server does, and keeps only a hash of it until the next day for the daily limit.
-            Frames are stored privately in the EU and used only to train PrintGuard's detection model. To have yours deleted, raise an
-            issue on GitHub with the hub ID from Settings.
+            The frames shown here with the labels you gave them, each frame's risk score, timestamp and whether it was an
+            alert, near miss or regular frame, random IDs for the print and each frame, this monitor's alert threshold,
+            the printer integration type, the printer model (if set on the printer), the PrintGuard version and a random
+            ID for this hub. No names or camera URLs are sent. The inbox sees your IP address like any web server does,
+            and only keeps a keyed hash of it until the next day to enforce the daily limit. Frames are stored privately
+            in the EU and used solely to train PrintGuard's detection models. To have yours deleted, open an issue on
+            GitHub with the hub ID from Settings.
           </p>
         </details>
       </div>
@@ -229,13 +230,13 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
   return (
     <div className="flex h-full min-h-0 flex-col">
       <DetailHead title={printedAt(review)} />
-      {review.status === "running" && <p className="px-4 py-4 text-sm text-text-1">This print is still running. You can review it once it ends.</p>}
+      {review.status === "running" && <p className="px-4 py-4 text-sm text-text-1">This print is still running. You can review it once it finishes.</p>}
       {(review.status === "queued" || review.status === "sent") && <Progress review={review} onDone={() => navigate(list)} />}
       {reviewable(review) && (
         <>
           <div className="space-y-1 border-b border-line-0 px-4 py-3 text-sm">
             <p className="text-text-1">
-              Press the flag on any frame where something went wrong, and the × to leave a frame out. The frames you send train the detection model.
+              Click the flag on any frame where something went wrong, or × to leave a frame out. Every frame you share helps me train the next detection model.
             </p>
             {review.recording && review.recording.expires !== null && (
               <p className="text-text-2">
@@ -286,8 +287,8 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
         <Dialog title="Ignore this print?" onClose={() => setIgnoring(false)}>
           <div className="space-y-4">
             <p className="text-sm text-text-1">
-              Ignoring deletes the record of this print, its {framesLabel(review.frames)} and its recording, freeing{" "}
-              {megabytes(review.bytes + (review.recording?.bytes ?? 0))}. You can't undo it.
+              Ignoring this print permanently deletes its {framesLabel(review.frames)} and recording, freeing{" "}
+              {megabytes(review.bytes + (review.recording?.bytes ?? 0))}.
             </p>
             <div className="flex justify-end gap-2">
               <button className="btn" onClick={() => setIgnoring(false)}>
@@ -342,7 +343,7 @@ export function ReviewPage() {
           ) : (
             <>
               <DetailHead title="Nothing to review" />
-              <p className="px-4 py-4 text-sm text-text-2">Frames from each finished print show up here for you to label and send.</p>
+              <p className="px-4 py-4 text-sm text-text-2">Frames from finished prints show up here so you can label and send them if you'd like.</p>
             </>
           )
         }

@@ -320,9 +320,9 @@ export function ModelChart({ selected }: { selected?: ModelId }) {
         </table>
       </div>
       <p className="text-xs leading-relaxed text-text-2">
-        Scored on {GOLD_TEST.frames.toLocaleString("en-GB")} frames from {GOLD_TEST.hubs} PrintGuard hubs no model was trained on, with
-        latency measured on one CPU thread of an M1 Max. Caught and false alarms count whole prints, {GOLD_TEST.failedPrints} failed and{" "}
-        {GOLD_TEST.goodPrints} good, alerting at 0.75 for 3 frames in a row. Obico's scores aren't probabilities, so its thresholds were
+        Tested on {GOLD_TEST.frames.toLocaleString("en-GB")} curated frames from {GOLD_TEST.hubs} PrintGuard hubs none of the models had seen before,
+        with latency measured on one CPU thread of an M1 Max. Caught and false alarms count whole prints ({GOLD_TEST.failedPrints} failed and{" "}
+        {GOLD_TEST.goodPrints} good), alerting after 3 frames in a row at 0.75. Obico's scores aren't probabilities, so its thresholds were
         matched on separate validation frames.
       </p>
     </div>

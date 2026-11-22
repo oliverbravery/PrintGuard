@@ -6,9 +6,7 @@
 
 </div>
 
-A monitor binds a camera to an optional printer and decides when a defect is real and what to do
-about it. This page covers its settings, the camera settings that change what the model sees, and
-the risk history you tune them against.
+A monitor ties a camera and an optional printer together, deciding when a defect is real and what PrintGuard should do about it. This page covers monitor settings, camera adjustments that affect what the model sees, and how to use risk history to dial everything in.
 
 - [How a defect becomes an alert](#how-a-defect-becomes-an-alert)
 - [Monitor settings](#monitor-settings)
@@ -31,126 +29,93 @@ flowchart LR
     act --> cool["Cooldown"]
 ```
 
-The score is the [detection model's](hardware.md#detection-models) own confidence that the frame
-shows a failing print, so 0.5 is where it changes its mind. It only ever approaches 1, and Light
-passes 0.95 on only one in twelve frames of a real failure, which is why the threshold stops there. At the default settings one bad frame does nothing. A defect has
-to hold for a run of frames before the monitor acts, and the cooldown keeps one failure from
-alerting twice.
+Every scored frame gets a probability from 0 to 1 showing how confident the [detection model](hardware.md#detection-models) is that the print is failing, with 0.5 as the dividing line. Scores only ever approach 1 (and Light only goes above 0.95 on roughly one in twelve real failure frames), which is why the threshold slider caps at 0.95.
+
+With the defaults, a single spiky frame does nothing. The score has to stay above your threshold for several frames in a row before PrintGuard acts, and a cooldown stops the same failure from spamming you with alerts.
 
 ## Monitor settings
 
-Open a monitor from the dashboard and use its **Tune** and **Configure** tabs to change these.
-They save as you move them.
+Select any monitor on the dashboard and open its **Tune** or **Configure** tab. Settings save automatically as you change them.
 
 ![The selected monitor: its feed, live risk, temperatures, pause and cancel, with the Tune and Preheat panes beside them](assets/printer-detail.png)
 
 | Setting | Default | Range | What it does |
 |---|---|---|---|
-| **Watch this monitor** | On | | Turns the monitor off without deleting it. A switched-off monitor reads **off** in the monitor list |
-| **Camera** | The one chosen when the monitor is made | Any registered camera, or none | The camera whose frames the monitor scores. With none the monitor doesn't watch |
-| **Printer** | The one chosen when the monitor is made | Any registered printer, or none | The printer the monitor follows and can pause or cancel. With none it only alerts |
-| **Alert threshold** | 0.75 | 0.05 to 0.95 | The score a frame has to reach to count as a defect |
-| **Consecutive detections to alert** | 3 | 1 to 30 | How many flagged frames in a row it takes to act. A camera dropout or a frozen feed starts the count again |
-| **On sustained defect** | Alert only | | Alert only, pause the print or cancel the print. Without a linked printer the last two only alert |
-| **Cooldown (seconds)** | 60 | 0 to 600 | The quiet gap after acting before the monitor can act again. At 0 the next flagged frame acts once the last response has finished. It ends when the print does, and a pause or cancel the printer didn't take, or took but couldn't be read back as stopped, is tried again after 30 seconds, however short the cooldown is |
-| **Push notifications** | Off | | Sends this monitor's alerts and warnings to your [alert channels](notifications.md) |
+| **Watch this monitor** | On | | Pauses monitoring without deleting the monitor. Switched-off monitors show as **off** in the fleet list |
+| **Camera** | Chosen at creation | Any registered camera, or none | The camera feed this monitor scores. With no camera linked, it won't watch |
+| **Printer** | Chosen at creation | Any registered printer, or none | The printer to track and pause/cancel. Without one, the monitor only alerts |
+| **Alert threshold** | 0.75 | 0.05 to 0.95 | How high a frame's risk score needs to get to count as a defect |
+| **Consecutive detections to alert** | 3 | 1 to 30 | How many flagged frames in a row it takes to trigger. A camera disconnect or frozen feed resets the streak |
+| **On sustained defect** | Alert only | | Choose between alerting only, pausing the print or cancelling the print. Without a linked printer, pause and cancel fall back to alert only |
+| **Cooldown (seconds)** | 60 | 0 to 600 | Quiet period after an alert before the monitor can trigger again. At 0, the next flagged frame acts as soon as the previous action finishes. Cooldown resets when the print ends; if a pause or cancel failed (or couldn't be confirmed as stopped), PrintGuard retries after 30 seconds regardless of cooldown |
+| **Push notifications** | Off | | Sends alerts and fault warnings from this monitor to your configured [alert channels](notifications.md) |
 
 > [!IMPORTANT]
-> A new monitor only shows a defect on the dashboard. Turn on **Push notifications** to hear about
-> it, and choose pause or cancel if you want the print stopped.
+> Brand-new monitors only flag defects on the dashboard by default. Switch on **Push notifications** if you want alerts on your phone, and change **On sustained defect** to Pause or Cancel if you want PrintGuard to stop the printer automatically.
 
-The same panel pauses, resumes or cancels the print by hand, and sets the printer's
-[temperatures](printers.md#temperatures-and-preheat). It offers Pause unless the print is paused,
-Resume only while it is paused and Cancel only while it is printing or paused.
+From the monitor's **Control** and **Preheat** tabs you can also pause, resume or cancel manually and set [heater temperatures](printers.md#temperatures-and-preheat). Pause is available while printing, Resume while paused, and Cancel while printing or paused.
 
 ## When a monitor watches
 
-A monitor with a camera and no printer watches all the time. A monitor with a printer watches
-unless the printer reports idle, paused or an error, so it also watches before the printer has
-answered. One with no camera, or switched off, doesn't watch.
-Losing contact, or a state PrintGuard can't read, keeps whatever the printer last reported, so
-one that drops off mid-print is still watched and one switched off after a print stays in
-standby. [Failing safely](architecture.md#failing-safely) has the reasoning.
+If a monitor has a camera and no linked printer, it watches continuously. If a printer is linked, it watches unless the printer explicitly reports that it is idle, paused or in an error state (so it also watches before the printer has first responded). A monitor with no camera, or one you've switched off, doesn't watch.
+
+If the printer drops off the network or returns an unrecognised state, PrintGuard sticks with whatever it last reported. That way a printer disconnecting mid-print keeps getting watched, while a printer you power off after a finished job stays quietly on standby. See [failing safely](architecture.md#failing-safely) for the full design.
 
 ## Tuning the camera
 
-These settings live on the camera, under **Cameras**, so every monitor using that camera gets
-them. They apply to the live view, the frames the model scores, the snapshots in your alerts and
-the frames the [API](api.md) returns.
+Camera adjustments live on the **Cameras** page, so every monitor sharing that camera gets the same setup. They apply everywhere: the live view, the frames fed to the model, alert snapshots and frames fetched via the [API](api.md).
 
 ![A camera open on the Cameras page, with its name, brightness, contrast, sharpness, detection rate and rotation](assets/camera-editor.png)
 
 | Setting | Default | Range | What it does |
 |---|---|---|---|
-| **Rotation** | 0° | 0°, 90°, 180°, 270° | Sets a camera mounted sideways or upside down upright |
-| **Crop region** | The middle square | A square, or a freeform region up to 4 times as wide as it is tall | The part of the view the model watches |
-| **Brightness** | 1 | 0.25 to 2 | Lifts a dim chamber or tames a bright one |
-| **Contrast** | 1 | 0.25 to 2 | Separates the print from a background of a similar shade |
-| **Sharpness** | 0 | 0 to 2 | Brings out strands on a soft camera. The live view sharpens the picture at the size it's shown, so it looks stronger there than in the frame the model gets |
-| **Detection rate** | 60 a second | 0.5 up to the camera's own frame rate, never above 60, or from 0.1 over the API | The most frames a second the model scores from this camera |
+| **Rotation** | 0° | 0°, 90°, 180°, 270° | Flips or rotates a sideways or upside-down camera upright |
+| **Crop region** | Centre square | Square, or freeform up to 4:1 aspect ratio | The area of the frame the model looks at |
+| **Brightness** | 1 | 0.25 to 2 | Brightens a dark enclosure or tones down harsh lighting |
+| **Contrast** | 1 | 0.25 to 2 | Helps separate the print from a similarly coloured bed or background |
+| **Sharpness** | 0 | 0 to 2 | Brings out fine strands on soft cameras. Note that the preview sharpens at display size, so it looks slightly stronger in the UI than in the frame sent to the model |
+| **Detection rate** | 60 fps | 0.5 fps up to the camera's own rate (max 60; down to 0.1 via API) | Caps how many frames per second the model scores from this camera |
 
-The model is trained on squares. Until you crop a camera it only watches the middle square of the
-frame, so on a wide camera the sides of the bed go unwatched. Press **Set crop** on the camera's
-feed under **Cameras** and crop it to the part of the bed you print on, leaving a little room, since the model trims a sixteenth off each edge of a square
-before it scores it. A crop is square unless you choose **Freeform**. Square crops tend to do
-better at spotting defects, so the editor warns you when you switch. A crop wider than a square is
-scored as overlapping squares the height of
-the crop, each overlapping the next by at least a fifth, and a frame is as risky as its worst
-square. The crop editor draws the squares, and each one adds the cost of scoring a frame, so a
-crop twice as wide as it is tall halves the detection rate your hardware can sustain. Past 4 to 1
-only the middle is watched. Rotation is applied first, so you draw the crop on the picture as you see it,
-and turning a camera by 90° keeps its crop the same size and in the same place.
-A crop that runs off the frame is cut back to the part inside it.
+The models are trained on square images. Until you set a crop, PrintGuard only scores the centre square of the frame, which on a 16:9 webcam leaves the left and right edges of the bed unwatched. Click **Set crop** on the camera's feed and frame it tightly around the build area (leaving a tiny bit of margin, since the model trims a sixteenth off each edge during preprocessing).
 
-Detection normally runs as often as the hardware and the camera allow. Lower **Detection rate**
-to cut the load PrintGuard puts on a shared host. A defect takes longer to confirm at a lower
-rate, since the consecutive count is in frames.
+Crops stay square by default unless you switch to **Freeform**. Square crops generally catch defects more reliably, so the editor shows a quick warning if you go freeform. A wide crop is sliced into overlapping squares (each overlapping the next by at least 20%), and the frame takes the highest risk score among them. The crop editor outlines those squares for you. Each extra square multiplies the inference work, so a 2:1 wide crop halves the detection rate your hardware can sustain on that camera. Anything wider than 4:1 only watches the middle section. Rotation happens before cropping, so you always draw the crop upright, and rotating by 90° keeps your existing crop in place. Any part of a crop extending outside the frame is clipped back inside.
+
+By default, detection runs as fast as your hardware and camera allow. Lowering **Detection rate** is an easy way to cut CPU usage on a shared server or Pi. Just remember that because **Consecutive detections** counts frames, a lower detection rate means defects take slightly longer to confirm.
 
 ## Risk history
 
-The selected monitor shows the live score on a bar above its last 240 readings, which is 48
-seconds at best since the dashboard hears of five results a second at most.
-**History** beside it, or on the monitor's row in the list, opens the full page.
+The selected monitor shows its live risk bar above a sparkline of the last 240 readings (about 48 seconds at full speed, since the dashboard receives at most 5 updates per second). Click **History** next to it (or on any row in the fleet list) for the full history page.
 
 ![A monitor's history page: stat tiles, the risk chart with a gap where it wasn't watching, two prints kept and three risky moments](assets/history.png)
 
-| Part | Shows |
+| Section | Shows |
 |---|---|
-| Stat tiles | Average and peak score, the share of frames over the threshold, frames scored, alerts and watch time |
-| Risk per period | The score charted over the last hour, 6 hours, 24 hours or everything kept |
-| Prints | Each finished print kept from this monitor, with its frame count and review status. A print still running isn't listed |
-| Risky moments | A snapshot of what the camera saw each time the monitor raised an alert |
+| Stat tiles | Average and peak score, percentage of frames above threshold, total frames scored, alerts fired and watch time |
+| Risk per period | Risk score over the last 1 hour, 6 hours, 24 hours or all stored buckets |
+| Prints | Finished prints kept from this monitor, with frame counts and review status (prints still running aren't shown yet) |
+| Risky moments | Every alert snapshot captured by this monitor |
 
-Watch time is how long the readings spanned, in whole minutes. A gap of more than 30 seconds
-between two readings, such as the monitor standing down or losing its camera, isn't counted.
+Watch time counts whole minutes of active monitoring; any gap longer than 30 seconds (such as standby or a camera outage) is excluded.
 
-The chart is kept in memory as one-minute buckets covering the last 24 hours of watching, with
-the last 50 alerts, so restarting the hub clears it, and the alerts tile then counts the snapshots kept instead. The alert snapshots are kept on disk with
-the other [frames kept from each print](feedback.md#whats-kept-on-your-hub), up to 40 a print,
-and survive a restart. Deleting a monitor deletes every print kept from it, including ones still waiting for a
-review. The [REST API](api.md#rest-api)
-serves the same history and snapshots.
+The chart itself is stored in memory as one-minute buckets covering the last 24 hours (along with the last 50 alert counts), so restarting the hub clears the chart and the alerts tile falls back to counting the alert snapshots saved on disk. Alert snapshots are stored on disk alongside the other [kept print frames](feedback.md#whats-kept-on-your-hub) (up to 40 per print) and survive restarts. Deleting a monitor removes all saved prints from it, including any waiting for review. The [REST API](api.md#rest-api) exposes the same history and snapshots.
 
 ## Reviewing a print
 
-PrintGuard keeps a few frames from each print on your hub. When a print ends its monitor offers
-a button to review the frames from the last print, where you can label them and send them to help train the
-detection model. Nothing is sent unless you press **Send**.
-[Training frames](feedback.md) covers what's kept, what's sent and how to switch the prompt off.
+PrintGuard saves a small set of frames locally from each print. Once a print finishes, you can open the monitor's **Review** tab (or click the review link in the fleet list) to flag any frames where something went wrong and send them to me to help train future detection models. Nothing is ever sent unless you click **Send**. See [Training frames](feedback.md) for everything about what's stored, what's sent and how to switch the review flow off.
 
 ![The review page with a failed print's frames labelled good, failure and real failure beside the recording](assets/review.png)
 
 ## Choosing values
 
-Start with the defaults and one real print, then read the history.
+Start with the defaults on one normal print, then look at the risk history and adjust from real numbers rather than guessing:
 
-| You see | Change |
+| What you're seeing | What to tweak |
 |---|---|
-| Alerts on a good print | Raise the threshold, or raise the consecutive count so brief blips are ridden out |
-| A failure caught late | Lower the threshold or the consecutive count |
-| A failure that barely moves the score | Crop the camera tightly around the part of the bed you print on, then check the lighting with brightness and contrast |
-| A score that sits high on an empty bed | Crop out whatever the model is reacting to, such as cables or a cluttered background |
-| The same failure alerting again and again | Raise the cooldown |
-| A busy processor on a shared host | Lower the camera's detection rate |
+| False alarms on a clean print | Raise the threshold, or bump consecutive detections so brief blips don't trigger |
+| A real failure caught too late | Lower the threshold or the consecutive frame count |
+| A failure that barely raises the score | Crop the camera much tighter around the print bed, then check lighting with brightness and contrast |
+| Score sitting high on an empty bed | Crop out distracting background clutter, cables or shiny hardware |
+| Repeat alerts for the same failure | Raise the cooldown |
+| High CPU usage on a shared machine | Lower the camera's detection rate |
 
-[Troubleshooting](troubleshooting.md#detection-and-alerts) covers alerts that never arrive.
+If alerts aren't showing up at all, see [Troubleshooting](troubleshooting.md#detection-and-alerts).

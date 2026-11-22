@@ -76,8 +76,8 @@ export function ReportDialog() {
           <p className="text-sm text-text-1">
             Report sent, thank you.{" "}
             {email.trim()
-              ? "If more information is needed, you'll hear back at the address you left."
-              : "It was submitted anonymously."}
+              ? "If I need any more details, I'll reply to the email you left."
+              : "Sent anonymously."}
           </p>
           <button className="btn btn-primary w-full" onClick={close}>
             Done
@@ -91,7 +91,7 @@ export function ReportDialog() {
     <Dialog title="Report a bug" onClose={close}>
       <div className="space-y-3">
         <p className="text-sm text-text-1">
-          Describe what went wrong and it goes straight to me, anonymously and with no account needed.
+          Tell me what went wrong and it comes straight to me, anonymously and with no account needed.
         </p>
         <textarea
           className="field min-h-28"
@@ -140,13 +140,12 @@ export function ReportDialog() {
         <details className="text-xs text-text-2">
           <summary className="cursor-pointer pointer-coarse:min-h-11 pointer-coarse:py-3.5 hover:text-text-1">What's sent with your report</summary>
           <p className="mt-1.5 leading-relaxed">
-            Your description, any files you attach, the address this dashboard is open at, your browser's
-            user agent and window size, and a diagnostics bundle: the app version and platform, your
-            camera, printer and monitor configuration with every credential removed, the names of your alert
-            channels, performance stats, recent alerts, errors and warnings, and the app's recent logs, also
-            scrubbed of credentials. Camera and printer names and addresses are included. No camera frames
-            are included unless you attach them yourself. Download the same bundle to read it first, or to
-            send it somewhere else yourself.
+            Your description, any files you attach, the URL this dashboard is open at, your browser's user agent and
+            window size, plus a diagnostics bundle containing the PrintGuard version and platform, your camera, printer
+            and monitor config (with all passwords, keys and tokens stripped), the names of your alert channels,
+            performance stats, recent alerts/warnings/errors and recent logs (also scrubbed of credentials). Camera and
+            printer names and addresses are included, though no camera frames are sent unless you attach them yourself.
+            You can download the exact same bundle below to read it first or attach it to a GitHub issue yourself.
           </p>
         </details>
         {reportResult && !reportResult.ok && (

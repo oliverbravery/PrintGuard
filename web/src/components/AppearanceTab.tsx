@@ -85,7 +85,7 @@ export function AppearanceTab() {
             + New
           </button>
         </div>
-        {themes.length === 0 && <p className="text-sm text-text-2">No custom themes yet. Create one to tailor every colour.</p>}
+        {themes.length === 0 && <p className="text-sm text-text-2">No custom themes yet. Create one to customise every colour.</p>}
         <div className="border-t border-line-0">
           {themes.map((t) => (
             <div key={t.id} className="flex items-center gap-2 border-b border-line-0 py-2">

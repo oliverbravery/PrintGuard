@@ -42,8 +42,8 @@ export function GuideDialog() {
     <Dialog title="Guide" size="wide" onClose={() => openDialog(null)}>
       <div className="space-y-6">
         <p className="text-sm text-text-1">
-          What everything on the dashboard means, and what you can do with it. Use a section's action
-          to jump straight in.
+          A quick rundown of what everything on the dashboard does. Use the button under any section
+          to jump straight there.
         </p>
         {GUIDE.map((section) => (
           <GuideEntry key={section.id} section={section} />

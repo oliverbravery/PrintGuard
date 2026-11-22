@@ -48,7 +48,7 @@ export function MonitorDialog() {
           ))}
         </select>
         {!cameras.length && (
-          <p className="text-sm text-text-1">No cameras registered yet, so register one on the Cameras page first.</p>
+          <p className="text-sm text-text-1">No cameras registered yet. Add one on the Cameras page first.</p>
         )}
         <select className="field" aria-label="Printer" value={boundPrinterId} onChange={(e) => setPrinterId(e.target.value)}>
           <option value="">No printer (alerts only)</option>

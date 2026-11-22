@@ -18,7 +18,7 @@ export function ApiTab() {
       <div>
         <span className="label block">API &amp; MCP access</span>
         <span className="text-xs text-text-2 block mt-1">
-          Bearer tokens for the REST API and MCP server. Control includes read, and manage includes both.
+          Generate bearer tokens for the REST API and MCP server. Control includes read access, and manage includes everything.
         </span>
       </div>
 
@@ -34,7 +34,7 @@ export function ApiTab() {
             </button>
           </span>
           <span className="block text-sm text-text-1">
-            Copy <span className="text-accent">{createdToken.name}</span> now, it is shown once and cannot be retrieved later.
+            Copy <span className="text-accent">{createdToken.name}</span> now. It's only shown once and can't be retrieved again later.
           </span>
           <div className="flex items-center gap-2">
             <code className="mono flex-1 break-all text-sm">{createdToken.secret}</code>

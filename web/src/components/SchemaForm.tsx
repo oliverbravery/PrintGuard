@@ -100,7 +100,7 @@ export function SchemaForm({
             />
           )}
           {!prop.secret && stored !== undefined && ADDRESS_FIELDS.includes(key) && shown(value, key) !== shown(stored, key) && (
-            <span className="mt-1 block text-xs text-text-2">The saved address may hide a login or key, so type the whole address.</span>
+            <span className="mt-1 block text-xs text-text-2">The saved address may hide a login or key, so re-enter the full address.</span>
           )}
         </div>
       ))}

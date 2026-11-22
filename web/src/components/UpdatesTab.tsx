@@ -16,7 +16,7 @@ export function UpdatesTab() {
         }}
       />
       <span className="block text-sm text-text-2">
-        Checks the public GitHub releases once a day, from the hub. No telemetry is sent.
+        Checks GitHub releases once a day straight from your hub, with no telemetry.
       </span>
       <div className="flex flex-wrap items-center gap-2">
         <button className="btn" disabled={isPending("update.check")} onClick={() => send({ cmd: "update.check" })}>

@@ -90,13 +90,13 @@ export function UpdateDialog() {
                   Download v{update!.latest} <NewTab />
                 </a>
                 <p className="text-xs text-text-2">
-                  Quit PrintGuard from the tray, replace the app with the downloaded one, and open it again.
+                  Quit PrintGuard from the menu bar or system tray, replace the app with the new download and open it again.
                 </p>
               </>
             ) : (
               <>
                 <p className="text-xs text-text-2">
-                  Pull the new image and recreate the container where your compose file lives:
+                  Pull the new image and recreate the container from the folder with your compose file:
                 </p>
                 <div className="flex items-center gap-2">
                   <code className="mono text-xs text-text-0 break-all flex-1">{PULL_COMMAND}</code>

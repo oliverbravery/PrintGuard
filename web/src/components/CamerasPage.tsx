@@ -39,9 +39,9 @@ function CameraEditor({ camera }: { camera: Camera }) {
   const owner = camera.printer_id ? engine?.printers.find((p) => p.id === camera.printer_id) : null;
   const managed = Boolean(owner) || Boolean(camera.declared);
   const removalHint = owner
-    ? "Managed by its printer integration, remove the printer to remove this camera."
+    ? "Added automatically by its printer integration. Remove the printer if you want to remove this camera."
     : camera.declared
-      ? "Passed in by the deployment, remove its devices entry to remove this camera."
+      ? "Passed into the container at startup. Remove its devices entry from your Docker config to remove it."
       : null;
   const detectFpsCeiling = Math.min(UNCAPPED_DETECT_FPS, Math.ceil(camera.max_fps));
   const covered = useCovered();
@@ -90,7 +90,7 @@ function CameraEditor({ camera }: { camera: Camera }) {
               min={0}
               max={2}
               step={0.1}
-              hint="The preview sharpens at the size it's drawn here, so it looks stronger than what the model gets."
+              hint="The preview sharpens at display size, so it looks a bit stronger here than what the model actually sees."
               onChange={(v) => updateCamera(camera.id, { sharpness: v })}
             />
             <Slider
@@ -100,7 +100,7 @@ function CameraEditor({ camera }: { camera: Camera }) {
               max={detectFpsCeiling}
               step={0.5}
               format={(v) => `${v} fps`}
-              hint="Lower it to lighten the load on the hub. A defect then takes longer to confirm."
+              hint="Lower this to cut CPU load on the hub. Defects will take a little longer to confirm at lower rates."
               onChange={(v) => updateCamera(camera.id, { detect_fps: v >= detectFpsCeiling ? UNCAPPED_DETECT_FPS : v })}
             />
           </div>
@@ -259,8 +259,8 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
       {tab === "machine" && (
         <div className="space-y-3">
           <p className="text-sm text-text-1">
-            Cameras plugged into the machine PrintGuard runs on. They register on the hub itself, so
-            they keep watching with every window closed.
+            USB webcams plugged straight into the machine running PrintGuard. They live on the hub itself, so they keep
+            watching even when every browser tab is closed.
           </p>
           <DevicePicker
             onAdd={onDeviceAdd}
@@ -277,8 +277,8 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
           }}
         >
           <p className="text-sm text-text-1">
-            Streams this device's camera to the hub. It reconnects if the hub restarts and resumes
-            when you reopen this page on this device.
+            Streams this phone or laptop's camera straight to the hub. It reconnects automatically if the hub restarts
+            and resumes whenever you reopen this page here.
           </p>
           <select className="field" aria-label="Camera" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
             <option value="">Select a camera…</option>
@@ -361,7 +361,7 @@ export function CamerasPage() {
         {group === "cameras" && own.length === 0 && <p className="border-b border-line-0 px-4 py-3 text-sm text-text-2">No cameras registered yet.</p>}
         {group === "printers" && (
           <div className="space-y-3 px-4 py-3">
-            <p className="text-sm text-text-1">Cameras connected to your registered printers. Refresh to register any added since.</p>
+            <p className="text-sm text-text-1">Webcams exposed by your registered printers. Hit Refresh if you've added a camera since connecting a printer.</p>
             {!hasPrinters && <p className="mono text-xs text-text-2">register a printer first</p>}
             {hasPrinters && !fromPrinters.length && <p className="mono text-xs text-text-2">no printer cameras found, refresh after connecting one</p>}
             <button className="btn" disabled={!hasPrinters || refreshing} onClick={() => send({ cmd: "printer.cameras.refresh" })}>

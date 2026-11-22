@@ -32,8 +32,8 @@ export interface GuideSection {
 }
 
 const WATCH_STATES: { led: string; when: string; then: string }[] = [
-  { led: "led-on", when: "Printing, or no printer linked", then: "Watching, every frame scored" },
-  { led: "led-off", when: "Positively idle, paused or errored", then: "Standby, nothing scored" },
+  { led: "led-on", when: "Printing, or no printer linked", then: "Watching and scoring every frame" },
+  { led: "led-off", when: "Printer reports idle, paused or errored", then: "On standby, saving CPU" },
 ];
 
 export const INTRO: GuideSection[] = [
@@ -44,10 +44,10 @@ export const INTRO: GuideSection[] = [
     shot: "alert",
     body: (
       <>
-        A vision model running on your own hardware scores every frame from your printer camera. When
-        a defect holds it pauses or cancels the print and sends you a snapshot. Frames stay on your
-        hardware. A defect snapshot goes to the alert channels and the MQTT broker you set up, and nothing else leaves
-        unless you send it for training.
+        PrintGuard runs a vision model locally on your own hardware to watch your printer cameras for failures. If a
+        defect stays on screen for long enough, it pauses or cancels the print and sends you a snapshot alert. Your
+        frames stay on your network and nothing leaves unless it goes to your own alert channels, your MQTT broker, or
+        frames you choose to share for model training.
       </>
     ),
   },
@@ -58,34 +58,33 @@ export const INTRO: GuideSection[] = [
     shot: "cameras",
     body: (
       <>
-        A camera is any video source PrintGuard can read, so a USB device or an RTSP, RTMP, MJPEG or WebRTC (WHEP)
-        stream. A printer is optional, and connecting one lets PrintGuard read whether it is printing
-        and stop it when something goes wrong.
+        A camera can be any USB webcam plugged into the hub or an RTSP, RTMP, MJPEG or WebRTC (WHEP) stream. Connecting
+        a printer is optional, though linking one lets PrintGuard see when it's actually printing and stop it if a print
+        goes bad.
       </>
     ),
   },
   {
     id: "monitors",
     led: "led-infer",
-    title: "Monitors are what you tune",
+    title: "Monitors bring them together",
     shot: "tuning",
     body: (
       <>
-        A monitor binds one camera, and optionally one printer, and carries the alert threshold, how
-        many detections in a row count as a defect, and what happens when one holds. Everything is set per monitor,
-        under Tune or in its settings.
+        A monitor links one camera (and optionally one printer) and holds its own alert threshold, consecutive frame
+        count and defect action. You can adjust all of these per monitor in the Tune and Configure tabs.
       </>
     ),
   },
   {
     id: "watching",
     led: "led-warn",
-    title: "When inference runs",
+    title: "When detection runs",
     shot: "standby",
     body: (
       <>
-        Only a printer that positively reports it is not printing stands a monitor down, so an idle
-        printer costs you nothing. A printer that drops off mid-print is still watched.
+        A monitor only goes on standby when its linked printer explicitly tells PrintGuard it isn't printing, so idle
+        printers don't waste CPU. If the printer drops off the network mid-print, PrintGuard keeps watching just in case.
       </>
     ),
     visual: (
@@ -108,8 +107,9 @@ export const INTRO: GuideSection[] = [
     title: "Pick a detection model",
     body: (
       <>
-        Standard catches the most failures, and Light trades some of that for about 2.5x the speed on a slower
-        computer. You can change it any time in Settings, under Detection.
+        Standard catches the most failures and is the best default. Light trades some accuracy for around 2.5x the speed
+        if you're on slower hardware or watching several cameras. You can switch models any time under Settings, in
+        Detection.
       </>
     ),
     visual: <ModelPicker />,
@@ -117,13 +117,13 @@ export const INTRO: GuideSection[] = [
   {
     id: "start",
     led: "led-on",
-    title: "Start watching",
+    title: "Ready to start",
     shot: "checklist",
     body: (
       <>
-        Register a camera, then add a monitor binding it. Connect a printer and a notification channel
-        such as ntfy or Telegram for the full net. The rest of the guide sits behind the ? in the top
-        bar.
+        Add a camera first, then create a monitor to start watching it. Hook up your printer and an alert channel like
+        ntfy or Telegram to get automatic pauses and phone notifications. You can open the full guide any time from the
+        ? button in the top bar.
       </>
     ),
     action: { label: "Register a camera", dialog: "camera" },
@@ -137,10 +137,10 @@ export const GUIDE: GuideSection[] = [
     title: "What PrintGuard does",
     body: (
       <>
-        PrintGuard watches your printer cameras with an on-device vision model, pauses or cancels the
-        print when a defect holds, and pushes a snapshot to your phone. There's no cloud and no subscription,
-        and your frames stay on your hardware. A defect snapshot goes to the alert channels and the MQTT broker you set up,
-        and nothing else leaves unless you send it for training.
+        PrintGuard watches your printer cameras with a local vision model, pauses or cancels the print if a failure
+        holds, and sends a snapshot to your phone. There's no cloud account or subscription, and your camera frames stay
+        on your own hardware unless they're going to your alert channels, your MQTT broker, or frames you manually send
+        in to help train future models.
       </>
     ),
   },
@@ -151,10 +151,9 @@ export const GUIDE: GuideSection[] = [
     shot: "cameras",
     body: (
       <>
-        A camera is any video source PrintGuard can read, so a USB device, an RTSP, RTMP, MJPEG or
-        WebRTC (WHEP) stream URL, or a camera published from this device. Printers that expose a
-        webcam register theirs automatically. The model watches the part of each view shown in the
-        camera's crop editor, so crop it tightly around the part of the bed you print on.
+        A camera can be a USB webcam plugged into the hub, an RTSP, RTMP, MJPEG or WebRTC (WHEP) stream URL, or even the
+        camera on the phone or laptop you're using right now. Printers that expose a webcam get added automatically. The
+        model only looks inside the crop box you set in the camera editor, so crop it tightly around the build plate.
       </>
     ),
     action: { label: "Open cameras", to: "/cameras" },
@@ -166,9 +165,11 @@ export const GUIDE: GuideSection[] = [
     shot: "printers",
     body: (
       <>
-        Connect a printer, whether <strong>OctoPrint</strong>, <strong>Klipper (Moonraker)</strong>, <strong>Creality</strong>, <strong>Elegoo</strong>,{" "}
-        <strong>Prusa (PrusaLink)</strong>, <strong>Bambu Lab</strong> or <strong>Ultimaker</strong>, and PrintGuard can read its status, progress and temperatures,
-        preheat it and pause or cancel a print on a defect. It's optional. Without one, a monitor still watches and alerts.{" "}
+        Connect <strong>OctoPrint</strong>, <strong>Klipper (Moonraker)</strong>, <strong>Creality</strong>,{" "}
+        <strong>Elegoo</strong>, <strong>Prusa (PrusaLink)</strong>, <strong>Bambu Lab</strong> or{" "}
+        <strong>Ultimaker</strong> so PrintGuard can read print status, progress and temperatures, preheat the heaters
+        and pause or cancel a failing print. Linking a printer is optional; without one, a monitor still watches and
+        alerts.{" "}
         <a className={link} href={docs("printers.md")} target="_blank" rel="noreferrer">
           Setup guides <NewTab />
         </a>
@@ -183,10 +184,10 @@ export const GUIDE: GuideSection[] = [
     shot: "prints",
     body: (
       <>
-        Drop sliced files onto the hub to preview their toolpath, name them and correct their temperatures before
-        they're uploaded. Each keeps the preview, print time and filament the slicer wrote into it. Tag a file with the printers it was sliced for and it can only ever start on those. Send it
-        to an idle printer from the library or from the 3D viewer, which lets you orbit the toolpath layer by layer. The
-        printer's camera comes up first so you can check the bed is clear.
+        Drop sliced files onto the library to inspect their toolpath in your browser, rename them and tweak first-layer
+        temperatures before uploading. Each saved file keeps its preview, estimated time and filament usage from your
+        slicer. Tag a file with the printers it was sliced for so it can only start on those machines. When you start a
+        print, the bed camera pops up first so you can make sure the plate is clear.
       </>
     ),
     action: { label: "Open the library", to: "/prints" },
@@ -194,13 +195,13 @@ export const GUIDE: GuideSection[] = [
   {
     id: "monitors",
     led: "led-infer",
-    title: "Monitors, the core unit",
+    title: "Monitors",
     shot: "alert",
     body: (
       <>
-        A monitor binds one camera (and optionally one printer) and carries the detection thresholds
-        and defect response. Inference is shared fairly across every monitor on watch. Its status reads
-        watching, standby or no signal, and turns to defect during an alert.
+        A monitor links one camera (and optionally one printer) together with its own thresholds and defect response.
+        PrintGuard shares inference time fairly across every active monitor. Each monitor shows whether it's watching,
+        on standby or has no signal, and switches to defect during an alert.
       </>
     ),
     action: { label: "Add a monitor", dialog: "monitor" },
@@ -212,10 +213,9 @@ export const GUIDE: GuideSection[] = [
     shot: "tuning",
     body: (
       <>
-        Every frame is scored with the model's confidence that the print is failing.{" "}
-        <strong>Alert threshold</strong> sets how high that score must reach, and a defect must hold
-        for a number of <strong>consecutive detections</strong> before PrintGuard acts. Tune both per
-        monitor under Tune.
+        Every frame gets a score for how likely the print is failing. <strong>Alert threshold</strong> sets how high
+        that score needs to go, and <strong>consecutive detections</strong> sets how many flagged frames in a row it
+        takes before PrintGuard acts. You can dial both in per monitor under Tune.
       </>
     ),
   },
@@ -225,8 +225,9 @@ export const GUIDE: GuideSection[] = [
     title: "Detection models",
     body: (
       <>
-        The hub runs one of three detection models, trading accuracy against speed. Settings compares them with
-        Obico's on frames none of them was trained on, so you can pick the one your hardware keeps up with.
+        PrintGuard ships with three models so you can trade accuracy against speed. Settings charts all three against
+        Obico's open models on unseen printers, right next to your host's live speed readout, making it easy to pick the
+        right one for your hardware.
       </>
     ),
     action: { label: "Choose a model", to: "/settings/detection" },
@@ -238,10 +239,9 @@ export const GUIDE: GuideSection[] = [
     shot: "alerts",
     body: (
       <>
-        Add a notification channel, whether <strong>ntfy</strong>, <strong>Pushover</strong>,{" "}
-        <strong>Telegram</strong>, <strong>Discord</strong> or <strong>Desktop notification</strong>{" "}
-        in the desktop app, and PrintGuard sends a snapshot the moment a defect holds. Turn
-        notifications on per monitor in its settings.
+        Set up <strong>ntfy</strong>, <strong>Pushover</strong>, <strong>Telegram</strong>, <strong>Discord</strong> or{" "}
+        <strong>Desktop notifications</strong> (in the desktop app) and PrintGuard sends a snapshot the moment a defect
+        triggers. Remember to switch push notifications on for each monitor in its Configure tab.
       </>
     ),
     action: { label: "Set up alerts", to: "/settings/alerts" },
@@ -249,13 +249,13 @@ export const GUIDE: GuideSection[] = [
   {
     id: "failsafe",
     led: "led-warn",
-    title: "Fail-safe by design",
+    title: "Built to fail safe",
     shot: "standby",
     body: (
       <>
-        A watchdog warns when a camera drops, a feed freezes or a printer stops answering for
-        longer than the grace period, two minutes by default. Watching only stands down on a positive "not printing" signal, so a
-        lost feed keeps the monitor watching.
+        An independent watchdog warns you if a camera disconnects, a feed freezes or a printer stops replying for longer
+        than the grace period (two minutes by default). Monitors only go on standby when a printer confirms it isn't
+        printing, so a lost connection won't quietly stop detection.
       </>
     ),
   },
@@ -266,9 +266,8 @@ export const GUIDE: GuideSection[] = [
     shot: "customise",
     body: (
       <>
-        Reorder, pin and hide monitors with Layout above the monitor list, and switch between
-        light, dark, glass and your own custom themes. Your layout and theme sync to every browser that opens
-        the hub.
+        Hit Layout in the fleet bar to reorder, pin or hide monitors, and switch between Light, Dark, Glass or your own
+        custom colour themes. Both your layout and theme are saved on the hub so every device you open it on matches.
       </>
     ),
     action: { label: "Open settings", to: "/settings/appearance" },
@@ -279,9 +278,9 @@ export const GUIDE: GuideSection[] = [
     title: "Automate & integrate",
     body: (
       <>
-        Drive PrintGuard from a <strong>REST API</strong> or an <strong>MCP</strong>{" "}
-        server with scoped tokens (read ⊂ control ⊂ manage), and surface every monitor in{" "}
-        <strong>Home Assistant</strong> over MQTT.{" "}
+        Control PrintGuard from scripts or AI agents using the <strong>REST API</strong> or <strong>MCP</strong>{" "}
+        server with scoped tokens (read ⊂ control ⊂ manage), or expose every monitor in{" "}
+        <strong>Home Assistant</strong> via MQTT discovery.{" "}
         <a className={link} href={docs("api.md")} target="_blank" rel="noreferrer">
           API reference <NewTab />
         </a>
@@ -296,12 +295,11 @@ export const GUIDE: GuideSection[] = [
     shot: "plugins",
     body: (
       <>
-        Add a row to the dashboard or a job on the hub, from the catalogue, a GitHub repo or a zip.
-        Plugins are third-party code, so they run in a sandbox with only what you grant them.{" "}
-        <strong>Picture in picture</strong>, <strong>Alert sounds</strong>, <strong>Progress reports</strong>{" "}
-        and <strong>Spotify</strong> are in the catalogue.{" "}
+        Extend the dashboard or hub with plugins from the catalogue, a GitHub repo or a zip file. Everything runs in a
+        sandbox and can only touch what you approve. <strong>Picture in picture</strong>, <strong>Alert sounds</strong>,{" "}
+        <strong>Progress reports</strong> and <strong>Spotify</strong> are ready to install in the catalogue.{" "}
         <a className={link} href={docs("plugin-development.md")} target="_blank" rel="noreferrer">
-          Writing one <NewTab />
+          Writing a plugin <NewTab />
         </a>
       </>
     ),
@@ -313,11 +311,10 @@ export const GUIDE: GuideSection[] = [
     title: "Your frames stay yours",
     body: (
       <>
-        Inference runs entirely on your own hardware, and a defect snapshot goes only to the alert
-        channels and the MQTT broker you set up. PrintGuard keeps a few frames from each print
-        on your hub, and after a print you can label them and send them to me to train the detection
-        model. Training frames are only sent when you press Send, and you can switch the prompt off in Settings,
-        under Storage.
+        All inference happens on your own machine, and defect snapshots only go to the alert channels and MQTT broker
+        you configure. PrintGuard keeps a handful of frames locally after each print so you can review them and
+        optionally send them to me to help train future models. Nothing is ever sent unless you click Send, and you can
+        switch the review flow off under Settings, in Storage.
       </>
     ),
   },
@@ -327,9 +324,10 @@ export const GUIDE: GuideSection[] = [
     title: "Report a bug",
     body: (
       <>
-        Report a bug from the <Bug className="inline h-[1.15em] w-[1.15em] align-[-0.2em]" aria-hidden /> icon in the top bar,
-        anonymously, no account needed. A diagnostics bundle goes with it, with every credential stripped and no
-        camera frames unless you attach them. Download the same bundle from that dialog to read it or send it somewhere else yourself.
+        Found a problem? Hit the <Bug className="inline h-[1.15em] w-[1.15em] align-[-0.2em]" aria-hidden /> icon in
+        the top bar to send me an anonymous bug report, no GitHub account required. It attaches a diagnostics bundle
+        with all passwords, keys and tokens stripped out, and no camera frames unless you attach them yourself. You can
+        also download the exact same zip to read it first or post it on GitHub yourself.
       </>
     ),
     action: { label: "Report a bug", dialog: "report" },

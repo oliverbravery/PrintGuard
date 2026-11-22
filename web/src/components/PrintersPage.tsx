@@ -42,8 +42,8 @@ function PrinterModelField({ value, onChange }: { value: string; onChange: (mode
   return (
     <label className="block">
       <span className="label mb-1 block">Printer model</span>
-      <input className="field" placeholder="Optional, such as Prusa MK4" maxLength={80} value={value} onChange={(e) => onChange(e.target.value)} />
-      <span className="mt-1 block text-xs text-text-2">Sent with the frames you review from this printer's prints.</span>
+      <input className="field" placeholder="Optional, e.g. Prusa MK4" maxLength={80} value={value} onChange={(e) => onChange(e.target.value)} />
+      <span className="mt-1 block text-xs text-text-2">Included when you share reviewed frames from this printer to help train future models.</span>
     </label>
   );
 }
@@ -163,7 +163,7 @@ export function PrinterDialog() {
           <>
             <label className="block">
               <span className="label mb-1 block">Name</span>
-              <input className="field" placeholder={`Such as ${meta.label} Ender 3`} value={name} onChange={(e) => setName(e.target.value)} />
+              <input className="field" placeholder={`e.g. ${meta.label} Ender 3`} value={name} onChange={(e) => setName(e.target.value)} />
             </label>
             <PrinterModelField value={model} onChange={setModel} />
             <SchemaForm meta={meta} value={config} onChange={setConfig} />

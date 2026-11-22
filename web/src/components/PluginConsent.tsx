@@ -93,9 +93,9 @@ function Findings({ plugin }: { plugin: PluginRecord }) {
     if (!reconnecting) checkPlugin(plugin.id);
   }, [plugin.id, findings === undefined, reconnecting]);
 
-  if (findings === undefined) return <span className="block text-xs text-text-2">Reading its code…</span>;
+  if (findings === undefined) return <span className="block text-xs text-text-2">Checking its code…</span>;
   if (findings.length === 0) {
-    return <span className="block text-xs text-ok">Its code matches what it asks for.</span>;
+    return <span className="block text-xs text-ok">Its code matches the permissions it asks for.</span>;
   }
   return (
     <ul className="space-y-1">
@@ -120,18 +120,18 @@ export function ConsentDialog({ plugin, permissions, onClose }: { plugin: Plugin
       <div className="space-y-3">
         <span className="block text-xs leading-relaxed text-text-2">
           {plugin.verified
-            ? "These bytes match PrintGuard's catalogue."
-            : "Unreviewed third-party code. Read it first."}
+            ? "Verified against PrintGuard's catalogue by hash."
+            : "Unreviewed third-party code. Check what it does before enabling it."}
         </span>
         <Findings plugin={plugin} />
         <PermissionList plugin={plugin} permissions={permissions} />
         {Object.keys(plugin.manifest.secrets).length > 0 && (
           <span className="block text-xs text-text-2">
-            It also needs {Object.keys(plugin.manifest.secrets).join(", ").replace(/[_-]/g, " ")}, which PrintGuard fills
-            in for it.
+            It also needs {Object.keys(plugin.manifest.secrets).join(", ").replace(/[_-]/g, " ")}, which PrintGuard injects
+            into requests for you.
           </span>
         )}
-        <span className="block text-xs text-text-2">All of it or none. Disable to stop it.</span>
+        <span className="block text-xs text-text-2">Permissions are all or nothing. Disable the plugin any time to stop it.</span>
         <div className="flex gap-2">
           <button className="btn btn-primary" onClick={accept}>
             Allow and enable
