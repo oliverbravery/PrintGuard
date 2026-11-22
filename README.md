@@ -223,7 +223,7 @@ arrow buttons, pin the ones that matter to the top and hide the rest.
 ![Layout mode: reorder, pin and hide monitors](docs/assets/customise.png)
 
 The dashboard fits phones and tablets, works from the keyboard and with a screen reader, and
-meets WCAG 2.2 AA. A guide behind the **?** in the top bar explains every part of it.
+meets WCAG 2.2 AA contrast. A guide behind the **?** in the top bar explains every part of it.
 
 ## Hardware acceleration
 

@@ -84,13 +84,15 @@ function ControlPane({ monitor }: { monitor: Monitor }) {
           </Link>
         </Block>
       )}
-      <div className="flex-1 border-b border-rule">
-        <HeaterReadouts state={device} />
-      </div>
       {printer ? (
-        <PrintActions printer={printer} />
+        <>
+          <div className="flex-1 border-b border-rule">
+            <HeaterReadouts state={device} />
+          </div>
+          <PrintActions printer={printer} />
+        </>
       ) : (
-        <p className="px-4 py-3 text-sm text-text-1">Bind a printer to pause or cancel a failing print.</p>
+        <p className="mt-auto border-t border-rule px-4 py-3 text-sm text-text-1">Bind a printer to pause or cancel a failing print.</p>
       )}
     </>
   );
