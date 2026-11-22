@@ -88,8 +88,7 @@ test("a setting still saving holds its value when a later setting is acknowledge
 });
 
 test("picking a detection model in Settings sends it and marks it in use", async ({ page }) => {
-  const { commands } = await hub(page, () => {}, engine({ settings: { ...engine().settings, model: "standard", inference_runtime: "auto" } }));
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("detection"));
+  const { commands } = await hub(page, () => {}, engine({ settings: { ...engine().settings, model: "standard", inference_runtime: "auto" } }), "/settings/detection");
   const light = page.getByRole("group", { name: "Detection model" }).getByRole("button", { name: /^Light/ });
   await light.click();
   await expect.poll(() => commands.filter((c) => c.cmd === "settings.update").map((c) => c.patch)).toEqual([{ model: "light" }]);
@@ -149,22 +148,21 @@ test("a hub that goes silent without closing is dropped and reached again", asyn
 });
 
 test("a command pressed while the hub is away says so and leaves its button free", async ({ page }) => {
-  const { sockets } = await hub(page);
-  await page.evaluate(() => (window as any).__pg.getState().openDetail("m1"));
+  const { sockets } = await hub(page, undefined, engine(), "/monitors/m1/edit");
   await page.routeWebSocket(/\/api\/ws$/, (socket) => void socket.close());
   await sockets[0].close();
   await expect(page.getByRole("status").getByText("reconnecting")).toBeVisible();
-  const panel = page.getByRole("dialog", { name: "Prusa" });
-  await panel.getByRole("button", { name: "Delete" }).click();
+  const main = page.getByRole("main");
+  await main.getByRole("button", { name: "Delete monitor" }).click();
   await pastDoublePress(page);
-  await panel.getByRole("button", { name: "Confirm" }).click();
+  await main.getByRole("button", { name: "Confirm" }).click();
 
-  await expect(panel.getByRole("status").filter({ hasText: "wasn't sent" })).toBeVisible();
-  await expect(panel.getByRole("button", { name: "Delete" })).toBeEnabled();
+  await expect(page.getByRole("status").filter({ hasText: "wasn't sent" })).toBeVisible();
+  await expect(main.getByRole("button", { name: "Delete monitor" })).toBeEnabled();
   expect(await page.evaluate(() => (window as any).__pg.getState().pending)).toEqual({});
 });
 
-test("deleting a monitor from its panel closes it and brings the other feeds back", async ({ page }) => {
+test("deleting a monitor from its settings goes back to the monitors and brings the other feeds back", async ({ page }) => {
   const cameras = [camera(), camera({ id: "c2", name: "Garage" })];
   const voron = monitor({ id: "m2", name: "Voron", camera_id: "c2" });
   await hub(
@@ -174,108 +172,93 @@ test("deleting a monitor from its panel closes it and brings the other feeds bac
       socket.send(JSON.stringify({ event: "state", ...engine({ cameras, monitors: [voron] }), req_id: command.req_id }));
     },
     engine({ cameras, monitors: [monitor(), voron] }),
+    "/monitors/m1/edit",
   );
-  await page.evaluate(() => (window as any).__pg.getState().openDetail("m1"));
-  const panel = page.getByRole("dialog", { name: "Prusa" });
-  await expect(panel).toBeVisible();
+  const main = page.getByRole("main");
+  await expect(main.getByRole("heading", { name: "Prusa settings" })).toBeVisible();
   const feedRestarted = page.waitForRequest(/\/hls\/c2\//);
-  await panel.getByRole("button", { name: "Delete" }).click();
+  await main.getByRole("button", { name: "Delete monitor" }).click();
   await pastDoublePress(page);
-  await panel.getByRole("button", { name: "Confirm" }).click();
+  await main.getByRole("button", { name: "Confirm" }).click();
 
-  await expect(panel).toBeHidden();
+  await expect(page).toHaveURL(/#\/$/);
+  await expect(main.getByRole("heading", { name: "Voron" })).toBeVisible();
   await feedRestarted;
-  expect(await page.evaluate(() => (window as any).__pg.getState().detailId)).toBeNull();
 });
 
-test("a history or review sheet closes when what it shows is removed elsewhere", async ({ page }) => {
-  const review = { id: "r1", monitor_id: "m1", status: "ready", started: 1, ended: 2, frames: 0, alerts: 0 };
-  await dashboard(page, { engine: engine({ reviews: [review] }), statsMonitorId: "m1", reviewId: "r1" });
+test("a history or review page goes back when what it shows is removed elsewhere", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [review({ frames: 0, alerts: 0 })] }) }, "/monitors/m1/review/r1");
+  await expect(page.getByRole("heading", { level: 1, name: "Prusa review" })).toBeVisible();
+  await emit(page, { event: "state", ...engine() });
+  await expect(page).toHaveURL(/#\/monitors\/m1$/);
+
+  await page.evaluate(() => (location.hash = "#/monitors/m1/history"));
+  await expect(page.getByRole("heading", { level: 1, name: "Prusa history" })).toBeVisible();
   await emit(page, { event: "state", ...engine({ monitors: [] }) });
-
-  expect(await page.evaluate(() => [(window as any).__pg.getState().statsMonitorId, (window as any).__pg.getState().reviewId])).toEqual([null, null]);
+  await expect(page).toHaveURL(/#\/$/);
 });
 
 
-test("a tile asks about its last print only", async ({ page }) => {
+test("a monitor asks about its last print only", async ({ page }) => {
   await dashboard(page, { engine: engine({ reviews: [review(), review({ id: "r2", status: "dismissed" })] }) });
   await expect(page.getByRole("heading", { name: "Prusa" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /from the last print/ })).toHaveCount(0);
+  await expect(page.getByText(/from the last print/)).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /^Review/ })).toHaveCount(0);
 
   await emit(page, { event: "state", ...engine({ reviews: [review({ status: "dismissed" }), review({ id: "r2", frames: 7 })] }) });
-  await page.getByRole("button", { name: "Review 7 frames from the last print" }).click();
-  expect(await page.evaluate(() => (window as any).__pg.getState().reviewId)).toBe("r2");
+  await expect(page.getByText("7 frames from the last print")).toBeVisible();
+  await page.getByRole("link", { name: "Review 7 frames from Prusa" }).click();
+  await expect(page).toHaveURL(/#\/monitors\/m1\/review\/r2$/);
 });
 
-test("one kept frame is not called frames on the tile or in the review sheet", async ({ page }) => {
-  await dashboard(page, { engine: engine({ reviews: [review({ frames: 1 })] }), reviewId: "r1" });
-  await expect(page.getByRole("button", { name: "Review 1 frame from the last print" })).toBeVisible();
-  await expect(page.getByRole("dialog", { name: "Prusa · review" }).getByText("PrintGuard kept 1 frame from this print.")).toBeVisible();
+test("one kept frame is not called frames on the monitor or in its review", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [review({ frames: 1 })] }) });
+  await expect(page.getByText("1 frame from the last print")).toBeVisible();
+  await page.getByRole("link", { name: "Review 1 frame from Prusa" }).click();
+  await expect(page.getByRole("main").getByText("PrintGuard kept 1 frame from this print.")).toBeVisible();
 });
 
-test("the review's answer buttons sit in a group named by their question and the printer model has a name", async ({ page }) => {
-  await dashboard(page, { engine: engine({ reviews: [review()] }), reviewId: "r1" });
-  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
-  const question = sheet.getByRole("group", { name: "Did this print finish without any problems?" });
-  await expect(question.getByRole("button")).toHaveText(["Yes", "No, something went wrong"]);
+test("the review's answers sit in a group named by their question and the printer model has a name", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [review()] }) }, "/monitors/m1/review/r1");
+  const main = page.getByRole("main");
+  const question = main.getByRole("group", { name: "Did this print finish without any problems?" });
+  await expect(question.getByRole("radio")).toHaveCount(2);
+  await expect(question.getByRole("radio", { name: "No, something went wrong" })).toBeVisible();
 
-  await question.getByRole("button", { name: "Yes" }).click();
-  await expect(sheet.getByRole("textbox", { name: "Printer model" })).toBeVisible();
+  await question.getByRole("radio", { name: "Yes" }).check();
+  await expect(main.getByRole("textbox", { name: "Printer model" })).toBeVisible();
 });
 
-test("a review answered before its frames arrive still marks the alert frames, and a frame left out can be put back", async ({ page }) => {
+test("a review answered before its frames arrive still marks the alert frames, and a frame left out is not sent", async ({ page }) => {
   const asked = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "review.get").length);
   const picture = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
-  await dashboard(page, { engine: engine({ reviews: [review()] }), reviewId: "r1", snapshotCache: { a1: picture, s1: picture, s2: picture } });
-  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
-  await expect(sheet.getByText("PrintGuard kept 3 frames from this print.")).toBeVisible();
+  await dashboard(page, { engine: engine({ reviews: [review()] }), snapshotCache: { a1: picture, s1: picture, s2: picture } }, "/monitors/m1/review/r1");
+  const main = page.getByRole("main");
+  await expect(main.getByText("PrintGuard kept 3 frames from this print.")).toBeVisible();
   await expect.poll(asked).toBeGreaterThan(0);
   const onOpening = await asked();
   await page.evaluate(() => (window as any).__pg.setState({ reconnecting: true }));
   await page.evaluate(() => (window as any).__pg.setState({ reconnecting: false }));
   await expect.poll(asked).toBe(onOpening + 1);
 
-  await sheet.getByRole("button", { name: "No, something went wrong" }).click();
+  await main.getByRole("radio", { name: "No, something went wrong" }).check();
   const frames = [
     { id: "a1", ts: 60, score: 0.9, kind: "alert", action: "pause", size: 1 },
     { id: "s1", ts: 120, score: 0.1, kind: "spaced", size: 1 },
     { id: "s2", ts: 180, score: 0.1, kind: "spaced", size: 1 },
   ];
   await emit(page, { event: "review", ...review(), frames });
-  await expect(sheet.getByText("Real failure", { exact: true })).toBeVisible();
-  await expect(sheet.getByText("Good")).toHaveCount(2);
+  await expect(main.getByRole("button", { name: /marked Real failure/ })).toHaveCount(1);
+  await expect(main.getByRole("button", { name: /marked Good/ })).toHaveCount(2);
 
-  await sheet.getByRole("button", { name: /^Don't send/ }).nth(1).click();
-  await expect(sheet.getByRole("button", { name: "Send 2 frames" })).toBeVisible();
-  await sheet.getByRole("button", { name: /^Send frame \d of \d at/ }).click();
-  await sheet.getByRole("button", { name: "Send 3 frames" }).click();
-  expect(await sent(page, "review.send")).toMatchObject({ id: "r1", failures: ["a1"], removed: [] });
+  await main.getByRole("button", { name: /^Don't send/ }).nth(1).click();
+  await expect(main.getByRole("button", { name: /marked Good/ })).toHaveCount(1);
+  await main.getByRole("button", { name: "Send 2 frames" }).click();
+  expect(await sent(page, "review.send")).toMatchObject({ id: "r1", failures: ["a1"], removed: ["s1"] });
 
-  await sheet.getByRole("button", { name: "Close print review" }).click();
-  expect(await page.evaluate(() => (window as any).__pg.getState().snapshotCache)).toEqual({});
-});
-
-test("every frame of a review can be left out at once and one put back to send it alone", async ({ page }) => {
-  await dashboard(page, { engine: engine({ reviews: [review()] }), reviewId: "r1" });
-  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
-  await sheet.getByRole("button", { name: "Yes" }).click();
-  const frames = [
-    { id: "a1", ts: 60, score: 0.9, kind: "alert", action: "pause", size: 1 },
-    { id: "s1", ts: 120, score: 0.1, kind: "spaced", size: 1 },
-    { id: "s2", ts: 180, score: 0.1, kind: "spaced", size: 1 },
-  ];
-  await emit(page, { event: "review", ...review(), frames });
-
-  await sheet.getByRole("button", { name: "Leave all out" }).click();
-  await expect(sheet.getByRole("button", { name: "Send 0 frames" })).toBeDisabled();
-  await sheet.getByRole("button", { name: "Put all back" }).click();
-  await expect(sheet.getByRole("button", { name: "Send 3 frames" })).toBeEnabled();
-
-  await sheet.getByRole("button", { name: "Leave all out" }).click();
-  await sheet.getByRole("button", { name: /^Send frame 1 of 3 at/ }).click();
-  await expect(sheet.getByRole("button", { name: "Leave all out" })).toBeVisible();
-  await sheet.getByRole("button", { name: "Send 1 frame" }).click();
-  expect(await sent(page, "review.send")).toMatchObject({ id: "r1", failures: [], removed: ["s1", "s2"] });
+  await main.getByRole("link", { name: "Monitors" }).click();
+  await expect(page).toHaveURL(/#\/monitors\/m1$/);
+  await expect.poll(() => page.evaluate(() => (window as any).__pg.getState().snapshotCache)).toEqual({});
 });
 
 const picked = [
@@ -286,77 +269,83 @@ const picked = [
 const timeline = Array.from({ length: 40 }, (_, index) => [index * 5, index > 30 ? 0.8 : 0.1]);
 const recorded = (over = {}) => review({ recording: { frames: 40, bytes: 98 * 1024 * 1024, expires: 7 * 86_400 }, ...over });
 
+test("every frame of a review can be cleared at once and one added from the recording sends alone", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [recorded()] }) }, "/monitors/m1/review/r1");
+  const main = page.getByRole("main");
+  await main.getByRole("radio", { name: "Yes" }).check();
+  await emit(page, { event: "review", ...recorded(), frames: picked, timeline });
+
+  await main.getByRole("button", { name: "Clear all" }).click();
+  await expect(main.getByRole("button", { name: "Send 0 frames" })).toBeDisabled();
+  await expect(main.getByText("No frames picked. Add some from the recording.")).toBeVisible();
+
+  await main.getByRole("button", { name: "Add as good" }).click();
+  expect(await sent(page, "review.add")).toMatchObject({ id: "r1", index: 39, label: "good" });
+  const added = { id: "d1", ts: 195, score: 0.8, kind: "added", label: "good", size: 1 };
+  await emit(page, { event: "review", ...recorded({ frames: 4 }), frames: [...picked, added], timeline });
+  await main.getByRole("button", { name: "Send 1 frame" }).click();
+  expect(await sent(page, "review.send")).toMatchObject({ id: "r1", failures: [], removed: ["a1", "s1", "s2"] });
+});
+
 test("a reviewer scrubs through the print's recording and adds a frame PrintGuard didn't pick", async ({ page }) => {
   const picture = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
-  await dashboard(page, { engine: engine({ reviews: [recorded()] }), reviewId: "r1", snapshotCache: { "r1:39": picture } });
-  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
-  await sheet.getByRole("button", { name: "No, something went wrong" }).click();
+  await dashboard(page, { engine: engine({ reviews: [recorded()] }), snapshotCache: { "r1:39": picture } }, "/monitors/m1/review/r1");
+  const main = page.getByRole("main");
+  await main.getByRole("radio", { name: "No, something went wrong" }).check();
   await emit(page, { event: "review", ...recorded(), frames: picked, timeline });
-  await expect(sheet.getByText("PrintGuard picked these frames.")).toBeVisible();
-  await expect(sheet.getByText("3 of 60")).toBeVisible();
+  await expect(main.getByText("Alert frames are marked as real failures.", { exact: false })).toBeVisible();
+  await expect(main.getByText("3 of 60")).toBeVisible();
 
-  const scrubber = sheet.getByRole("slider", { name: "Whole print" });
+  const scrubber = main.getByRole("slider", { name: "Whole print" });
   await expect(scrubber).toHaveAttribute("aria-valuetext", "0:03:15 in · 80%");
-  await expect(sheet.getByRole("img", { name: "The print 0:03:15 in, scored 80%" })).toBeVisible();
+  await expect(main.getByRole("img", { name: "The print 0:03:15 in, scored 80%" })).toBeVisible();
   await scrubber.focus();
   await page.keyboard.press("ArrowLeft");
   await expect.poll(() => lastSent(page, "recording.frame")).toMatchObject({ id: "r1", index: 38 });
-  await expect(sheet.getByRole("status").filter({ hasText: "loading" })).toBeVisible();
-  await sheet.getByRole("button", { name: "Previous frame" }).click();
+  await expect(main.getByRole("status").filter({ hasText: "loading" })).toBeVisible();
+  await main.getByRole("button", { name: "Previous frame" }).click();
   await expect(scrubber).toHaveAttribute("aria-valuetext", "0:03:05 in · 80%");
 
-  await sheet.getByRole("button", { name: "Add as failure" }).click();
+  await main.getByRole("button", { name: "Add as failure" }).click();
   expect(await sent(page, "review.add")).toMatchObject({ id: "r1", index: 37, label: "failure" });
   const added = { id: "d1", ts: 185, score: 0.8, kind: "added", label: "failure", size: 1 };
   await emit(page, { event: "review", ...recorded({ frames: 4 }), frames: [...picked, added], timeline });
-  await expect(sheet.getByText("4 of 60")).toBeVisible();
-  await expect(sheet.getByRole("button", { name: "Add as failure" })).toBeDisabled();
-  await expect(sheet.getByRole("button", { name: /^Frame 4 of 4 at .* marked Failure/ })).toContainText("added ·");
+  await expect(main.getByText("4 of 60")).toBeVisible();
+  await expect(main.getByRole("button", { name: "Add as failure" })).toBeDisabled();
+  await expect(main.getByRole("button", { name: /^Frame 4 of 4 at .* marked Failure/ })).toContainText("added ·");
 
-  await sheet.getByRole("button", { name: "Send 4 frames" }).click();
+  await main.getByRole("button", { name: "Send 4 frames" }).click();
   expect(await sent(page, "review.send")).toMatchObject({ id: "r1", failures: ["a1", "d1"], removed: [] });
-});
-
-test("put all back restores PrintGuard's picks and leaves out the frames you added", async ({ page }) => {
-  await dashboard(page, { engine: engine({ reviews: [recorded()] }), reviewId: "r1" });
-  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
-  await sheet.getByRole("button", { name: "Yes" }).click();
-  await emit(page, { event: "review", ...recorded({ frames: 4 }), frames: [...picked, { id: "d1", ts: 185, score: 0.8, kind: "added", label: "good", size: 1 }], timeline });
-
-  await sheet.getByRole("button", { name: "Leave all out" }).click();
-  await sheet.getByRole("button", { name: "Put all back" }).click();
-  await expect(sheet.getByRole("button", { name: "Send 3 frames" })).toBeEnabled();
-  await expect(sheet.getByRole("button", { name: /^Send frame 4 of 4 at/ })).toBeVisible();
 });
 
 test("a print holding more than a day's frames can't be sent until enough are left out", async ({ page }) => {
   const frames = Array.from({ length: 61 }, (_, index) => ({ id: `s${index}`, ts: index, score: 0.1, kind: "spaced", size: 1 }));
-  await dashboard(page, { engine: engine({ reviews: [recorded({ frames: 61 })] }), reviewId: "r1" });
-  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
-  await sheet.getByRole("button", { name: "Yes" }).click();
+  await dashboard(page, { engine: engine({ reviews: [recorded({ frames: 61 })] }) }, "/monitors/m1/review/r1");
+  const main = page.getByRole("main");
+  await main.getByRole("radio", { name: "Yes" }).check();
   await emit(page, { event: "review", ...recorded({ frames: 61 }), frames, timeline });
 
-  await expect(sheet.getByText("61 of 60")).toBeVisible();
-  await expect(sheet.getByRole("status").filter({ hasText: "You can send 60 frames a day. Leave 1 out to send this print." })).toBeVisible();
-  await expect(sheet.getByRole("button", { name: "Send 61 frames" })).toBeDisabled();
-  await expect(sheet.getByRole("button", { name: "Add as good" })).toBeDisabled();
-  await sheet.getByRole("button", { name: /^Don't send/ }).first().click();
-  await expect(sheet.getByRole("status").filter({ hasText: "Leave one out to add another." })).toBeVisible();
-  await expect(sheet.getByRole("button", { name: "Send 60 frames" })).toBeEnabled();
+  await expect(main.getByText("61 of 60")).toBeVisible();
+  await expect(main.getByRole("status").filter({ hasText: "You can send 60 frames a day. Leave 1 out to send this print." })).toBeVisible();
+  await expect(main.getByRole("button", { name: "Send 61 frames" })).toBeDisabled();
+  await expect(main.getByRole("button", { name: "Add as good" })).toBeDisabled();
+  await main.getByRole("button", { name: /^Don't send/ }).first().click();
+  await expect(main.getByRole("status").filter({ hasText: "Leave one out to add another." })).toBeVisible();
+  await expect(main.getByRole("button", { name: "Send 60 frames" })).toBeEnabled();
 });
 
 test("the review says how big the print's recording is and when it goes, and leads to its storage settings", async ({ page }) => {
-  await dashboard(page, { engine: engine({ reviews: [recorded()] }), reviewId: "r1" });
-  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
-  await expect(sheet.getByText(/This print's recording is 98 MB and is deleted on/)).toBeVisible();
-  await sheet.getByRole("button", { name: "Manage storage" }).click();
-  await expect(sheet).toBeHidden();
-  await expect(page.getByRole("tab", { name: "Storage" })).toHaveAttribute("aria-selected", "true");
+  await dashboard(page, { engine: engine({ reviews: [recorded()] }) }, "/monitors/m1/review/r1");
+  const main = page.getByRole("main");
+  await expect(main.getByText(/This print's recording is 98 MB and is deleted on/)).toBeVisible();
+  await main.getByRole("link", { name: "Manage storage" }).click();
+  await expect(page).toHaveURL(/#\/settings\/storage$/);
+  await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "Storage" })).toHaveAttribute("aria-current", "page");
 });
 
 test("the storage tab lists each recording with its size and deletes one or all of them", async ({ page }) => {
   const reviews = [recorded({ bytes: 2 * 1024 * 1024 }), recorded({ id: "r2", ended: null, status: "running", recording: { frames: 3, bytes: 1024 * 1024, expires: null } })];
-  await dashboard(page, { engine: engine({ reviews }), dialog: "settings", settingsTab: "storage" });
+  await dashboard(page, { engine: engine({ reviews }) }, "/settings/storage");
   const list = page.getByRole("list", { name: "Recordings" });
   await expect(list.getByRole("listitem")).toHaveCount(2);
   await expect(list.getByRole("listitem").first()).toContainText("98 MB");
@@ -385,24 +374,25 @@ test("a review frame shows whole whatever its shape and any frame opens full siz
     { id: "s1", ts: 60, score: 0.1, kind: "spaced", size: 1 },
     { id: "a1", ts: 120, score: 0.9, kind: "alert", action: "pause", size: 1 },
   ];
-  await dashboard(page, { engine: engine({ reviews: [review({ frames: 2 })] }), reviewId: "r1", snapshotCache: { s1: square, a1: square } });
+  await dashboard(page, { engine: engine({ reviews: [review({ frames: 2 })] }), snapshotCache: { s1: square, a1: square } }, "/monitors/m1/review/r1");
   await emit(page, { event: "review", ...review({ frames: 2 }), frames });
-  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
-  await sheet.getByRole("button", { name: "Yes" }).click();
-  await expect(sheet.locator("img")).toHaveCount(2);
-  expect(await sheet.locator("img").first().evaluate((img) => getComputedStyle(img).objectFit)).toBe("contain");
+  const main = page.getByRole("main");
+  await main.getByRole("radio", { name: "Yes" }).check();
+  const pictures = main.getByRole("listitem").locator("img");
+  await expect(pictures).toHaveCount(2);
+  expect(await pictures.first().evaluate((img) => getComputedStyle(img).objectFit)).toBe("contain");
 
-  await sheet.getByRole("button", { name: /^Enlarge frame 1 of 2 at/ }).click();
+  await main.getByRole("button", { name: /^Enlarge frame 1 of 2 at/ }).click();
   const enlarged = page.getByRole("dialog", { name: /10%/ });
   await expect(enlarged.locator("img")).toHaveAttribute("src", square);
   await page.keyboard.press("Escape");
   await expect(enlarged).toBeHidden();
-  await expect(sheet).toBeVisible();
+  await expect(main.getByRole("heading", { level: 1, name: "Prusa review" })).toBeVisible();
 });
 
 test("opening the history asks only for the snapshots near the screen", async ({ page }) => {
-  await dashboard(page, { statsMonitorId: "m1" });
-  const sheet = page.getByRole("dialog", { name: "Prusa · history" });
+  await dashboard(page, {}, "/monitors/m1/history");
+  const sheet = page.getByRole("main");
   const snaps = Array.from({ length: 90 }, (_, index) => ({ id: `s${index}`, ts: 1_700_000_000 - index, score: 0.9, action: "failed" }));
   await emit(page, { event: "history", monitor_id: "m1", now: 1_700_000_100, buckets: [], snaps, alerts: [], stats: {} });
   const asked = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "snapshot.get").map((c: any) => c.id));
@@ -414,8 +404,8 @@ test("opening the history asks only for the snapshots near the screen", async ({
 });
 
 test("a minute of history on its own is drawn across its width, not as a dot", async ({ page }) => {
-  await dashboard(page, { statsMonitorId: "m1" });
-  const chart = page.getByRole("dialog", { name: "Prusa · history" }).getByRole("img", { name: "Risk over time" });
+  await dashboard(page, {}, "/monitors/m1/history");
+  const chart = page.getByRole("main").getByRole("img", { name: "Risk over time" });
   const bucket = (t: number) => ({ t, n: 10, sum: 4.5, min: 0.4, max: 0.5, defects: 10, watched: 60 });
   await emit(page, { event: "history", monitor_id: "m1", now: 1_700_000_200, buckets: [bucket(1_699_999_980), bucket(1_700_000_100)], snaps: [], alerts: [], stats: {} });
 
@@ -425,8 +415,8 @@ test("a minute of history on its own is drawn across its width, not as a dot", a
 });
 
 test("a history chart spanning more than a day dates the ends of its axis", async ({ page }) => {
-  await dashboard(page, { statsMonitorId: "m1" });
-  const sheet = page.getByRole("dialog", { name: "Prusa · history" });
+  await dashboard(page, {}, "/monitors/m1/history");
+  const sheet = page.getByRole("main");
   const bucket = (t: number) => ({ t, n: 10, sum: 4.5, min: 0.4, max: 0.5, defects: 0, watched: 60 });
   const twoDays = 2 * 86_400;
   const ends = sheet.getByRole("img", { name: "Defect frames per period" }).locator("xpath=following-sibling::div[1]/span");
@@ -437,41 +427,41 @@ test("a history chart spanning more than a day dates the ends of its axis", asyn
   expect(first).not.toBe(last);
 });
 
-test("after a hub restart the alerts tile still counts the snapshots that were kept", async ({ page }) => {
-  await dashboard(page, { statsMonitorId: "m1" });
+test("after a hub restart the alerts figure still counts the snapshots that were kept", async ({ page }) => {
+  await dashboard(page, {}, "/monitors/m1/history");
   const snaps = [1, 2, 3].map((index) => ({ id: `s${index}`, ts: 1_700_000_000 - index, score: 0.9, action: "failed" }));
   await emit(page, { event: "history", monitor_id: "m1", now: 1_700_000_100, buckets: [], snaps, alerts: [], stats: { alerts: 0, snaps: 3 } });
-  await expect(page.getByText("alerts", { exact: true }).locator("xpath=preceding-sibling::div")).toHaveText("3");
+  await expect(page.getByText("alerts", { exact: true }).locator("xpath=following-sibling::div")).toHaveText("3");
 });
 
 test("a failure card at the narrowest phone keeps its time and score inside the card", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 700 });
-  await dashboard(page, { engine: engine({ reviews: [review({ frames: 1 })] }), reviewId: "r1" });
+  await dashboard(page, { engine: engine({ reviews: [review({ frames: 1 })] }) }, "/monitors/m1/review/r1");
   await emit(page, { event: "review", ...review({ frames: 1 }), frames: [{ id: "a1", ts: 120, score: 0.9, kind: "alert", action: "pause", size: 1 }] });
-  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
-  await sheet.getByRole("button", { name: "No, something went wrong" }).click();
+  const main = page.getByRole("main");
+  await main.getByRole("radio", { name: "No, something went wrong" }).check();
 
-  const card = (await sheet.locator(".panel").filter({ hasText: "Real failure" }).boundingBox())!;
-  const score = (await sheet.locator(".label", { hasText: "90%" }).boundingBox())!;
-  expect(score.x).toBeGreaterThanOrEqual(card.x);
-  expect(score.x + score.width).toBeLessThanOrEqual(card.x + card.width);
+  const card = main.getByRole("listitem").filter({ hasText: "Real failure" });
+  const box = (await card.boundingBox())!;
+  const score = (await card.getByText(/90%/).boundingBox())!;
+  expect(score.x).toBeGreaterThanOrEqual(box.x);
+  expect(score.x + score.width).toBeLessThanOrEqual(box.x + box.width);
 });
 
 test("sheets and the page keep clear of the right safe area", async ({ page }) => {
   await dashboard(page);
-  const insets = await page.evaluate(() =>
-    [".app", ".sheet"].map((selector) =>
-      [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules]).some((rule) => rule instanceof CSSStyleRule && rule.selectorText === selector && rule.cssText.includes("safe-area-inset-right")),
-    ),
-  );
+  const insets = await page.evaluate(() => {
+    const rules = (list: CSSRuleList): CSSRule[] => [...list].flatMap((rule) => ("cssRules" in rule ? [rule, ...rules((rule as CSSGroupingRule).cssRules)] : [rule]));
+    const all = [...document.styleSheets].flatMap((sheet) => rules(sheet.cssRules));
+    return [".app", ".sheet"].map((selector) => all.some((rule) => rule instanceof CSSStyleRule && rule.selectorText === selector && rule.cssText.includes("safe-area-inset-right")));
+  });
   expect(insets).toEqual([true, true]);
 });
 
 test("review frames whose pictures were lost to a reconnect are asked for again", async ({ page }) => {
-  await dashboard(page, { engine: engine({ reviews: [review()] }), reviewId: "r1" });
+  await dashboard(page, { engine: engine({ reviews: [review()] }) }, "/monitors/m1/review/r1");
   await emit(page, { event: "review", ...review(), frames: [{ id: "a1", ts: 60, score: 0.9, kind: "alert", action: "pause", size: 1 }] });
-  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
-  await sheet.getByRole("button", { name: "Yes" }).click();
+  await page.getByRole("main").getByRole("radio", { name: "Yes" }).check();
   const asked = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "snapshot.get").length);
   await expect.poll(asked).toBeGreaterThan(0);
   const before = await asked();
@@ -481,9 +471,9 @@ test("review frames whose pictures were lost to a reconnect are asked for again"
   await expect.poll(asked).toBeGreaterThan(before);
 });
 
-test("the history sheet says when it has not loaded, and breaks its line between prints", async ({ page }) => {
-  await dashboard(page, { statsMonitorId: "m1" });
-  const sheet = page.getByRole("dialog", { name: "Prusa · history" });
+test("the history page says when it has not loaded, and breaks its line between prints", async ({ page }) => {
+  await dashboard(page, {}, "/monitors/m1/history");
+  const sheet = page.getByRole("main");
   await expect(sheet.getByText("loading history")).toHaveCount(2);
   await expect(sheet.getByText("No alerts have fired yet")).toBeHidden();
 
@@ -495,10 +485,10 @@ test("the history sheet says when it has not loaded, and breaks its line between
   await expect(sheet.getByRole("img", { name: "Risk over time" }).locator('path[fill="none"]')).toHaveCount(2);
 });
 
-test("the history sheet asks for the rollup once, then again only when an alert is kept", async ({ page }) => {
-  await dashboard(page, { statsMonitorId: "m1" });
+test("the history page asks for the rollup once, then again only when an alert is kept", async ({ page }) => {
+  await dashboard(page, {}, "/monitors/m1/history");
   const asked = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "history.get").length);
-  const sheet = page.getByRole("dialog", { name: "Prusa · history" });
+  const sheet = page.getByRole("main");
   await expect(sheet).toBeVisible();
   const onOpening = await asked();
   expect(onOpening).toBeGreaterThan(0);
@@ -578,10 +568,10 @@ test("two tabs never issue the same request id", async ({ page, context }) => {
   expect(ids[0]).not.toBe(ids[1]);
 });
 
-test("a camera that cannot open says why in the camera rail", async ({ page }) => {
+test("a camera that cannot open says why in the camera list", async ({ page }) => {
   const reason = "no decoder for this stream";
-  await dashboard(page, { engine: engine({ cameras: [camera({ online: false, in_use: false, reason })] }) });
-  await expect(page.getByText(reason)).toBeVisible();
+  await dashboard(page, { engine: engine({ cameras: [camera({ online: false, in_use: false, reason })] }) }, "/cameras");
+  await expect(page.getByRole("link", { name: new RegExp(reason) })).toBeVisible();
 });
 
 test("a camera that fails to register stops its publisher", async ({ page }) => {
@@ -658,22 +648,22 @@ test("a monitor that is off or on standby shows no live figures and says which i
     engine: engine({ monitors: [monitor({ watching: false }), monitor({ id: "m2", name: "Voron", enabled: false, watching: false })] }),
     history: { m1: [{ ts: 1, score: 0.9 }], m2: [{ ts: 1, score: 0.9 }] },
   });
-  const tiles = page.locator("article");
-  await expect(tiles).toHaveCount(2);
-  for (const tile of await tiles.all()) {
-    await expect(tile).not.toContainText("5.0/5.0");
-    await expect(tile.getByRole("img", { name: "risk unknown" })).toBeVisible();
+  const rows = page.getByRole("main").getByRole("listitem");
+  await expect(rows).toHaveCount(2);
+  for (const row of await rows.all()) {
+    await expect(row).not.toContainText("5.0");
+    await expect(row.getByRole("img", { name: "risk unknown" })).toBeVisible();
   }
-  await expect(tiles.nth(0).getByText("standby", { exact: true })).toBeVisible();
-  await expect(tiles.nth(1).getByText("off", { exact: true })).toBeVisible();
+  await expect(rows.nth(0)).toContainText("standby");
+  await expect(rows.nth(1)).toContainText("off");
 });
 
 test("two layout edits in a row both hold through a stale tick and go out as one save", async ({ page }) => {
   await dashboard(page);
   await page.evaluate(() => {
     const state = (window as any).__pg.getState();
-    state.mutateLayout("monitors", (section: any) => ({ ...section, pinned: ["m1"] }));
-    state.mutateLayout("monitors", (section: any) => ({ ...section, hidden: ["m9"] }));
+    state.mutateLayout((section: any) => ({ ...section, pinned: ["m1"] }));
+    state.mutateLayout((section: any) => ({ ...section, hidden: ["m9"] }));
   });
   await emit(page, { event: "state", ...engine() });
   const shown = () => page.evaluate(() => (window as any).__pg.getState().engine.settings.layout.monitors);
@@ -717,7 +707,8 @@ test("a heater target the printer refuses goes back to what the printer has", as
     id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true,
     device_state: { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: heater, bed: heater },
   };
-  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })] }), detailId: "m1" });
+  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })] }) });
+  await page.getByRole("tab", { name: "Preheat" }).click();
   const target = page.getByRole("spinbutton", { name: "nozzle target" });
   await target.fill("250");
   await target.blur();
@@ -733,7 +724,8 @@ test("the bed target can be typed while the nozzle target just set is still on i
   const heater = { actual: 21, target: 0 };
   const device = { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: heater, bed: heater };
   const printer = { id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true, device_state: device };
-  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })] }), detailId: "m1" });
+  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })] }) });
+  await page.getByRole("tab", { name: "Preheat" }).click();
   const nozzle = page.getByRole("spinbutton", { name: "nozzle target" });
   const bed = page.getByRole("spinbutton", { name: "bed target" });
   await nozzle.fill("215");
@@ -749,41 +741,42 @@ test("the bed target can be typed while the nozzle target just set is still on i
   await expect(bed).toHaveValue("60");
 });
 
-test("a monitor name or heater target typed and left with Escape is still saved", async ({ page }) => {
+test("a monitor name or heater target typed and left by going elsewhere is still saved", async ({ page }) => {
   const heater = { actual: 21, target: 0 };
   const printer = {
     id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true,
     device_state: { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: heater, bed: heater },
   };
-  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })] }), detailId: "m1" });
-  const panel = page.getByRole("dialog", { name: "Prusa" });
-  await panel.getByRole("textbox", { name: "Name" }).fill("Bench");
-  await panel.getByRole("spinbutton", { name: "nozzle target" }).fill("215");
-  await page.keyboard.press("Escape");
-  await expect(panel).toBeHidden();
+  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })] }) }, "/monitors/m1/edit");
+  await page.getByRole("main").getByRole("textbox", { name: "Name" }).fill("Bench");
+  await page.getByRole("main").getByRole("link", { name: "Monitors" }).click();
+  await page.getByRole("tab", { name: "Preheat" }).click();
+  await page.getByRole("spinbutton", { name: "nozzle target" }).fill("215");
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: /Prints/ }).click();
+  await expect(page).toHaveURL(/#\/prints$/);
 
   const commands = () => page.evaluate(() => (window as any).__sent.map((c: any) => [c.cmd, c.patch ?? c.nozzle]));
   expect(await commands()).toEqual(expect.arrayContaining([["monitor.update", { name: "Bench" }], ["printer.heat", 215]]));
   expect(await commands()).toHaveLength(2);
 });
 
-test("the register form keeps what was typed when the printer is refused and clears once it is added", async ({ page }) => {
-  await dashboard(page, { dialog: "printers" });
-  const service = page.getByRole("combobox");
-  await service.selectOption("octoprint");
-  await page.getByPlaceholder(/^Name/).fill("Bench printer");
+test("the register form keeps what was typed when the printer is refused and opens the printer once it is added", async ({ page }) => {
+  await dashboard(page, {}, "/printers/new");
+  await page.getByRole("combobox", { name: "Printer service" }).selectOption("octoprint");
+  const name = page.getByRole("main").getByRole("textbox", { name: "Name" });
+  await name.fill("Bench printer");
   const requests = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "printer.add"));
 
   await page.getByRole("button", { name: "Register printer" }).click();
   await emit(page, { event: "error", message: "no printer answered there", req_id: (await requests())[0].req_id });
-  await expect(page.getByPlaceholder(/^Name/)).toHaveValue("Bench printer");
+  await expect(name).toHaveValue("Bench printer");
 
   await page.getByRole("button", { name: "Register printer" }).click();
   await expect.poll(async () => (await requests()).length).toBe(2);
   const added = { id: "p1", name: "Bench printer", provider: "octoprint", config: {}, online: true, device_state: null };
   await emit(page, { event: "state", ...engine({ printers: [added] }), req_id: (await requests())[1].req_id });
-  await expect(page.getByPlaceholder(/^Name/)).toBeHidden();
-  await expect(service.last()).toHaveValue("");
+  await expect(page).toHaveURL(/#\/printers\/p1$/);
+  await expect(page.getByRole("heading", { name: "Bench printer" })).toBeVisible();
 });
 
 test("a plugin check that was never sent is asked again", async ({ page }) => {
