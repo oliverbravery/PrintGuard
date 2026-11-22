@@ -2125,6 +2125,8 @@ class Engine:
         manifest = plugins.sanitise_manifest(manifest)
         if not plugins.runs_here(manifest["platforms"], self.platform.host):
             raise ValueError(f"{manifest['id']} only runs on {', '.join(manifest['platforms'])}, not {self.platform.host}")
+        if not plugins.supports(manifest.get("min_printguard", ""), self.platform.version):
+            raise ValueError(f"{manifest['name']} needs PrintGuard {manifest['min_printguard']} or newer")
         sources = plugins.sanitise_sources(sources)
         assets = plugins.sanitise_assets(files)
         if set(manifest["assets"]) - set(assets):
@@ -2263,7 +2265,11 @@ class Engine:
 
     async def _cmd_plugin_catalogue(self, message: dict[str, Any]) -> None:
         await self._refresh_catalogue(quiet=True)
-        self.emit({"event": "catalogue", "plugins": self.catalogue, "req_id": message.get("req_id")})
+        listed = [
+            {**entry, "supported": plugins.supports(str(entry.get("min_printguard") or ""), self.platform.version)}
+            for entry in self.catalogue
+        ]
+        self.emit({"event": "catalogue", "plugins": listed, "req_id": message.get("req_id")})
 
     async def _cmd_plugin_page(self, message: dict[str, Any]) -> None:
         """Hands over the page files a zip-installed plugin carries.

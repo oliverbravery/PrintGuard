@@ -5301,6 +5301,29 @@ async def test_a_plugin_for_another_platform_is_refused_from_any_source() -> Non
         assert engine.plugins.get("demo") is None
 
 
+async def test_a_plugin_for_a_newer_printguard_is_refused_and_marked_in_the_catalogue() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    manifest = {**MANIFEST, "min_printguard": "9.0.0"}
+    listed = [{"id": "demo", "name": "Demo", "min_printguard": "9.0.0"}, {"id": "spare", "name": "Spare", "min_printguard": platform.version}, {"id": "any", "name": "Any"}]
+    platform.responses = {plugins.CATALOGUE_URL: (200, {"plugins": listed})}
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        with pytest.raises(RuntimeError, match="needs PrintGuard 9.0.0 or newer"):
+            await engine.request({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest)})
+        assert engine.plugins.get("demo") is None
+        await engine.handle({"cmd": "plugin.catalogue"})
+
+    answer = next(e for e in events if e.get("event") == "catalogue")
+    assert [entry["supported"] for entry in answer["plugins"]] == [False, True, True]
+
+
+def test_min_printguard_is_a_plain_version() -> None:
+    """The oldest PrintGuard a plugin runs on reads as three numbers or not at all."""
+    assert plugins.sanitise_manifest({**MANIFEST, "min_printguard": "3.0.0"})["min_printguard"] == "3.0.0"
+    assert "min_printguard" not in plugins.sanitise_manifest(MANIFEST), "a plugin without one keeps the digest it was pinned with"
+    with pytest.raises(ValueError, match="min_printguard"):
+        plugins.sanitise_manifest({**MANIFEST, "min_printguard": "3.0"})
+
+
 async def test_plugins_survive_a_restart() -> None:
     platform = FakePlatform(infer_s=0.02)
     async with running_engine(platform, camera_fps=[]) as (engine, _):
