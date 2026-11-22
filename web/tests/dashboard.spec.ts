@@ -808,8 +808,7 @@ const withCatalogue = async (page: Page) => {
         { id: "oauth", label: "Sign in", description: "" },
       ],
     }),
-  });
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
+  }, "/settings/plugins");
   await emit(page, { event: "catalogue", plugins: [CATALOGUED_SIGN_IN] });
 };
 
@@ -922,8 +921,7 @@ test("an updated plugin restarts on its new code and is read again for the conse
 });
 
 test("a plugin's secret field is never filled by a password manager", async ({ page }) => {
-  await dashboard(page, { engine: withPlugins([demoPlugin({ manifest: { ...demoPlugin().manifest, secrets: { api_key: "Your key" } } })]) });
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
+  await dashboard(page, { engine: withPlugins([demoPlugin({ manifest: { ...demoPlugin().manifest, secrets: { api_key: "Your key" } } })]) }, "/settings/plugins");
   await emit(page, { event: "catalogue", plugins: [] });
   await page.getByRole("button", { name: "Demo", exact: true }).click();
 
@@ -1032,12 +1030,16 @@ test("a feed the browser refuses to autoplay offers a tap to play", async ({ pag
   });
   await page.route(/\/hls\/c1\//, (route) => route.abort());
   await dashboard(page);
-  const tap = page.locator("article").getByRole("button", { name: "Tap to play" });
+  const tap = page.getByRole("region", { name: /selected monitor$/ }).getByRole("button", { name: "Tap to play" });
+  const play = page.locator("main li").getByRole("button", { name: "Play", exact: true });
   await expect(tap).toBeVisible();
+  await expect(play).toBeVisible();
 
   await tap.click();
   await expect(tap).toBeHidden();
-  expect(await page.evaluate(() => (window as any).__pg.getState().detailId)).toBeNull();
+  await play.click();
+  await expect(play).toBeHidden();
+  expect(new URL(page.url()).hash).toBe("#/");
 });
 
 test("sounds held back by the autoplay policy are dropped, not played together later", async ({ page }) => {
@@ -1120,19 +1122,20 @@ test("a camera floating in picture in picture keeps playing behind a dialog and 
     }, hidden);
   const cover = (dialog: string | null) => page.evaluate((dialog) => (window as any).__pg.setState({ dialog }), dialog);
   await expect.poll(attached).toBe(true);
+  await expect.poll(() => starts).toBe(2);
 
   await float(true);
   await cover("report");
   await hide(true);
   await page.waitForTimeout(300);
   expect(await attached()).toBe(true);
-  expect(starts).toBe(1);
+  expect(starts).toBe(2);
 
   await float(false);
   await expect.poll(attached).toBe(false);
   await hide(false);
   await cover(null);
-  await expect.poll(() => starts).toBe(2);
+  await expect.poll(() => starts).toBe(4);
 });
 
 async function stagePrint(page: Page, megabytes = 0) {
@@ -1203,9 +1206,14 @@ test("discarding or closing the sheet while a file uploads cancels the request",
   await page.addInitScript(() => {
     const win = window as any;
     const abort = XMLHttpRequest.prototype.abort;
+    const open = XMLHttpRequest.prototype.open;
     win.__aborts = 0;
-    XMLHttpRequest.prototype.abort = function () {
-      win.__aborts++;
+    XMLHttpRequest.prototype.open = function (this: XMLHttpRequest & { url?: string }, ...args: unknown[]) {
+      this.url = String(args[1]);
+      return (open as (...rest: unknown[]) => void).apply(this, args);
+    } as typeof open;
+    XMLHttpRequest.prototype.abort = function (this: XMLHttpRequest & { url?: string }) {
+      if (this.url?.startsWith("api/prints")) win.__aborts++;
       abort.call(this);
     };
   });
@@ -1353,7 +1361,6 @@ const printFile = (over = {}) => ({
 const library = (prints: unknown[]) => {
   const printer = { provider: "octoprint", config: {}, online: true, device_state: { status: "idle" } };
   return {
-    dialog: "prints",
     engine: engine({
       prints,
       printers: [{ id: "p1", name: "MK4", ...printer }, { id: "p2", name: "Mini", ...printer }],
@@ -1364,18 +1371,18 @@ const library = (prints: unknown[]) => {
 
 test("the print library does not squeeze its list into a strip on a phone held sideways", async ({ page }) => {
   await page.setViewportSize({ width: 667, height: 375 });
-  await dashboard(page, library([printFile({ id: "a", name: "First" }), printFile({ id: "b", name: "Second" }), printFile({ id: "c", name: "Third" })]));
-  const scrollers = await page.evaluate(() =>
-    [...document.querySelectorAll("dialog *")]
-      .filter((el) => getComputedStyle(el).overflowY === "auto" && el.scrollHeight > el.clientHeight + 1)
-      .map((el) => el.clientHeight),
+  await dashboard(page, library([printFile({ id: "a", name: "First" }), printFile({ id: "b", name: "Second" }), printFile({ id: "c", name: "Third" })]), "/prints");
+  await expect(page.getByRole("link", { name: /^View / })).toHaveCount(3);
+  const squeezed = await page.evaluate(() =>
+    [...document.querySelectorAll("main *")].filter(
+      (el) => ["auto", "scroll"].includes(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight + 1 && el.clientHeight < 200,
+    ).length,
   );
-  expect(scrollers.length).toBeGreaterThan(0);
-  expect(Math.min(...scrollers)).toBeGreaterThan(200);
+  expect(squeezed).toBe(0);
 });
 
 test("two printers tagged in quick succession are both sent, without a printer that is gone", async ({ page }) => {
-  await dashboard(page, library([printFile({ printer_ids: ["gone"] })]));
+  await dashboard(page, library([printFile({ printer_ids: ["gone"] })]), "/prints");
   await expect(page.getByText("none of its printers is registered")).toBeVisible();
   await page.getByRole("button", { name: "MK4", exact: true }).click();
   await page.getByRole("button", { name: "Mini", exact: true }).click();
@@ -1386,29 +1393,33 @@ test("two printers tagged in quick succession are both sent, without a printer t
 });
 
 test("a printer that cannot print a file is named in the text, not only a hover title", async ({ page }) => {
-  await dashboard(page, library([printFile({ id: "f3", name: "Plate", filename: "plate.3mf", ext: "3mf" })]));
+  await dashboard(page, library([printFile({ id: "f3", name: "Plate", filename: "plate.3mf", ext: "3mf" })]), "/prints");
 
   await expect(page.getByText("MK4, Mini can't print .3mf files.")).toBeVisible();
 });
 
-test("removing or sending one file leaves the other rows' buttons alone", async ({ page }) => {
-  await dashboard(page, library([printFile(), printFile({ id: "f2", name: "Vase", uploaded: 0, meta: { time_s: 7190 } })]));
-  await expect(page.getByText("2h 0m")).toBeVisible();
-  await page.getByRole("button", { name: "Print", exact: true }).first().click();
-  await page.getByRole("button", { name: "Start print" }).click();
-  await page.getByRole("button", { name: "Remove", exact: true }).first().click();
+test("removing or sending one file leaves the other files' buttons alone", async ({ page }) => {
+  await dashboard(page, library([printFile(), printFile({ id: "f2", name: "Vase", uploaded: 0, meta: { time_s: 7190 } })]), "/prints/f1");
+  await page.getByRole("button", { name: "Remove", exact: true }).click();
   await pastDoublePress(page);
   await page.getByRole("button", { name: "Confirm" }).click();
+  await expect(page.getByRole("button", { name: "Removing…" })).toBeVisible();
 
-  await expect(page.getByRole("button", { name: "Sending…" })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Removing…" })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Print", exact: true })).toBeEnabled();
+  await page.getByRole("link", { name: "View Vase" }).click();
+  await expect(page.getByText("2h 0m", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Remove", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Print", exact: true }).click();
+  await page.getByRole("button", { name: "Start print" }).click();
+  await expect(page.getByRole("button", { name: "Sending…" })).toBeVisible();
+
+  await page.getByRole("link", { name: "View Benchy" }).click();
+  await expect(page.getByRole("button", { name: "Print", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Removing…" })).toBeVisible();
 });
 
 test("a print only starts after the bed has been checked on the printer's camera", async ({ page }) => {
   const { engine: state } = library([printFile()]);
-  await dashboard(page, { dialog: "prints", engine: { ...state, monitors: [monitor({ printer_id: "p1" })] } });
+  await dashboard(page, { engine: { ...state, monitors: [monitor({ printer_id: "p1" })] } }, "/prints");
   await page.getByRole("button", { name: "Print", exact: true }).click();
   const check = page.getByRole("dialog", { name: "Print Benchy on MK4" });
   await expect(check.getByText("Is the build plate on and the bed clear?")).toBeVisible();
@@ -1426,14 +1437,14 @@ test("a print only starts after the bed has been checked on the printer's camera
 
 test("a file uploaded seconds ago reads just now and an older one counts minutes", async ({ page }) => {
   const secondsAgo = (seconds: number) => Date.now() / 1000 - seconds;
-  await dashboard(page, library([printFile({ uploaded: secondsAgo(5) }), printFile({ id: "f2", name: "Vase", uploaded: secondsAgo(150) })]));
+  await dashboard(page, library([printFile({ uploaded: secondsAgo(5) }), printFile({ id: "f2", name: "Vase", uploaded: secondsAgo(150) })]), "/prints");
   await expect(page.getByText("just now")).toHaveCount(1);
   await expect(page.getByText("2m ago")).toHaveCount(1);
 });
 
 test("a file dropped beside the drop zone is staged, and the page stays where it is", async ({ page }) => {
   await page.route(/\/api\/prints\/inspect/, (route) => route.fulfill({ json: { meta: {}, thumbnail: true } }));
-  await dashboard(page, library([]));
+  await dashboard(page, library([]), "/prints");
   const dropped = (target: string, kind: "file" | "text") =>
     page.evaluate(
       ([target, kind]) => {
@@ -1446,23 +1457,24 @@ test("a file dropped beside the drop zone is staged, and the page stays where it
       [target, kind],
     );
 
-  expect(await dropped("dialog h2", "text")).toEqual([false, false]);
-  expect(await dropped("dialog h2", "file")).toEqual([true, true]);
+  expect(await dropped("main h1", "text")).toEqual([false, false]);
+  expect(await dropped("main h1", "file")).toEqual([true, true]);
   await expect(page.getByRole("heading", { name: "Upload stray.gcode" })).toBeVisible();
   expect(await page.evaluate(() => (window as any).__pg.getState().staged.length)).toBe(1);
 });
 
 test("a printer test result shows only under the printer that was tested", async ({ page }) => {
   const printer = { id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true, device_state: null };
-  await dashboard(page, { engine: engine({ printers: [printer] }), dialog: "printers" });
-  await page.getByRole("button", { name: "Edit", exact: true }).click();
-  await page.getByRole("combobox").selectOption("octoprint");
-  await page.getByRole("button", { name: "Test connection" }).first().click();
+  await dashboard(page, { engine: engine({ printers: [printer] }) }, "/printers/p1");
+  await page.getByRole("button", { name: "Test connection" }).click();
   const asked = await sent(page, "printer.test");
   await emit(page, { event: "printer_test", ok: true, status: "printing", req_id: asked.req_id });
-
   await expect(page.getByText("ok, printing")).toHaveCount(1);
-  await expect(page.locator(".panel .panel").getByText("ok, printing")).toBeVisible();
+
+  await page.getByRole("link", { name: "+ Register a printer" }).click();
+  await page.getByRole("combobox", { name: "Printer service" }).selectOption("octoprint");
+  await expect(page.getByRole("button", { name: "Test connection" })).toBeVisible();
+  await expect(page.getByText("ok, printing")).toHaveCount(0);
 });
 
 test("selecting text out past the edge of a dialog leaves it open", async ({ page }) => {
@@ -1493,18 +1505,17 @@ test("a page that fails to draw says so and offers a reload", async ({ page }) =
   await expect(page.getByRole("alert")).toBeHidden();
 });
 
-test("closing settings part way through a theme puts the saved theme back", async ({ page }) => {
-  await dashboard(page, { dialog: "settings", settingsTab: "appearance" });
+test("leaving settings part way through a theme puts the saved theme back", async ({ page }) => {
+  await dashboard(page, {}, "/settings/appearance");
   await page.getByRole("button", { name: "+ New" }).click();
-  await page.keyboard.press("Escape");
+  await page.getByRole("link", { name: "Monitors", exact: true }).click();
   await page.getByRole("button", { name: "Switch theme" }).click();
 
   await expect(page.locator("html")).toHaveAttribute("data-glass", "");
 });
 
 test("a theme saved while the hub is away is sent once it is back", async ({ page }) => {
-  const { sockets, commands } = await hub(page);
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("appearance"));
+  const { sockets, commands } = await hub(page, undefined, engine(), "/settings/appearance");
   await page.getByRole("button", { name: "+ New" }).click();
   await page.getByRole("textbox", { name: "Theme name" }).fill("Workshop");
   await sockets[0].close();
@@ -1516,7 +1527,7 @@ test("a theme saved while the hub is away is sent once it is back", async ({ pag
 });
 
 test("a saved theme stays on screen through a state sent before the hub has answered it", async ({ page }) => {
-  await dashboard(page, { dialog: "settings", settingsTab: "appearance" });
+  await dashboard(page, {}, "/settings/appearance");
   await page.getByRole("button", { name: "+ New" }).click();
   await page.getByRole("textbox", { name: "Theme name" }).fill("Workshop");
   await page.getByRole("button", { name: "Save theme" }).click();
