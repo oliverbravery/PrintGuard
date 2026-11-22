@@ -12,7 +12,7 @@ export function Feed({
   camera,
   active = true,
   compact = false,
-  fill = false,
+  className = "",
   aspect,
   uncropped = false,
   onFrameSize,
@@ -22,7 +22,7 @@ export function Feed({
   camera: Camera | undefined;
   active?: boolean;
   compact?: boolean;
-  fill?: boolean;
+  className?: string;
   aspect?: number;
   uncropped?: boolean;
   onFrameSize?: (size: { w: number; h: number }) => void;
@@ -76,7 +76,7 @@ export function Feed({
   return (
     <div
       data-camera={camera?.id}
-      className={`feed relative overflow-hidden bg-ink-1 ${fill ? "min-h-0 flex-1" : aspect ? "" : "aspect-video"} ${compact ? "border border-line-0" : ""}`}
+      className={`feed relative overflow-hidden bg-ink-1 ${aspect ? "" : "aspect-video"} ${compact ? "border border-line-0" : ""} ${className}`}
       style={aspect ? { aspectRatio: aspect } : undefined}
     >
       <video

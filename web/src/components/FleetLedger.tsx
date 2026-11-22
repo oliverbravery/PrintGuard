@@ -137,7 +137,7 @@ export function FleetLedger({ monitors, selectedId, visible, hidden }: { monitor
   const reorder = useReorder(visible);
   return (
     <section aria-labelledby="fleet-heading" className="@container border-b border-rule">
-      <div className="surface z-[5] lg:sticky lg:top-0">
+      <div className="surface sticky top-0 z-[5]">
         <div className="flex min-h-11 items-center gap-2 border-b border-rule bg-ink-1 pl-4">
           <h2 id="fleet-heading" className="label flex-1 text-text-1">
             Fleet · {monitors.length}

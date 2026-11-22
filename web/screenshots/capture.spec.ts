@@ -432,7 +432,7 @@ const CROPS: Crop[] = [
     },
   },
   {
-    id: "customise", ...DESK, customising: true, pad: 0,
+    id: "customise", ...DESK, height: 1000, customising: true, pad: 0,
     target: (page) => page.locator("main section").filter({ has: page.getByRole("heading", { name: /^Fleet/ }) }),
   },
   {

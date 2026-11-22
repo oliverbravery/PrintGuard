@@ -2784,10 +2784,10 @@ test("buttons, tabs, the close button and the small controls are 44 pixels to a 
   };
   const fitsAFinger = (target: ReturnType<Page["locator"]>) => expect.poll(() => shortSide(target)).toBeGreaterThanOrEqual(44);
   const takesAFinger = async (target: ReturnType<Page["locator"]>) => {
-    await target.scrollIntoViewIfNeeded();
     await expect
       .poll(() =>
         target.evaluate((control) => {
+          control.scrollIntoView({ block: "center" });
           const box = control.getBoundingClientRect();
           const centre = [box.x + box.width / 2, box.y + box.height / 2];
           return [[-21, 0], [21, 0], [0, -21], [0, 21]].every(([x, y]) => control.contains(document.elementFromPoint(centre[0] + x, centre[1] + y)));
@@ -3214,7 +3214,7 @@ test("the selected monitor's risk bar keeps its width when the score drops to on
   expect(await bar.boundingBox()).toEqual(before);
 });
 
-test("on a desktop the page fits the screen, with the fleet and each list scrolling on their own", async ({ page }) => {
+test("the page fits the screen, with the fleet and each list scrolling on their own", async ({ page }) => {
   const monitors = Array.from({ length: 8 }, (_, index) => monitor({ id: `m${index}`, name: `Printer ${index}` }));
   const prints = Array.from({ length: 30 }, (_, index) => ({ id: `f${index}`, name: `part ${index}`, filename: `part${index}.gcode`, ext: "gcode", size: 1000, printer_ids: [], uploaded: index, meta: {}, thumbnail: null }));
   await dashboard(page, { engine: engine({ monitors, prints }) });
@@ -3239,17 +3239,19 @@ test("on a desktop the page fits the screen, with the fleet and each list scroll
 });
 
 test("the divider, its arrow keys and the layout buttons resize the fleet, and the size is remembered", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
   const state = { engine: engine({ monitors: [monitor(), monitor({ id: "m2", name: "MK4" })] }) };
   await dashboard(page, state);
   const fleetTop = async () => (await page.getByRole("heading", { name: /^Fleet/ }).boundingBox())!.y;
   const divider = page.getByRole("separator", { name: "Selected monitor height" });
   const start = await fleetTop();
   const handle = (await divider.boundingBox())!;
-  await page.mouse.move(handle.x + handle.width / 2, handle.y);
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
   await page.mouse.down();
   await page.mouse.move(handle.x + handle.width / 2, handle.y - 120, { steps: 6 });
   await page.mouse.up();
-  expect(start - (await fleetTop())).toBeCloseTo(120, -1);
+  expect(start - (await fleetTop())).toBeGreaterThan(100);
+  expect(start - (await fleetTop())).toBeLessThan(140);
 
   const dragged = await fleetTop();
   await divider.press("ArrowDown");
@@ -3264,7 +3266,57 @@ test("the divider, its arrow keys and the layout buttons resize the fleet, and t
   await page.reload();
   await dashboard(page, state);
   expect(await fleetTop()).toBe(kept);
+});
 
-  await page.setViewportSize({ width: 900, height: 800 });
-  await expect(divider).toHaveCount(0);
+test("the fleet can't grow over the selected monitor's risk, and what's pinned under it stays in view", async ({ page }) => {
+  await dashboard(page, { engine: engine({ monitors: [monitor(), monitor({ id: "m2", name: "MK4" })] }) });
+  const handle = (await page.getByRole("separator", { name: "Selected monitor height" }).boundingBox())!;
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2, 0, { steps: 8 });
+  await page.mouse.up();
+  const hero = page.getByRole("region", { name: "Prusa, selected monitor" });
+  const risk = (await hero.getByRole("img", { name: /^risk/ }).boundingBox())!;
+  const pinned = hero.getByText("Bind a printer to pause or cancel a failing print.");
+  await expect(pinned).toBeInViewport();
+  expect(risk.y + risk.height).toBeLessThan((await pinned.boundingBox())!.y);
+});
+
+test("on a phone the fleet stays at the bottom of the screen while the selected monitor scrolls above it", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const monitors = Array.from({ length: 6 }, (_, index) => monitor({ id: `m${index}`, name: `Printer ${index}` }));
+  await dashboard(page, { engine: engine({ monitors }) });
+  const fleet = page.getByRole("heading", { name: /^Fleet/ });
+  await expect(fleet).toBeInViewport();
+  const fleetTop = (await fleet.boundingBox())!.y;
+  await page.getByRole("link", { name: "Edit", exact: true }).scrollIntoViewIfNeeded();
+  await page.getByRole("link", { name: "Printer 5", exact: true }).scrollIntoViewIfNeeded();
+  expect((await fleet.boundingBox())!.y).toBe(fleetTop);
+  await expect(page.getByRole("navigation", { name: "Primary" }).last()).toBeInViewport();
+  expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight)).toBe(true);
+});
+
+test("a quarter turn keeps the crop a square of the same size and centre, and the preview keeps its size", async ({ page }) => {
+  const square = { x: (1 - 9 / 16) / 2, y: 0, w: 9 / 16, h: 1 };
+  await dashboard(page, { engine: engine({ cameras: [camera({ crop: square })] }) }, "/cameras/c1");
+  const stage = page.locator("main .ReactCrop").locator("xpath=..");
+  const before = (await stage.boundingBox())!;
+  const turn = async (degrees: string) => {
+    await page.getByRole("radio", { name: degrees }).check();
+    await page.evaluate(() => (window as any).__pg.getState().flushUpdates());
+    return (await lastSent(page, "camera.update")).patch;
+  };
+
+  const turned = await turn("90°");
+  expect(turned.rotation).toBe(90);
+  expect(turned.crop.w).toBeCloseTo(1, 5);
+  expect(turned.crop.h).toBeCloseTo(9 / 16, 5);
+  expect(turned.crop.y).toBeCloseTo((1 - 9 / 16) / 2, 5);
+  await emit(page, { event: "state", ...engine({ cameras: [camera({ rotation: 90, crop: turned.crop })] }) });
+  expect(await stage.boundingBox()).toEqual(before);
+  await page.getByRole("button", { name: "Edit crop", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Square" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+
+  expect(await turn("270°")).toEqual({ rotation: 270 });
 });

@@ -94,7 +94,7 @@ function ControlPane({ monitor }: { monitor: Monitor }) {
           </div>
         </>
       ) : (
-        <p className="mt-auto border-t border-rule px-4 py-3 text-sm text-text-1">Bind a printer to pause or cancel a failing print.</p>
+        <p className="surface z-[1] mt-auto border-t border-rule px-4 py-3 text-sm text-text-1 lg:sticky lg:bottom-0">Bind a printer to pause or cancel a failing print.</p>
       )}
     </>
   );
@@ -162,7 +162,7 @@ function PreheatPaneFor({ monitor }: { monitor: Monitor }) {
   return <PreheatPane printer={printer} />;
 }
 
-export function MonitorHero({ monitor, fill = false }: { monitor: Monitor; fill?: boolean }) {
+export function MonitorHero({ monitor }: { monitor: Monitor }) {
   const engine = useStore((s) => s.engine);
   const [pane, setPane] = useState<Pane>("control");
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
@@ -173,13 +173,13 @@ export function MonitorHero({ monitor, fill = false }: { monitor: Monitor; fill?
   return (
     <section
       aria-label={`${monitor.name}, selected monitor`}
-      className={`grid lg:grid-cols-[minmax(0,1.32fr)_minmax(0,1fr)] ${fill ? "h-full grid-rows-[minmax(0,1fr)]" : "border-b border-rule"}`}
+      className="grid lg:h-full lg:grid-cols-[minmax(0,1.32fr)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]"
     >
       <div className="flex min-w-0 flex-col border-rule max-lg:border-b lg:border-r">
         <Feed
           camera={camera}
           active={!covered}
-          fill={fill}
+          className="lg:aspect-auto lg:min-h-0 lg:flex-1"
           banner={monitor.alert && <span className="mono relative z-[4] bg-bad px-4 py-1.5 text-xs font-bold tracking-[0.2em] text-on-bad">DEFECT DETECTED</span>}
         >
           {activeJob(device) && <ProgressBar state={device} className="absolute inset-x-0 bottom-0 z-[3] h-1" />}
@@ -202,7 +202,7 @@ export function MonitorHero({ monitor, fill = false }: { monitor: Monitor; fill?
       </div>
       <div className="flex min-w-0 flex-col">
         <Tabs prefix={prefix} label="Monitor panes" tabs={PANES} value={pane} onChange={setPane} cells />
-        <div className={`grid flex-1 ${fill ? "min-h-0 overflow-y-auto" : ""}`}>
+        <div className="grid flex-1 lg:min-h-0 lg:scroll-pb-14 lg:overflow-y-auto">
           {PANES.map(({ id }) => (
             <TabPanel key={id} prefix={prefix} id={id} className={`flex flex-col [grid-area:1/1] ${pane === id ? "" : "invisible"}`}>
               {id === "control" && <ControlPane monitor={monitor} />}

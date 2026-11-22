@@ -352,36 +352,29 @@ button.chip:hover {
 .app {
   display: flex;
   flex-direction: column;
-  min-height: 100dvh;
+  height: 100dvh;
   padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
 }
 
 .app-main,
 .page {
   display: flex;
-  flex: 1 0 auto;
   flex-direction: column;
 }
 
-.page-fill {
+.app-main {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.page {
   flex: 1 0 auto;
 }
 
-@media (width >= 64rem) {
-  .app {
-    height: 100dvh;
-  }
-
-  .app-main {
-    flex: 1 1 0;
-    min-height: 0;
-    overflow-y: auto;
-  }
-
-  .page-fill {
-    flex: 1 1 0;
-    min-height: 0;
-  }
+.page-fill {
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .ReactCrop__child-wrapper {
@@ -393,33 +386,30 @@ button.chip:hover {
 }
 
 .splitter {
-  position: relative;
-  z-index: 10;
-  height: 1px;
-  background: var(--color-rule);
+  display: grid;
+  place-items: center;
+  height: 0.75rem;
+  border-top: 1px solid var(--color-rule);
+  background: var(--color-ink-1);
 }
 
 .splitter::after {
   content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
   width: 2.5rem;
-  height: 0.375rem;
-  border: 1px solid var(--color-rule);
-  background: var(--color-ink-0);
-  translate: -50% -50%;
+  height: 0.25rem;
+  background: var(--color-line-1);
 }
 
-.splitter:is([data-separator="hover"], [data-separator="active"]),
-.splitter:is([data-separator="hover"], [data-separator="active"])::after {
+.splitter:is([data-separator="hover"], [data-separator="active"]) {
   border-color: var(--color-accent);
+}
+
+.splitter:is([data-separator="hover"], [data-separator="active"])::after {
   background: var(--color-accent);
 }
 
 .topbar {
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 30;
   display: flex;
   align-items: stretch;
@@ -631,10 +621,6 @@ a.topbar-readout:hover {
     padding-bottom: calc(3.5rem + 1px + env(safe-area-inset-bottom));
   }
 
-  html {
-    scroll-padding-bottom: calc(3.5rem + 1px + env(safe-area-inset-bottom));
-  }
-
   body:has([data-subview]) .dock {
     display: none;
   }
@@ -642,10 +628,6 @@ a.topbar-readout:hover {
   body:has([data-subview]) .app {
     padding-bottom: env(safe-area-inset-bottom);
   }
-}
-
-html {
-  scroll-padding-top: 3rem;
 }
 
 .page-head {
