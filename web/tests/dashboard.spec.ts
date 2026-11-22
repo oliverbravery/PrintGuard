@@ -1512,18 +1512,17 @@ test("a page that fails to draw says so and offers a reload", async ({ page }) =
   await expect(page.getByRole("alert")).toBeHidden();
 });
 
-test("closing settings part way through a theme puts the saved theme back", async ({ page }) => {
-  await dashboard(page, { dialog: "settings", settingsTab: "appearance" });
+test("leaving settings part way through a theme puts the saved theme back", async ({ page }) => {
+  await dashboard(page, {}, "/settings/appearance");
   await page.getByRole("button", { name: "+ New" }).click();
-  await page.keyboard.press("Escape");
+  await page.getByRole("link", { name: "Monitors", exact: true }).click();
   await page.getByRole("button", { name: "Switch theme" }).click();
 
   await expect(page.locator("html")).toHaveAttribute("data-glass", "");
 });
 
 test("a theme saved while the hub is away is sent once it is back", async ({ page }) => {
-  const { sockets, commands } = await hub(page);
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("appearance"));
+  const { sockets, commands } = await hub(page, undefined, engine(), "/settings/appearance");
   await page.getByRole("button", { name: "+ New" }).click();
   await page.getByRole("textbox", { name: "Theme name" }).fill("Workshop");
   await sockets[0].close();
@@ -1535,7 +1534,7 @@ test("a theme saved while the hub is away is sent once it is back", async ({ pag
 });
 
 test("a saved theme stays on screen through a state sent before the hub has answered it", async ({ page }) => {
-  await dashboard(page, { dialog: "settings", settingsTab: "appearance" });
+  await dashboard(page, {}, "/settings/appearance");
   await page.getByRole("button", { name: "+ New" }).click();
   await page.getByRole("textbox", { name: "Theme name" }).fill("Workshop");
   await page.getByRole("button", { name: "Save theme" }).click();
