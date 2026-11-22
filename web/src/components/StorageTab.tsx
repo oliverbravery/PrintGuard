@@ -59,7 +59,7 @@ export function StorageTab() {
           </select>
           <span className="block text-xs leading-relaxed text-text-2">
             PrintGuard records a frame every 5 seconds, so you can scrub through a print when you review it and add frames it didn't pick. A
-            recording is deleted once you send or skip its print. An 8 hour print takes about 100 MB.
+            recording is deleted once you send or ignore its print. An 8 hour print takes about 100 MB.
           </span>
         </>
       )}

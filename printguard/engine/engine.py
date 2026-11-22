@@ -233,6 +233,7 @@ class Engine:
             "review.send": self._cmd_review_send,
             "review.retry": self._cmd_review_retry,
             "review.dismiss": self._cmd_review_dismiss,
+            "review.delete": self._cmd_review_delete,
             "review.add": self._cmd_review_add,
             "recording.frame": self._cmd_recording_frame,
             "recording.delete": self._cmd_recording_delete,
@@ -368,7 +369,7 @@ class Engine:
         if not (reported_status is None or isinstance(reported_status, str)):
             raise ValueError("its last status is text")
         config = self._restored_config(INTEGRATIONS[printer["provider"]], printer["config"], f"printer '{printer['name']}'")
-        self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], config=config, reported_status=reported_status))
+        self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], model=printer["model"], config=config, reported_status=reported_status))
 
     def _restored_config(self, adapter: Adapter, config: dict[str, Any], owner: str) -> dict[str, Any]:
         """A stored adapter config as a save would take it, warning of each value that had to be cleared.
@@ -1502,7 +1503,7 @@ class Engine:
         record = sanitise_printer(printer_id, message.get("printer", {}))
         INTEGRATIONS[record["provider"]].require(record["config"])
         reports.require_storable(record["config"].values())
-        printer = Printer(id=printer_id, name=record["name"], provider=record["provider"], config=record["config"])
+        printer = Printer(id=printer_id, name=record["name"], provider=record["provider"], model=record["model"], config=record["config"])
         self.printers.add(printer)
         self._schedule_reconcile(printer)
 
@@ -1531,6 +1532,7 @@ class Engine:
         reports.require_storable(record["config"].values())
         was = (existing.provider, existing.config)
         existing.name = record["name"]
+        existing.model = record["model"]
         existing.provider = record["provider"]
         existing.config = record["config"]
         if was != (existing.provider, existing.config):
@@ -1836,11 +1838,14 @@ class Engine:
                 or already sent, or no frame is left to send.
         """
         self._require_feedback_on()
+        known = self.reviews.get(message["id"])
+        monitor = self.monitors.get(known.monitor_id) if known else None
+        printer = self.printers.get(monitor.get("printer_id") or "") if monitor else None
         review = self.reviews.submit(
             message["id"],
             failures=set(message.get("failures") or []),
             removed=set(message.get("removed") or []),
-            printer=feedback.printer_model(message.get("printer")),
+            printer=printer.model if printer else "",
         )
         self._start_send(review, message.get("req_id"))
 
@@ -1853,6 +1858,9 @@ class Engine:
 
     async def _cmd_review_dismiss(self, message: dict[str, Any]) -> None:
         self.reviews.dismiss(message["id"])
+
+    async def _cmd_review_delete(self, message: dict[str, Any]) -> None:
+        await self.reviews.delete(message["id"])
 
     async def _cmd_review_add(self, message: dict[str, Any]) -> None:
         """Keeps a frame from a finished print's recording and answers with the print's frames.

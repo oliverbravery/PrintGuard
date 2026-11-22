@@ -111,6 +111,7 @@ FiniteObject = Annotated[dict[str, Any], AfterValidator(require_finite)]
 class PrinterFields(BaseModel):
     name: str | None = None
     provider: str | None = None
+    model: str | None = None
     config: FiniteObject | None = None
 
 

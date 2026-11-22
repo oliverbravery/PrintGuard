@@ -3540,7 +3540,10 @@ async def test_a_reviewed_print_is_sent_with_its_labels(monkeypatch) -> None:
         alert = next(frame for frame in review["frames"] if frame["kind"] == "alert")
         spaced = [frame for frame in review["frames"] if frame["kind"] == "spaced"]
         assert review["status"] == "ready" and len(spaced) >= 2
-        await engine.handle({"cmd": "review.send", "id": review["id"], "failures": [alert["id"]], "removed": [spaced[0]["id"]], "printer": "  Voron   2.4 "})
+        await engine.handle({"cmd": "printer.add", "printer": {"name": "P", "model": "  Voron   2.4 ", **OCTOPRINT}})
+        printer_id = next(iter(engine.printers.items))
+        await engine.handle({"cmd": "monitor.update", "id": review["monitor_id"], "patch": {"printer_id": printer_id}})
+        await engine.handle({"cmd": "review.send", "id": review["id"], "failures": [alert["id"]], "removed": [spaced[0]["id"]], "printer": "typed in the review"})
         outcome = await _sent(events)
         state = engine.state_event()
 
@@ -3550,11 +3553,24 @@ async def test_a_reviewed_print_is_sent_with_its_labels(monkeypatch) -> None:
     assert by_frame[alert["id"]]["label"] == "failure" and by_frame[spaced[1]["id"]]["label"] == "good"
     sent = by_frame[alert["id"]]
     assert sent["authorization"] == f"Bearer {TOKEN}" and sent["jpeg"] == b"\xff\xd8fake"
-    assert (sent["print"], sent["kind"], sent["printer"], sent["provider"], sent["version"]) == (review["id"], "alert", "Voron 2.4", "none", platform.version)
+    assert (sent["print"], sent["kind"], sent["printer"], sent["provider"], sent["version"]) == (review["id"], "alert", "Voron 2.4", "octoprint", platform.version)
     assert sent["threshold"] == 0.75 and sent["score"] == alert["score"] and sent["ts"] == alert["ts"]
     assert state["feedback_hub"] == "a" * 32 and TOKEN not in json.dumps(state), "the state names the hub and never carries its token"
     assert platform.state["feedback_token"] == TOKEN, "the token is kept so the hub registers once"
     assert platform.http_calls.count(("POST", f"{feedback.ENDPOINT}/register")) == 1
+
+
+async def test_an_ignored_print_is_deleted_with_its_frames_and_recording(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.2)
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        review = await _finished_review(engine)
+        assert _kept_files(platform) and _recording_files(platform)
+        await engine.request({"cmd": "review.delete", "id": review["id"]})
+        assert engine.state_event()["reviews"] == []
+        assert not _kept_files(platform) and not _recording_files(platform)
+        with pytest.raises(RuntimeError, match="no review"):
+            await engine.request({"cmd": "review.delete", "id": review["id"]})
 
 
 def test_a_typed_printer_model_is_cut_to_what_the_inbox_takes() -> None:

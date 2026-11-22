@@ -37,19 +37,31 @@ function PrinterTest({ id, provider, config }: { id: string; provider: string; c
   );
 }
 
+function PrinterModelField({ value, onChange }: { value: string; onChange: (model: string) => void }) {
+  return (
+    <label className="block">
+      <span className="label mb-1 block">Printer model</span>
+      <input className="field" placeholder="Optional, such as Prusa MK4" maxLength={80} value={value} onChange={(e) => onChange(e.target.value)} />
+      <span className="mt-1 block text-xs text-text-2">Sent with the frames you review from this printer's prints.</span>
+    </label>
+  );
+}
+
 function PrinterEditor({ printer }: { printer: Printer }) {
   const { engine, send, isPending } = useStore();
   const [name, setName] = useState(printer.name);
+  const [model, setModel] = useState(printer.model);
   const [config, setConfig] = useState<AdapterConfig>(printer.config ?? {});
   const integrations = engine?.integrations ?? [];
   const meta = integrations.find((i) => i.id === printer.provider);
   const save = useSubmit(() => setConfig(printer.config ?? {}));
 
   useEffect(() => setName(printer.name), [printer.id, printer.name]);
+  useEffect(() => setModel(printer.model), [printer.id, printer.model]);
   useEffect(() => setConfig(printer.config ?? {}), [printer.id]);
 
   const retype = meta ? retypeReason(config, printer.config ?? {}, savedSecretTitles(meta, printer.secrets_set ?? [])) : null;
-  const dirty = name.trim() !== printer.name || JSON.stringify(config) !== JSON.stringify(printer.config ?? {});
+  const dirty = name.trim() !== printer.name || model.trim() !== printer.model || JSON.stringify(config) !== JSON.stringify(printer.config ?? {});
 
   return (
     <>
@@ -72,12 +84,13 @@ function PrinterEditor({ printer }: { printer: Printer }) {
             <span className="label mb-1 block">Name</span>
             <input className="field" value={name} onChange={(e) => setName(e.target.value)} />
           </label>
+          <PrinterModelField value={model} onChange={setModel} />
           <SchemaForm meta={meta} value={config} stored={printer.config ?? {}} saved={printer.secrets_set} onChange={setConfig} />
           <PrinterTest id={printer.id} provider={printer.provider} config={config} />
           <button
             className="btn btn-primary"
             disabled={!dirty || retype !== null || isPending("printer.update", printer.id)}
-            onClick={() => save.submit({ cmd: "printer.update", id: printer.id, patch: { name: name.trim(), config } })}
+            onClick={() => save.submit({ cmd: "printer.update", id: printer.id, patch: { name: name.trim(), model: model.trim(), config } })}
           >
             {isPending("printer.update", printer.id) ? "Saving…" : "Save printer"}
           </button>
@@ -99,6 +112,7 @@ function RegisterPrinter() {
   const integrations = engine?.integrations ?? [];
   const [provider, setProvider] = useState("");
   const [name, setName] = useState("");
+  const [model, setModel] = useState("");
   const [config, setConfig] = useState<AdapterConfig>({});
   const meta = integrations.find((i) => i.id === provider);
   const busy = isPending("printer.add");
@@ -121,7 +135,7 @@ function RegisterPrinter() {
       onSubmit={(event) => {
         event.preventDefault();
         printersWhenSent.current = printers;
-        send({ cmd: "printer.add", printer: { name: name.trim(), provider, config } });
+        send({ cmd: "printer.add", printer: { name: name.trim(), model: model.trim(), provider, config } });
       }}
     >
       <select
@@ -146,6 +160,7 @@ function RegisterPrinter() {
             <span className="label mb-1 block">Name</span>
             <input className="field" placeholder={`Such as ${meta.label} Ender 3`} value={name} onChange={(e) => setName(e.target.value)} />
           </label>
+          <PrinterModelField value={model} onChange={setModel} />
           <SchemaForm meta={meta} value={config} onChange={setConfig} />
           <PrinterTest id={NEW_PRINTER} provider={provider} config={config} />
           <button type="submit" className="btn btn-primary" disabled={busy || incomplete}>

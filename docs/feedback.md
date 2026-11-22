@@ -35,7 +35,7 @@ including ones waiting for a review or to send.
 
 Each print is also recorded, one frame every 5 seconds, so you can scrub through it when you
 review it. An 8 hour print's recording takes about 100 MB. A recording is deleted once you send
-or skip its print, or 7 days after the print ended, which you can change to 3 or 14 days or
+or ignore its print, or 7 days after the print ended, which you can change to 3 or 14 days or
 switch off. Recordings are capped at 2 GB together, and the oldest go first.
 
 A print ends when its printer reports idle or an error, or when you switch its monitor off, so a
@@ -55,11 +55,11 @@ isn't listed.
 2. Use the × on a frame to leave it out, or **Clear all** to leave every frame out.
 3. Scrub through the print with the slider and use **Add as good** or **Add as failure** to send a
    frame PrintGuard didn't pick. Marks on the slider show where the alerts and picked frames are.
-4. Add your printer model if you like, then press **Send**. You can send 60 frames a day, and
-   the count above the frames shows how many you have chosen.
+4. Press **Send**. You can send 60 frames a day, and the count above the frames shows how many
+   you have chosen.
 
-**Not this print** marks it reviewed, not sent. Its frames stay on the hub, so you can still open
-it from **Review** later.
+**Ignore** deletes the print from the hub with its frames and recording, and asks first with how
+much space that frees. Its alert snapshots leave the risk history too.
 
 ## What's sent
 
@@ -67,7 +67,7 @@ it from **Review** later.
 - Each frame's risk score, time and which of the three kinds above it is, or that you added it from the recording.
 - A random ID for the print and for each frame.
 - The monitor's alert threshold at the time you send.
-- The type of printer connection, such as `klipper` or `none`, and the printer model if you typed one.
+- The type of printer connection, such as `klipper` or `none`, and the printer model if you set one on the printer in **Printers**.
 - The PrintGuard version.
 - A random ID for your hub, issued the first time you send.
 
@@ -110,7 +110,7 @@ A print that is waiting has **Try now** and **Cancel sending** on its review pag
 skips isn't counted as sent. A frame the inbox already holds is answered as sent without being
 written again, so it doesn't count twice and the copy keeps the labels of the first send. A print
 none of whose frames could be sent goes back to waiting for a review. The hub drops control
-characters from the printer model you type, and the Worker refuses a frame with one in its labels
+characters from a printer model, and the Worker refuses a frame with one in its labels
 or with a label written as an RFC 2047 encoded word, such as `=?utf-8?q?x?=`. It also refuses a
 file that isn't a complete JPEG or is over 4096 by 4096 pixels.
 

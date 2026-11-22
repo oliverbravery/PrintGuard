@@ -68,6 +68,7 @@ export interface Printer {
   id: string;
   name: string;
   provider: string;
+  model: string;
   config: Record<string, string>;
   secrets_set?: string[];
   device_state?: DeviceState | null;

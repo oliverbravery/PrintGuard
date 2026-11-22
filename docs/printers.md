@@ -38,7 +38,7 @@ channels.
 ## Register a printer
 
 Open **Printers**, then **+ Register a printer**, choose the service, fill in the form and press **Test connection**
-before saving. A printer with a starred field left blank is not saved, and the error names the
+before saving. The optional printer model is only used to label the frames you [send for training](feedback.md). A printer with a starred field left blank is not saved, and the error names the
 field. A key or password the service rejects fails the test with that as the reason, and so does
 an address that answers but not as the service's API does, or one that redirects.
 

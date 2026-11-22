@@ -65,7 +65,7 @@ class Review:
             the reviewer chose not to send it, ``queued`` while
             frames wait on the inbox and ``sent`` when all of them are in.
         submission: What the reviewer chose once they pressed Send: the label
-            of every frame they kept, the printer model they typed, the frames
+            of every frame they kept, the model set on the printer, the frames
             already sent, and the refusal code and retry time when queued.
         frames: The kept frames in capture order, each with its id, time, score,
             kind (alert, near, spaced or added from the recording), stored size,
@@ -489,7 +489,7 @@ class ReviewLibrary:
             review_id: The review being sent.
             failures: Ids of the frames that show a failure. Every other kept frame is good.
             removed: Ids of the frames the reviewer chose not to send.
-            printer: The printer model the reviewer typed, or an empty string.
+            printer: The model set on the monitor's printer, or an empty string.
 
         Raises:
             LookupError: If there is no such review.
@@ -524,6 +524,21 @@ class ReviewLibrary:
         if review.status in ("running", "sent"):
             raise ValueError("only a finished, unsent print can be dismissed")
         review.submission, review.status = None, "skipped"
+
+    async def delete(self, review_id: str) -> None:
+        """Deletes a finished print the reviewer chose to ignore, with its frames and recording.
+
+        Raises:
+            LookupError: If there is no such review.
+            ValueError: If the print is still running or its frames are being sent.
+            OSError: If a file could not be deleted, once the rest were tried.
+        """
+        review = self._reviews.get(review_id)
+        if review is None:
+            raise LookupError(f"no review {review_id}")
+        if review.status in ("running", "queued"):
+            raise ValueError("a print can only be ignored once it has finished and is not being sent")
+        await self._discard(review)
 
     async def stop_asking(self) -> None:
         """Dismisses every print waiting to be reviewed or sent, keeps only alert frames and deletes every recording.

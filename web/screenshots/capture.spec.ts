@@ -23,7 +23,7 @@ const camera = (id: string, name: string, source: Camera["source"], inferring = 
 
 const idle: DeviceState = { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: { actual: 24.3, target: 0 }, bed: { actual: 23.1, target: 0 } };
 const printer = (id: string, name: string, provider: string, status: string, progress: number, job: string, remaining_s: number, nozzle: number, bed: number): Printer => ({
-  id, name, provider, config: {}, online: true,
+  id, name, provider, model: "", config: {}, online: true,
   device_state: { status, progress, job, remaining_s, nozzle: { actual: nozzle - 0.4, target: nozzle }, bed: { actual: bed + 0.2, target: bed } },
 });
 

@@ -22,6 +22,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - The runtime setting has moved from Advanced in Settings to Detection.
 - Creality and Ultimaker printers are no longer marked experimental.
 - Each monitor has Configure and Review tabs. Review lists its finished prints, and you flag the frames where something went wrong instead of saying whether the print failed.
+- A printer's model is set on the printer instead of on each review, and ignoring a print deletes it to free space.
 - The image and the desktop apps are about 45 MB larger, since they carry the new models.
 
 ### Removed

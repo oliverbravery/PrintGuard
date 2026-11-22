@@ -12,7 +12,7 @@ export const monitor = (over = {}) => ({
 });
 
 export const printer = (over = {}) => ({
-  id: "p1", name: "Ender", provider: "octoprint", config: {}, online: true,
+  id: "p1", name: "Ender", provider: "octoprint", model: "", config: {}, online: true,
   device_state: { status: "printing", progress: 40, job: "cube.gcode", remaining_s: 600, nozzle: { actual: 210, target: 210 }, bed: { actual: 60, target: 60 } },
   ...over,
 });

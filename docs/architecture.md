@@ -152,7 +152,7 @@ Commands, UI to engine. The table is the engine's `_handlers` map:
 | Printers | `printer.add`, `printer.update`, `printer.remove`, `printer.action`, `printer.heat`, `printer.test`, `printer.cameras.refresh` |
 | Prints | `print.add`, `print.update`, `print.remove`, `print.start` |
 | Monitors | `monitor.add`, `monitor.update`, `monitor.remove` |
-| History | `history.get`, `snapshot.get`, `review.get`, `review.add`, `review.send`, `review.retry`, `review.dismiss`, `recording.frame`, `recording.delete` |
+| History | `history.get`, `snapshot.get`, `review.get`, `review.add`, `review.send`, `review.retry`, `review.dismiss`, `review.delete`, `recording.frame`, `recording.delete` |
 | Plugins | `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.code`, `plugin.catalogue`, `plugin.page`, `plugin.http`, `plugin.socket`, `plugin.call`, `plugin.answer`, `plugin.publish`, `plugin.secrets`, `plugin.oauth`, `plugin.effect` |
 | System | `settings.update`, `notify.test`, `notify.send`, `token.create`, `token.remove`, `update.check`, `update.releases`, `report.send`, `report.bundle` |
 
@@ -505,13 +505,14 @@ frames show a failure and which were left out, and
 request. The upload runs as a background task and its progress rides in the `state` snapshot.
 It is deliberately absent from the REST API, the MCP server and the plugin permission table,
 so training frames only leave the hub when a person presses Send in the dashboard.
+`review.delete` deletes a finished print that isn't uploading, with its frames and recording.
 
 | `status` | Meaning |
 |---|---|
 | `running` | The print is still being watched |
 | `ready` | It has ended and waits to be reviewed |
 | `dismissed` | Nobody wants to review it, or `settings.feedback` is `off` |
-| `skipped` | The reviewer pressed **Not this print** or cancelled its upload |
+| `skipped` | The reviewer cancelled its upload |
 | `queued` | It was reviewed and frames are uploading, or wait on a refusal's `retry_at` |
 | `sent` | Every chosen frame is in the inbox |
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from .bounds import HEATER_MAX, clamp
+from .feedback import printer_model
 from .integrations import HEATERS, INTEGRATIONS
 
 PRESET_NAME_MAX = 20
@@ -30,7 +31,7 @@ def sanitise_printer(printer_id: str, patch: dict[str, Any], base: dict[str, Any
         base: Existing record when updating, else None.
 
     Returns:
-        A complete, validated printer record: id, name, provider and config,
+        A complete, validated printer record: id, name, provider, model and config,
         which keeps only the fields the provider's schema declares so a field
         another service marks secret cannot linger in it unhidden.
 
@@ -44,6 +45,7 @@ def sanitise_printer(printer_id: str, patch: dict[str, Any], base: dict[str, Any
         raise ValueError(f"unknown printer provider {provider!r}")
     record["provider"] = provider
     record["name"] = (str(record.get("name") or "").strip()) or INTEGRATIONS[provider].label
+    record["model"] = printer_model(record.get("model"))
     record["config"] = INTEGRATIONS[provider].declared(connection_settings(record.get("config") or {}))
     return record
 

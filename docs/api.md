@@ -212,7 +212,7 @@ The bodies the manage routes take. Every field is optional on a `PATCH`.
 | Monitor | `name`, `camera_id`, `printer_id`, `enabled`, `threshold`, `consecutive`, `cooldown_s`, `on_defect`, `notify`. Send `printer_id` as `""` to unlink the printer. [Monitoring](monitoring.md#monitor-settings) has the defaults and ranges |
 | New camera | `name` and a `source`, which is `{"kind": "url", "url"}` for a stream or an entry from `/cameras/discover` as it was listed |
 | Camera update | `name`, `brightness`, `contrast`, `sharpness`, `rotation` of 0, 90, 180 or 270, `detect_fps`, and `crop` as `{"x", "y", "w", "h"}` in shares of the frame, where the whole frame clears it |
-| Printer | `name`, `provider`, `config` |
+| Printer | `name`, `provider`, `model`, `config` |
 | Print file update | `name`, `printer_ids` |
 | Settings | `notifiers` keyed by channel id, [`mqtt`](#home-assistant), `model` of `standard`, `light` or `legacy`, `inference_runtime` of `auto`, `litert` or `onnx`, `preheat` as a list of `{"name", "nozzle", "bed"}`, `fault_grace_s` in seconds (30 to 900, a number outside that is moved to the nearest end), `update_check` as true or false and `feedback` as `ask` or `off` |
 

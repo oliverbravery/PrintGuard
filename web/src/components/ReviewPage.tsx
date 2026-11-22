@@ -5,6 +5,7 @@ import { clock, day, framesLabel, FRAMES_PER_DAY, isDailyLimit, LIMIT_REASON, me
 import { useLazySnapshot } from "../snapshot";
 import { useStore } from "../store";
 import type { Monitor, ReviewFrame, ReviewSummary } from "../types";
+import { Dialog } from "./Dialog";
 import { DetailHead, ListHead, Page, Split } from "./Page";
 import { RecordingScrubber } from "./RecordingScrubber";
 import { ReviewList } from "./ReviewList";
@@ -125,7 +126,7 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
   const { engine, send, isPending, fetchReview, reviewData, reconnecting } = useStore();
   const [flagged, setFlagged] = useState<Set<string>>(new Set());
   const [removed, setRemoved] = useState<Set<string>>(new Set());
-  const [printer, setPrinter] = useState("");
+  const [ignoring, setIgnoring] = useState(false);
   const [enlarged, setEnlarged] = useState<ReviewFrame | null>(null);
   const [column, setColumn] = useState<Column>("picked");
 
@@ -149,7 +150,6 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
       id: review.id,
       failures: kept.filter(showsFailure).map((frame) => frame.id),
       removed: [...removed],
-      printer: printer.trim(),
     });
 
   const picked = (
@@ -210,23 +210,13 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
       ) : (
         <p className="px-4 py-4 text-sm text-text-2">{switchedOff ? "The end-of-print review is switched off in Settings." : "This print has no recording to scrub."}</p>
       )}
-      <div className="space-y-3 border-t border-line-0 px-4 py-4">
-        <label className="block">
-          <span className="label mb-1 block">Printer model</span>
-          <input
-            className="field"
-            placeholder="Optional, such as Prusa MK4"
-            maxLength={80}
-            value={printer}
-            onChange={(event) => setPrinter(event.target.value)}
-          />
-        </label>
+      <div className="border-t border-line-0 px-4 py-4">
         <details className="text-sm text-text-2">
           <summary className="cursor-pointer py-1 hover:text-text-1 pointer-coarse:py-3">What's sent</summary>
           <p className="mt-1.5 leading-relaxed">
             The frames shown here with the labels you gave them, each frame's risk score, time and whether it was an alert, a near miss
             or an ordinary frame, a random ID for the print and for each frame, this monitor's alert threshold, the type of printer
-            connection, the printer model if you type one, the PrintGuard version and a random ID for this hub. No names or camera URLs.
+            connection, the printer model if its printer has one, the PrintGuard version and a random ID for this hub. No names or camera URLs.
             The inbox sees your IP address, as any server does, and keeps only a hash of it until the next day for the daily limit.
             Frames are stored privately in the EU and used only to train PrintGuard's detection model. To have yours deleted, raise an
             issue on GitHub with the hub ID from Settings.
@@ -249,7 +239,7 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
             </p>
             {review.recording && review.recording.expires !== null && (
               <p className="text-text-2">
-                This print's recording is {megabytes(review.recording.bytes)} and is deleted on {day(review.recording.expires)}, or once you send or skip it.{" "}
+                This print's recording is {megabytes(review.recording.bytes)} and is deleted on {day(review.recording.expires)}, or once you send or ignore it.{" "}
                 <Link to="/settings/storage" className="text-accent underline">
                   Manage storage
                 </Link>
@@ -280,14 +270,8 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
           {switchedOff && <p className="border-t border-line-0 px-4 py-3 text-sm text-text-2">The end-of-print review is switched off in Settings, so nothing can be sent.</p>}
           <div className="surface grid grid-cols-2 border-t border-rule pb-[env(safe-area-inset-bottom)]">
             {review.status === "ready" ? (
-              <button
-                className="cell-action"
-                onClick={() => {
-                  send({ cmd: "review.dismiss", id: review.id });
-                  navigate(list);
-                }}
-              >
-                Not this print
+              <button className="cell-action" onClick={() => setIgnoring(true)}>
+                Ignore
               </button>
             ) : (
               <span />
@@ -297,6 +281,30 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
             </button>
           </div>
         </>
+      )}
+      {ignoring && (
+        <Dialog title="Ignore this print?" onClose={() => setIgnoring(false)}>
+          <div className="space-y-4">
+            <p className="text-sm text-text-1">
+              Ignoring deletes the record of this print, its {framesLabel(review.frames)} and its recording, freeing{" "}
+              {megabytes(review.bytes + (review.recording?.bytes ?? 0))}. You can't undo it.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button className="btn" onClick={() => setIgnoring(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-danger"
+                onClick={() => {
+                  send({ cmd: "review.delete", id: review.id });
+                  navigate(list);
+                }}
+              >
+                Ignore
+              </button>
+            </div>
+          </div>
+        </Dialog>
       )}
       {enlarged && (
         <SnapshotLightbox snapshotId={enlarged.id} onClose={() => setEnlarged(null)} caption={`${clock(enlarged.ts)} · ${(enlarged.score * 100).toFixed(0)}%`} />
