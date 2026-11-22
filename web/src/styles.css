@@ -1405,8 +1405,11 @@ video {
     min-height: 2.75rem;
   }
 
-  .btn-inline {
+  .btn-inline,
+  .page-back {
+    min-width: 2.75rem;
     min-height: 2.75rem;
+    justify-content: center;
   }
 
   .field {
