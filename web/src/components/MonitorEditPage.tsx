@@ -1,4 +1,4 @@
-import { Link, Navigate, useNavigate, useParams } from "react-router";
+import { Link, Navigate, useParams } from "react-router";
 import { useStore } from "../store";
 import { ConfirmButton } from "./ConfirmButton";
 import { Feed, useCovered } from "./Feed";
@@ -19,7 +19,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export function MonitorEditPage() {
   const { monitorId } = useParams();
-  const navigate = useNavigate();
   const { engine, send, isPending, updateMonitor } = useStore();
   const monitor = engine?.monitors.find((m) => m.id === monitorId);
   const settingsPanels = usePluginSurface("settings", monitorId ?? "");
@@ -87,13 +86,7 @@ export function MonitorEditPage() {
         ))}
         <Section title="Delete">
           <p className="text-sm text-text-1">Deleting a monitor keeps its camera and printer.</p>
-          <ConfirmButton
-            disabled={removing}
-            onConfirm={() => {
-              send({ cmd: "monitor.remove", id: monitor.id });
-              navigate("/", { replace: true });
-            }}
-          >
+          <ConfirmButton disabled={removing} onConfirm={() => send({ cmd: "monitor.remove", id: monitor.id })}>
             {removing ? "Deleting…" : "Delete monitor"}
           </ConfirmButton>
         </Section>

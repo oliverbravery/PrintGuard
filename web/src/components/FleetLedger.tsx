@@ -1,6 +1,6 @@
 import { Link } from "react-router";
 import { section, toggleHidden, type Tile } from "../layout";
-import { awaitingReview } from "../review";
+import { awaitingReview, framesLabel } from "../review";
 import { useStore } from "../store";
 import type { Monitor } from "../types";
 import { ConfirmButton } from "./ConfirmButton";
@@ -80,7 +80,7 @@ function Row({ monitor, selected, handle, visible, group }: { monitor: Monitor; 
             </span>
             <div className="relative z-[1] flex flex-wrap justify-end gap-1">
               {awaiting && (
-                <Link to={`/monitors/${monitor.id}/review/${awaiting.id}`} className="btn-inline btn-inline-accent" aria-label={`Review ${awaiting.frames} frames from ${monitor.name}`}>
+                <Link to={`/monitors/${monitor.id}/review/${awaiting.id}`} className="btn-inline btn-inline-accent" aria-label={`Review ${framesLabel(awaiting.frames)} from ${monitor.name}`}>
                   Review {awaiting.frames}
                 </Link>
               )}
