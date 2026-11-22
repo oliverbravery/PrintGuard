@@ -45,7 +45,7 @@ REDACTED = "[redacted]"
 MESSAGE_MAX = 4096
 TIMEOUT_S = 20.0
 SOURCE_KEYS = ("kind", "path", "device_id", "label")
-DIAGNOSTIC_SETTINGS = ("update_check", "inference_runtime", "fault_grace_s", "feedback")
+DIAGNOSTIC_SETTINGS = ("update_check", "model", "inference_runtime", "fault_grace_s", "feedback")
 MESSAGE_STANDALONE_BELOW = 8
 PATH_TOKEN = re.compile(r"[A-Za-z0-9]{16,}|[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
 """A path segment that reads as a key rather than a name: one long and

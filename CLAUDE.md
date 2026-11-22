@@ -159,7 +159,7 @@ change made wrong or redundant. Never leave a doc describing something that no l
 | A monitor or camera setting, risk history | `docs/monitoring.md` |
 | The frames kept from a print, what's sent for training, the Worker's limits | `docs/feedback.md` |
 | A notifier, or when a notice is sent | `docs/notifications.md` |
-| Model runtimes, execution providers, image variants, GPU setup | `docs/hardware.md` |
+| Detection models, model runtimes, execution providers, image variants, GPU setup | `docs/hardware.md` |
 | Exposure, proxies, origin checks, ports, hardening, an environment variable, the data directory | `docs/deployment.md` |
 | A REST endpoint, MCP tool, scope, response shape or Home Assistant entity | `docs/api.md` |
 | Installing plugins, a permission, what a plugin can reach | `docs/plugins.md` |

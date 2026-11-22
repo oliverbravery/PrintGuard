@@ -1,3 +1,4 @@
 @import "../src/styles.css";
 @source "../src/components/Wordmark.tsx";
 @source "../src/components/NewTab.tsx";
+@source "../src/components/ModelChart.tsx";

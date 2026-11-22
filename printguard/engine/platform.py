@@ -225,7 +225,7 @@ class Platform(Protocol):
     from every message and report."""
 
     async def configure(self, settings: dict[str, Any]) -> None:
-        """Applies platform-owned settings before inference starts."""
+        """Loads the detection model and runtime the settings name before inference starts."""
         ...
 
     def take_notices(self) -> list[Notice]:

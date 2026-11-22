@@ -6,11 +6,13 @@
 
 </div>
 
-Which image to pull, how PrintGuard picks a model runtime, and how to give it a GPU.
+Which image to pull, which detection model to run, how PrintGuard picks a model runtime, and how to
+give it a GPU.
 
 - [How much hardware you need](#how-much-hardware-you-need)
 - [Image variants](#image-variants)
 - [Choosing a variant](#choosing-a-variant)
+- [Detection models](#detection-models)
 - [Model runtimes](#model-runtimes)
 - [Execution providers by platform](#execution-providers-by-platform)
 - [Intel GPU](#intel-gpu)
@@ -19,8 +21,8 @@ Which image to pull, how PrintGuard picks a model runtime, and how to give it a 
 
 ## How much hardware you need
 
-The detector is a compact encoder, not a large model. A Raspberry Pi 4 handles a camera or
-two, and any modern x86 mini PC handles several. Inference is only one part of the load.
+The largest detection model is about 13 MB, not a large model. A Raspberry Pi 4 runs every model on
+its CPU, and any modern x86 mini PC handles several cameras. Inference is only one part of the load.
 Decoding video costs more than classifying it, so frame rate and resolution matter more than
 raw model throughput.
 
@@ -69,22 +71,47 @@ flowchart TD
 If you run the desktop app on macOS or Windows you don't choose a variant, since the app
 carries the runtimes for your platform.
 
+## Detection models
+
+PrintGuard ships three detection models and runs the one you pick, either when you first open the
+dashboard or later in Settings, under **Detection**, where a chart compares them with Obico's.
+
+| Model | What it is | Size | Latency | Failed prints caught | Good prints alarmed |
+|---|---|---|---|---|---|
+| **Standard** | ConvNeXt-Atto, distilled. The default | 12.9 MB | 28.7 ms | 10 of 20 | 1 of 70 |
+| **Light** | MobileNetV4-Conv-Small, distilled | 9.5 MB | 11.2 ms | 5 of 20 | 1 of 70 |
+| **Legacy** | The ShuffleNetV2 prototype encoder PrintGuard used before 3.0.0 | 4.8 MB | 5.3 ms | 1 of 20 | 1 of 70 |
+| Obico, Dec 2025 | Obico's YOLOv2 Spaghetti Detective, for comparison | 193 MB | 360 ms | 3 of 20 | 0 of 70 |
+
+The scores come from 1,534 frames from 30 PrintGuard hubs that no model was trained on, alerting
+at the default threshold of 0.75 held for 3 frames. Obico's scores aren't probabilities, so its
+threshold was matched on separate validation frames. Latency is one CPU thread of an M1 Max on
+ONNX Runtime 1.32, so expect it to be higher on a Raspberry Pi and lower with an accelerator.
+
+![The Detection tab in Settings, with the three models charted against Obico's](assets/settings-detection.png)
+
+Every model gives its own probability that a frame shows a failing print, with 0.5 as its
+decision boundary, so a monitor's threshold works the same way whichever one runs. Switching waits for the frames already being
+scored, then loads the new model and benchmarks it again. Pick **Light** when the **capacity**
+readout with Standard sits below what your cameras need.
+
 ## Model runtimes
 
-PrintGuard carries the model twice, once for each runtime, and picks between them:
+PrintGuard carries each model twice, once for each runtime, and picks between them:
 
 | Runtime | What it is | Path used |
 |---|---|---|
 | [LiteRT](https://github.com/google-ai-edge/LiteRT) | Google's on-device runtime, formerly TensorFlow Lite | Optimised CPU |
 | [ONNX Runtime](https://onnxruntime.ai) | Cross-platform runtime with pluggable execution providers | The best execution provider the host offers |
 
-**Automatic** is the default. On start, and again whenever you change the setting, PrintGuard
-benchmarks both runtimes for concurrent throughput on the machine it is actually running on and
-keeps the faster one. The log shows what won and by how much, for example:
+**Automatic** is the default. On start, and again whenever you change the model or the runtime,
+PrintGuard benchmarks the model on both runtimes for concurrent throughput on the machine it is
+actually running on and keeps the faster one. The log shows which model, what won and by how much,
+for example on an M1 Max:
 
 ```
-inference benchmark: Intel CPU 412.0 fps across 4 workers, LiteRT CPU 298.5 fps across 8 workers
-inference ready: Intel CPU via onnx (4 workers, 412 fps)
+inference benchmark of the Standard model: Apple Core ML 173.2 fps across 1 workers, LiteRT CPU 195.4 fps across 8 workers
+inference ready: the Standard model on LiteRT CPU via litert (8 workers, 195 fps)
 ```
 
 The same benchmark also decides how many frames PrintGuard infers at once. It doubles the workers
@@ -193,7 +220,7 @@ PrintGuard logs which provider is unavailable and keeps running on the CPU.
 
 The **compute** readout names the hardware the model is running on, as the provider's vendor and
 the kind of device. It sits in the header on a window 1280 pixels wide or more and in the **More**
-sheet on a phone. From 640 to 1279 pixels it is only in the Advanced tab in Settings, where it
+sheet on a phone. From 640 to 1279 pixels it is only in the Detection tab in Settings, where it
 reads **Active compute**.
 
 | Readout | Means |
@@ -205,7 +232,7 @@ reads **Active compute**.
 | `onnx cpu` | ONNX Runtime's own CPU provider, where no other provider offered a device or none of the offered ones could run the model |
 
 A Windows ML or TensorRT device is named the same way as OpenVINO's, by its provider's vendor.
-The Advanced tab in Settings offers:
+Under **Runtime**, the Detection tab in Settings offers:
 
 | Setting | Effect |
 |---|---|

@@ -456,7 +456,7 @@ manifest's `events` names it. `tick` is the exception. It is the worker's own ti
 | `call` | Another plugin asking on a channel you offer | `from`, `channel`, `body`, `call_id` | `link:provide` |
 | `answer` | The answer to one of your own `ctx.call`s | `tag`, `from`, `channel`, `body` | `link:consume` |
 | `message` | Something a plugin you named published | `from`, `channel`, `body` | `link:consume` |
-| `result` | Every inference on a watched monitor, capped at 5 per second per monitor | `monitor_id`, `camera_id`, `score`, `prediction`, `margin`, `ms`, `ts` | `state:read` |
+| `result` | Every inference on a watched monitor, capped at 5 per second per monitor | `monitor_id`, `camera_id`, `score`, `prediction`, `ms`, `ts` | `state:read` |
 | `alert` | A defect held long enough to act on | `monitor_id`, `score`, `action`, `ts` | `state:read` |
 | `warning` | A watchdog condition, and its recovery | `monitor_id`, `message`, `recovered` | `state:read` |
 | `device` | A printer's status changed | `printer_id`, `status`, `progress`, `job`, `remaining_s`, `nozzle`, `bed` | `state:read` |

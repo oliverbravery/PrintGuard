@@ -18,6 +18,9 @@
   --color-bad: #ff3f34;
   --color-on-accent: #0b0c0a;
   --color-on-bad: #0b0c0a;
+  --color-series-orange: #d95926;
+  --color-series-blue: #3987e5;
+  --color-series-aqua: #199e70;
   --font-display: "Saira Condensed", "Arial Narrow", sans-serif;
   --font-body: "Saira", system-ui, sans-serif;
   --font-mono: "Chivo Mono", ui-monospace, monospace;
@@ -42,6 +45,9 @@
   --color-bad: #bd271f;
   --color-on-accent: #f3f4ed;
   --color-on-bad: #f3f4ed;
+  --color-series-orange: #eb6834;
+  --color-series-blue: #2a78d6;
+  --color-series-aqua: #1baf7a;
 }
 
 html {

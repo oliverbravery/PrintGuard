@@ -130,7 +130,7 @@ the same:
 | A printer action or heater target | 15 s, 25 s on a Creality printer and 105 s on an Elegoo printer, since a Centauri Carbon 2 answers a resume only once it has reheated |
 | Adding a camera | 40 s, for a first frame |
 | `/cameras/refresh-printers` | 115 s, since each printer's cameras open one at a time |
-| Switching `inference_runtime` in `PATCH /settings` | 85 s, while the frames in flight finish and the model loads |
+| Switching `model` or `inference_runtime` in `PATCH /settings` | 85 s, while the frames in flight finish and the model loads |
 | Uploading a print file | 120 s once the body has arrived |
 | `/prints/{id}/start` | 600 s, while the file is sent to the printer |
 | Any other change, and the risk history | 15 s |
@@ -200,7 +200,7 @@ unaffected.
 | `POST` | `/prints?filename=` | Upload a sliced file of up to 512 MB as the raw request body. `name`, a comma-separated `printer_ids` and first layer `nozzle` and `bed` temperatures are optional. A file with nothing in it, or a 3mf holding a member compressed with anything but stored or deflate, is refused |
 | `PATCH` | `/prints/{id}` | Rename a print file or change the printers it is tagged for |
 | `DELETE` | `/prints/{id}` | Remove a print file |
-| `PATCH` | `/settings` | Update `notifiers`, `mqtt`, `inference_runtime`, `preheat`, `fault_grace_s`, `update_check` or `feedback`. Each one you send replaces the stored one, [keeping the secrets a read left out](#the-resource-model). A value of the wrong type is a `422`. The theme, layout and plugin catalogue are the dashboard's own and can't be changed here |
+| `PATCH` | `/settings` | Update `notifiers`, `mqtt`, `model`, `inference_runtime`, `preheat`, `fault_grace_s`, `update_check` or `feedback`. Each one you send replaces the stored one, [keeping the secrets a read left out](#the-resource-model). A value of the wrong type is a `422`. The theme, layout and plugin catalogue are the dashboard's own and can't be changed here |
 | `POST` | `/notifiers/test` | `{"provider", "config"}`, sends a test alert. A secret left out or blank is filled in from the saved channel, [for the address it was saved with](#the-resource-model) |
 
 </details>
@@ -214,7 +214,7 @@ The bodies the manage routes take. Every field is optional on a `PATCH`.
 | Camera update | `name`, `brightness`, `contrast`, `sharpness`, `rotation` of 0, 90, 180 or 270, `detect_fps`, and `crop` as `{"x", "y", "w", "h"}` in shares of the frame, where the whole frame clears it |
 | Printer | `name`, `provider`, `config` |
 | Print file update | `name`, `printer_ids` |
-| Settings | `notifiers` keyed by channel id, [`mqtt`](#home-assistant), `inference_runtime` of `auto`, `litert` or `onnx`, `preheat` as a list of `{"name", "nozzle", "bed"}`, `fault_grace_s` in seconds (30 to 900, a number outside that is moved to the nearest end), `update_check` as true or false and `feedback` as `ask` or `off` |
+| Settings | `notifiers` keyed by channel id, [`mqtt`](#home-assistant), `model` of `standard`, `light` or `legacy`, `inference_runtime` of `auto`, `litert` or `onnx`, `preheat` as a list of `{"name", "nozzle", "bed"}`, `fault_grace_s` in seconds (30 to 900, a number outside that is moved to the nearest end), `update_check` as true or false and `feedback` as `ask` or `off` |
 
 A monitor's `threshold`, `consecutive` and `cooldown_s` and a camera's `brightness`, `contrast`,
 `sharpness`, `detect_fps` and `crop` are moved to the nearest end of their range when a number falls
@@ -241,7 +241,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 # Classify a supplied frame, no registered camera needed
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: image/jpeg" \
   --data-binary @frame.jpg https://host/api/v1/classify
-# gives {"prediction":"success","distances":{...},"margin":1.16,"defect_score":0.08}
+# gives {"prediction":"success","defect_score":0.08}
 
 # Upload a sliced file tagged for one printer, then start it there
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/octet-stream" \
@@ -440,18 +440,17 @@ The camera object, from `GET /cameras` and `GET /cameras/{id}`:
   "standby": false,                                         // no monitor is watching it and nobody is viewing it
   "reason": null,                                           // why it could not be opened, until it opens
   "last_result": {                                          // latest classification (per FRAME)
-    "prediction": "success",                                //   "success" | "failure" | "unknown"
-    "distances": { "success": 0.48, "failure": 1.64 },      //   distance to each class prototype
-    "margin": 1.16                                          //   runner-up minus best (confidence)
+    "prediction": "success",                                //   "success" | "failure", at 0.5
+    "defect_score": 0.08                                    //   the model's probability of a failing print
   },
   "brightness": 1.0, "contrast": 1.0, "sharpness": 0.0, "crop": null, "rotation": 0
 }
 ```
 
 `last_result` is the newest raw classification, or `null` before the camera has been
-inferred. `prediction` is the nearest class prototype for that frame with no threshold applied,
-which makes it the quickest per-camera "failing?" read. It is `"unknown"` when the frame cannot
-be classified, for example when the embedding is not finite. It is kept when the camera stops
+inferred. `prediction` is the verdict at the model's own decision boundary of 0.5, with no
+monitor threshold applied, which makes it the quickest per-camera "failing?" read. A frame the
+model could not score leaves the previous result in place. It is kept when the camera stops
 being watched, so it is only current while `in_use` is `true`.
 
 The monitor object, from `GET /monitors` and `GET /monitors/{id}`:
@@ -481,12 +480,11 @@ monitor has no `alert` field until its first alert.
 
 ### Prediction against defect score
 
-The 0-1 defect score is the model's probability that a frame shows a failing print, the
-softmax over negative squared prototype distances the network was trained with, so `0.5` is
-the decision boundary. It appears in:
+The 0-1 defect score is the [detection model's](hardware.md#detection-models) probability that a
+frame shows a failing print, so `0.5` is the decision boundary. It appears in:
 
 - `result` events on the WebSocket:
-  `{ "event": "result", "monitor_id", "camera_id", "score", "prediction", "margin", "ms", "ts" }`,
+  `{ "event": "result", "monitor_id", "camera_id", "score", "prediction", "ms", "ts" }`,
   where `prediction` has that monitor's `threshold` applied, sampled at up to 5 Hz per
   monitor,
 - the monitor object's latest `result`, also carried by every full `state` snapshot,
@@ -494,5 +492,5 @@ the decision boundary. It appears in:
 - the MQTT **Defect score** sensor, published as 0-100.
 
 To poll one camera's current verdict, read `GET /cameras/{id}` and take
-`last_result.prediction`. For the score or a threshold-applied verdict, read the monitor or
-the `result` events.
+`last_result.prediction`. For a verdict at a monitor's threshold, read the monitor or the
+`result` events.

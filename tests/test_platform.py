@@ -28,7 +28,7 @@ import numpy as np
 import onnxruntime as ort
 import pytest
 import websockets
-from fakes import redirected_socket
+from fakes import model_assets, redirected_socket
 from test_state_file import needs_an_unprivileged_user
 
 from printguard.engine import reports, vision
@@ -57,16 +57,18 @@ V4L2_CAPABILITY_FILLED = "16s32s32sIII12x"
 
 
 @pytest.mark.parametrize("runtime", ["auto", "litert", "onnx"])
-async def test_model_inference(tmp_path: Path, runtime: str) -> None:
-    """Every selectable production model runtime loads and classifies."""
+@pytest.mark.parametrize("model", ["legacy", "light", "standard"])
+async def test_model_inference(tmp_path: Path, model: str, runtime: str) -> None:
+    """Every shipped model loads and scores on every selectable runtime."""
     platform = ServerPlatform(Path("models"), tmp_path, "http://localhost:9997", "rtsp://localhost:8554")
-    await platform.configure({"inference_runtime": runtime})
+    await platform.configure({"model": model, "inference_runtime": runtime})
     image = np.arange(240 * 320 * 3, dtype=np.uint8).reshape(240, 320, 3)
 
     results = await asyncio.gather(platform.infer(image), platform.infer(image))
     await platform.close()
 
-    assert all(result["prediction"] == "success" for result in results)
+    assert all(0.0 <= result["defect_score"] <= 1.0 for result in results)
+    assert results[0] == results[1]
     assert platform.inference_device
     assert platform.workers > 0
 
@@ -74,7 +76,7 @@ async def test_model_inference(tmp_path: Path, runtime: str) -> None:
 async def test_a_frame_in_flight_finishes_on_the_runtime_it_started_on_when_the_runtime_is_switched(tmp_path: Path) -> None:
     """A classify call is outside the scheduler's drain, and closing the ONNX session under it ended in an AttributeError."""
     platform = ServerPlatform(Path("models"), tmp_path, "http://localhost:9997", "rtsp://localhost:8554")
-    await platform.configure({"inference_runtime": "onnx"})
+    await platform.configure({"model": "light", "inference_runtime": "onnx"})
     selected = platform._inference._selected
     run = selected.run
     entered, release = threading.Event(), threading.Event()
@@ -88,7 +90,7 @@ async def test_a_frame_in_flight_finishes_on_the_runtime_it_started_on_when_the_
     image = np.arange(240 * 320 * 3, dtype=np.uint8).reshape(240, 320, 3)
     classifying = asyncio.ensure_future(platform.infer(image))
     await asyncio.to_thread(entered.wait, 10)
-    switching = asyncio.ensure_future(platform.configure({"inference_runtime": "litert"}))
+    switching = asyncio.ensure_future(platform.configure({"model": "standard", "inference_runtime": "litert"}))
     await asyncio.sleep(0.5)
     assert not switching.done(), "the runtime was closed with a frame still on it"
     release.set()
@@ -96,7 +98,7 @@ async def test_a_frame_in_flight_finishes_on_the_runtime_it_started_on_when_the_
     await switching
     await platform.close()
 
-    assert result["prediction"] == "success" and platform.inference_device == "LiteRT CPU"
+    assert 0.0 <= result["defect_score"] <= 1.0 and platform.inference_device == "LiteRT CPU"
 
 
 async def test_a_login_in_the_video_servers_addresses_is_one_the_engine_scrubs(tmp_path: Path) -> None:
@@ -131,33 +133,21 @@ async def test_the_bundled_servers_user_name_is_not_scrubbed_from_a_log_line_nam
     assert scrubbed == f"INFO printguard.server.platform: rtsp://printguard:{reports.REDACTED}@mediamtx:8554/cam"
 
 
-async def test_runtimes_agree_on_classification() -> None:
-    """Both runtimes carry the same model, so they must classify a frame the same way.
+@pytest.mark.parametrize("model", ["legacy", "light", "standard"])
+async def test_runtimes_agree_on_the_score(model: str) -> None:
+    """Both runtimes carry the same model, so they must score a frame alike.
 
-    Execution providers pick kernels for the hardware they land on, so the embeddings
-    are held to the only agreement the detector depends on rather than to an
-    elementwise tolerance. Every prototype distance moves by at most the distance
-    between the two embeddings, so drift under half the margin cannot reach the
-    nearest prototype of the other.
+    Execution providers pick kernels for the hardware they land on, so the scores
+    are held to a tolerance far below any threshold a monitor can be set to.
     """
-    model_dir = Path("models")
-    assets = vision.assets_from_dicts(
-        json.loads((model_dir / "metadata.json").read_text()),
-        json.loads((model_dir / "prototypes.json").read_text())["prototypes"],
-    )
-    tensor = np.random.default_rng(0).random((1, 3, 224, 224), dtype=np.float32)
-    embeddings = []
+    image = np.random.default_rng(0).integers(0, 256, (480, 640, 3), dtype=np.uint8)
+    scores = []
     for runtime in ("litert", "onnx"):
-        inference = Inference(model_dir, runtime)
-        embeddings.append(await inference.run(tensor))
+        inference = Inference(Path("models") / model, runtime)
+        scores.append((await inference.infer(image))["defect_score"])
         inference.close()
 
-    classifications = [vision.classify(embedding, assets) for embedding in embeddings]
-    drift = float(np.linalg.norm(embeddings[0] - embeddings[1]))
-
-    assert embeddings[0].shape == embeddings[1].shape == (1024,)
-    assert classifications[0]["prediction"] == classifications[1]["prediction"]
-    assert drift < min(result["margin"] for result in classifications) / 2
+    assert scores[0] == pytest.approx(scores[1], abs=1e-4)
 
 
 def _ep_device(
@@ -314,19 +304,19 @@ async def test_an_accelerator_that_cannot_run_the_model_loses_to_the_cpu(
             return real_session(path, sess_options=sess_options, providers=providers, **kwargs)
         if fault == "build":
             raise RuntimeError("the GPU could not compile the model")
-        return SimpleNamespace(get_inputs=lambda: [SimpleNamespace(name="input")], run=refuse)
+        return SimpleNamespace(get_inputs=lambda: [SimpleNamespace(name="input", shape=[1, 3, 224, 224])], run=refuse)
 
     monkeypatch.setattr(ort, "get_ep_devices", lambda: [_ep_device("OpenVINOExecutionProvider", "Intel", "GPU", {})])
     monkeypatch.setattr(ort.SessionOptions, "add_provider_for_devices", lambda *_: None)
     monkeypatch.setattr(ort, "InferenceSession", session)
 
-    inference = Inference(Path("models"), runtime)
-    embedding = await inference.run(np.zeros((1, 3, 224, 224), dtype=np.float32))
+    inference = Inference(Path("models/legacy"), runtime)
+    result = await inference.infer(np.zeros((240, 320, 3), dtype=np.uint8))
     inference.close()
 
     reason = "could not compile the model" if fault == "build" else "ran out of memory"
     assert inference.device in ("ONNX CPU", "LiteRT CPU" if runtime == "auto" else "ONNX CPU")
-    assert embedding.shape == (1024,)
+    assert 0.0 <= result["defect_score"] <= 1.0
     assert inference.skipped == [f"Intel GPU cannot run the model, so detection is not using it: the GPU {reason}"]
 
 
@@ -387,8 +377,8 @@ def test_measured_concurrency_tracks_scaling() -> None:
             time.sleep(0.002)
         return tensor
 
-    assert _measure_concurrency(scales)[0] > 1
-    assert _measure_concurrency(serialises)[0] == 1
+    assert _measure_concurrency(scales, (1, 3, 8, 8))[0] > 1
+    assert _measure_concurrency(serialises, (1, 3, 8, 8))[0] == 1
 
 
 def test_a_provider_that_returns_non_finite_output_fails_the_benchmark() -> None:
@@ -396,7 +386,7 @@ def test_a_provider_that_returns_non_finite_output_fails_the_benchmark() -> None
         return np.full(8, np.nan, dtype=np.float32)
 
     with pytest.raises(ValueError, match="non-finite"):
-        _measure_concurrency(broken)
+        _measure_concurrency(broken, (1, 3, 8, 8))
 
 
 @pytest.mark.parametrize(
@@ -965,7 +955,7 @@ def test_a_sliver_of_a_frame_is_not_scaled_up_whole_before_it_is_cropped(monkeyp
         return resize(image, size, *args, **kwargs)
 
     monkeypatch.setattr(Image.Image, "resize", measured)
-    assets = vision.Assets(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), prototypes={})
+    assets = model_assets()
 
     assert vision.preprocess(np.zeros((2, 4000, 3), dtype=np.uint8), assets).shape == (1, 3, 224, 224)
     assert vision.preprocess(np.zeros((720, 1280, 3), dtype=np.uint8), assets).shape == (1, 3, 224, 224)

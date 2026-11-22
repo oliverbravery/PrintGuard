@@ -21,6 +21,8 @@ from paho.mqtt.reasoncodes import ReasonCode
 from websockets.asyncio.server import serve
 
 from printguard.engine import vision
+from printguard.server.inference import load_assets
+from fakes import model_assets
 from printguard.engine.cameras import webrtc_endpoint, whep_endpoint
 from printguard.engine.integrations import INTEGRATIONS, DeviceAction, DeviceState, DeviceStatus, IntegrationAdapter
 from printguard.engine.integrations import bambu, creality, klipper, octoprint
@@ -2214,34 +2216,29 @@ def test_monitor_watching_follows_the_last_reported_status() -> None:
     assert not monitor_watching(linked, printers), "disabled monitors are never watched"
 
 
-def test_defect_score_is_the_prototype_softmax() -> None:
-    failing = vision.defect_score({"distances": {"success": 1.5, "failure": 0.5}})
-    assert failing == pytest.approx(1 / (1 + np.exp(-2.0)))
-    assert vision.defect_score({"distances": {"success": 0.5, "failure": 1.5}}) == pytest.approx(1 - failing)
-    assert vision.defect_score({"distances": {"success": 1.0, "failure": 1.0}}) == 0.5
-    assert vision.defect_score({"distances": {}}) == 0.5, "missing distances must sit on the boundary"
+def test_an_embedding_is_scored_with_the_prototype_softmax() -> None:
+    assets = model_assets({"success": np.zeros(1, np.float32), "failure": np.full(1, 2.0, np.float32)})
+    failing = vision.classify(np.array([1.5], np.float32), assets)
+    assert failing == {"prediction": "failure", "defect_score": pytest.approx(1 / (1 + np.exp(-2.0)))}
+    assert vision.classify(np.array([0.5], np.float32), assets)["defect_score"] == pytest.approx(1 - failing["defect_score"])
+    assert vision.classify(np.array([1.0], np.float32), assets)["defect_score"] == 0.5
+
+
+def test_a_model_that_gives_its_own_probability_is_read_as_it_is() -> None:
+    assert vision.classify(np.float32(0.8), model_assets()) == {"prediction": "failure", "defect_score": pytest.approx(0.8)}
+    assert vision.classify(np.float32(0.2), model_assets())["prediction"] == "success"
 
 
 def test_default_threshold_is_reachable_with_the_shipped_prototypes() -> None:
-    assets = vision.assets_from_dicts(
-        jsonlib.loads(Path("models/metadata.json").read_text()),
-        jsonlib.loads(Path("models/prototypes.json").read_text())["prototypes"],
-    )
-    on_failure = vision.defect_score(vision.classify(assets.prototypes["failure"], assets))
+    assets = load_assets(Path("models/legacy"))
+    on_failure = vision.classify(assets.prototypes["failure"], assets)["defect_score"]
     assert on_failure > sanitise_monitor("m1", {})["threshold"], "a frame on the failure prototype must be able to alert"
 
 
-def test_classify_rejects_non_finite_embeddings() -> None:
-    assets = vision.Assets(
-        mean=(0.5, 0.5, 0.5),
-        std=(0.25, 0.25, 0.25),
-        prototypes={"success": np.zeros(4, np.float32), "failure": np.ones(4, np.float32)},
-    )
+@pytest.mark.parametrize("prototypes", [{"success": np.zeros(4, np.float32), "failure": np.ones(4, np.float32)}, None])
+def test_classify_rejects_non_finite_output(prototypes: dict[str, np.ndarray] | None) -> None:
     with pytest.raises(ValueError, match="non-finite"):
-        vision.classify(np.array([np.nan, 0, 0, 0], dtype=np.float32), assets)
-    good = vision.classify(np.zeros(4, np.float32), assets)
-    assert good["prediction"] == "success"
-    assert good["margin"] == 2.0
+        vision.classify(np.array([np.nan, 0, 0, 0], dtype=np.float32) if prototypes else np.float32(np.inf), model_assets(prototypes))
 
 
 def test_print_formats_and_heater_control_travel_with_adapter_meta() -> None:

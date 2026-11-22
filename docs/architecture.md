@@ -94,9 +94,9 @@ for the hub:
 | `plugin_runtime` | A `PluginRuntime`, or `None` with `PRINTGUARD_PLUGINS=off` |
 | `secrets` | Credentials the deployment holds outside the engine's state, such as the login in `MEDIAMTX_API`, which the engine scrubs from every message and report |
 | `files` | A `FileStore` |
-| `configure(settings)` | Selects LiteRT, ONNX Runtime or the faster local benchmark, and measures its worker count. A runtime it replaces is closed once every frame already on it has come back, including one from `classify` |
+| `configure(settings)` | Loads the detection model `settings.model` names on LiteRT, ONNX Runtime or whichever benchmarks faster, and measures its worker count. A model it replaces is closed once every frame already on it has come back, including one from `classify` |
 | `take_notices()` | What the hub has worked around since the last call, as `Notice` records: an accelerator passed over for the CPU, and a camera whose live view cannot publish or has come back. The hub meets these on its own threads, so the engine collects them on its ticker and raises each as a `warning`, and reads the ones from loading the model once at start into `startup_warnings` |
-| `infer(rgb)` | `vision.preprocess`, the selected LiteRT or ONNX Runtime model, then `vision.classify` |
+| `infer(rgb)` | `vision.preprocess`, the loaded model on the selected runtime, then `vision.classify` |
 | `discover_cameras()` | V4L2, AVFoundation or DirectShow capture devices, plus the MediaMTX path list |
 | `open_camera(id, source)` | A `FrameSource`, once it has given a frame, which it gets `OPEN_WAIT_S` for, 25 s. MediaMTX pulls every URL that is not plain HTTP, so RTSP, RTMP and WHEP, and PyAV reads HTTP MJPEG and capture devices directly. A `path` source reads a stream already on MediaMTX, and a `bambu` source the A1 and P1 chamber camera. A stream FFmpeg can demux but has no decoder for, such as an SVG, fails with `no decoder for this stream`, and an address MediaMTX refuses with `PrintGuard can't use that address`. An error names the address as the user wrote it, with credentials removed |
 | `release_camera(id, source)` | Closes the source and removes its MediaMTX pull path. A reader that is stuck inside a device read cannot be stopped, so `open_camera` refuses to start another for that camera while it lasts |
@@ -163,7 +163,7 @@ or with its own event for the five that only read, and one that fails ends with 
 an unknown command included. `camera.remove`, `printer.update`, `printer.remove`, `printer.cameras.refresh`,
 `monitor.remove`, `print.remove`, `settings.update`, `plugin.install`, `plugin.remove`, `plugin.update` and `plugin.secrets` are `FINISHING_COMMANDS`. Each runs as a task `Engine._background`
 holds, so it finishes when the socket that sent it closes or its request times out. An id nothing matches fails a remove as it does an update, and a monitor or camera patch is refused for a setting it doesn't have or
-a value its setting doesn't take, where a number out of range is clamped. `camera.add` refuses a source whose device, path or address isn't text. `settings.update` takes `notifiers`, `update_check`, `mqtt`, `theme`, `themes`, `glass`, `layout`, `inference_runtime`, `catalogue_url`, `fault_grace_s`, `preheat`, `feedback` and `recording_days`, which is 0, 3, 7 or 14, and refuses any other key. A printer's config, a notifier's config and `mqtt` are refused for a value that isn't of the type its field declares, and `mqtt` for a field it doesn't have. A heater target is the
+a value its setting doesn't take, where a number out of range is clamped. `camera.add` refuses a source whose device, path or address isn't text. `settings.update` takes `notifiers`, `update_check`, `mqtt`, `theme`, `themes`, `glass`, `layout`, `model`, `inference_runtime`, `catalogue_url`, `fault_grace_s`, `preheat`, `feedback` and `recording_days`, which is 0, 3, 7 or 14, and refuses any other key. A printer's config, a notifier's config and `mqtt` are refused for a value that isn't of the type its field declares, and `mqtt` for a field it doesn't have. A heater target is the
 exception, and `printer.heat` refuses one outside 0 to 350 for the nozzle or 0 to 150 for the bed. An error that carries
 no text of its own, as a timeout does, is reported by its type.
 
@@ -178,7 +178,7 @@ Events, engine to UI:
 | Event | Carries |
 |---|---|
 | `state` | Full snapshot, on connect, after every command that can change it, after an update check or a plugin's sign-in, and on a 1 s ticker. `history.get`, `snapshot.get`, `review.get`, `recording.frame` and `camera.snapshot` only read, so they save nothing and answer with their own event alone. The commands in `UNSAVED_COMMANDS`, such as `discover`, `printer.test`, `notify.test`, `update.check`, `report.bundle` and a plugin's requests, change nothing that is stored, so they save nothing either and their closing `state` goes only to the transport that sent them. The fields are listed below |
-| `result` | One monitor's score, with the verdict at its threshold, the margin and `ms`, the scheduler's smoothed inference latency, sampled at up to 5 Hz per monitor |
+| `result` | One monitor's score, with the verdict at its threshold and `ms`, the scheduler's smoothed inference latency, sampled at up to 5 Hz per monitor |
 | `alert` | A sustained defect, with its score and the action taken: `none`, `pause`, `cancel` or `failed` |
 | `warning` | Watchdog conditions and their recovery, an MQTT broker the bridge cannot reach, once when the outage starts or its cause changes and once when it ends, what the platform reports through `take_notices()`, a printer whose cameras could not be listed or opened, an alert whose frame could not be encoded, which went without a picture, and a transport sink that raised and was unsubscribed. `recovered` says which way it goes |
 | `device` | A printer's status, progress, job, time left and heaters, when a read finds them changed and after a command sent to the printer |
@@ -337,9 +337,9 @@ dynamic:
    sleeps until the earliest idle camera's interval is up or any inference comes back, so a
    camera capped to a low rate never sets the pace for a faster one beside it.
 
-Changing `settings.inference_runtime` waits for the inferences in flight before the new runtime
-loads. One that has not come back after 10 s is given up on and the command fails with the
-runtime unchanged.
+Changing `settings.model` or `settings.inference_runtime` waits for the inferences in flight before
+the new model loads. One that has not come back after 10 s is given up on and the command fails
+with the model and runtime unchanged.
 
 ```mermaid
 flowchart LR
@@ -400,13 +400,15 @@ sequenceDiagram
 
 [`engine/vision.py`](../printguard/engine/vision.py) holds every image step. `transform`
 applies the camera's settings in a fixed order, so rotation, then the crop in the rotated
-frame's coordinates, then brightness, contrast and sharpness. `preprocess` resizes the
-shortest edge to 256 with Pillow's bilinear filter, converts to luminance, centre-crops to 224
-and normalises. `squares` splits a cropped frame wider than a square into squares the height of
+frame's coordinates, then brightness, contrast and sharpness. `preprocess` follows the torchvision
+eval transform each model was trained with. It resizes the shortest edge with Pillow's bilinear
+filter, sized and rounded as torchvision sizes it, converts to luminance for Legacy, centre-crops
+and normalises. The sizes come from each model's `metadata.json`, so 256 then 224 for Standard and
+Legacy and 293 then 256 for Light. `squares` splits a cropped frame wider than a square into squares the height of
 the frame, overlapping by at least `SQUARE_OVERLAP`, 0.2, up to `LONGEST_RATIO` times as wide,
 and `scheduler.infer_squares` scores each and keeps the riskiest result. An uncropped camera is
-scored once on its middle square, and `/classify` scores the whole image square by square. `classify` picks the nearest class prototype by Euclidean distance, and an embedding that
-isn't finite raises, so the scheduler reports an inference error for it instead of scoring the frame.
+scored once on its middle square, and `/classify` scores the whole image square by square. `classify` turns the model's first output into `defect_score` and the
+verdict at 0.5, and an output that isn't finite raises, so the scheduler reports an inference error for it instead of scoring the frame.
 
 `adjust` works through a frame in blocks of `ADJUST_BLOCK_PIXELS`, 32,768 pixels, with one
 extra row above and below each for the sharpening kernel. Each float32 temporary is then about
@@ -423,9 +425,11 @@ M1 Max sees little difference.
 | 2304 by 1296 | 225 | 45 |
 | 3840 by 2160 | 642 | 146 |
 
-`defect_score` maps the two distances to `0.5 * (1 + tanh((success² - failure²) / 2))`, the
-softmax over negative squared distances the model was trained with. 0.5 is the decision
-boundary, and a result with no distances scores 0.5.
+Standard and Light end in a temperature-scaled sigmoid, so their output is already a calibrated
+probability and is the `defect_score` as it is. Legacy outputs an embedding, which `classify`
+scores against its two class prototypes as `0.5 * (1 + tanh((success² - failure²) / 2))`, the
+softmax over negative squared distances it was trained with, worked in float64 so a far-off
+embedding still scores a number. 0.5 is the decision boundary for all three.
 
 `_on_result` runs once for each inference and handles every monitor on that camera that is
 watching. Each score goes into [`engine/history.py`](../printguard/engine/history.py), which is held in memory and
@@ -629,11 +633,11 @@ the scheduler's at the top of [`engine/scheduler.py`](../printguard/engine/sched
 | `STATE_TICK_S` | 1 s | The ticker that broadcasts `state`, settles finished prints, sends queued reviews and collects platform notices |
 | `REATTACH_EVERY_TICKS` | 10 | The ticks between tries at a camera with no source, which leaves alone one that is being moved or restarted |
 | `RESULT_EVENT_INTERVAL_S` | 0.2 s | The gap between `result` events for one monitor |
-| `REQUEST_TIMEOUT_S` | 15 s | How long `engine.request()` waits, which the REST API, MCP server, plugins and Home Assistant bridge all call. The dashboard's socket calls `engine.handle()` and waits as long as a command takes. A printer action or heater target is the exception: it has this long plus the adapter's `slow_action_s` to reach the printer, whichever transport sent it, and fails with `did not answer` after that. `_time_allowed` adds `READ_BACK_S` to that for the read that follows, `CAMERA_OPEN_WAIT_S` for `camera.add`, that four times over for `printer.cameras.refresh`, and `RUNTIME_DRAIN_TIMEOUT_S` plus `RUNTIME_LOAD_ALLOWANCE_S` for a runtime switch |
+| `REQUEST_TIMEOUT_S` | 15 s | How long `engine.request()` waits, which the REST API, MCP server, plugins and Home Assistant bridge all call. The dashboard's socket calls `engine.handle()` and waits as long as a command takes. A printer action or heater target is the exception: it has this long plus the adapter's `slow_action_s` to reach the printer, whichever transport sent it, and fails with `did not answer` after that. `_time_allowed` adds `READ_BACK_S` to that for the read that follows, `CAMERA_OPEN_WAIT_S` for `camera.add`, that four times over for `printer.cameras.refresh`, and `RUNTIME_DRAIN_TIMEOUT_S` plus `RUNTIME_LOAD_ALLOWANCE_S` for a model or runtime switch |
 | `READ_BACK_S` | 5 s | How long a printer is given to be read after a command it took. A slower read is left to the next poll and the command still succeeds |
 | `CAMERA_OPEN_WAIT_S`, `CAMERAS_OPENED_IN_TURN` | 25 s, 4 | What a camera gets to give a first frame, and how many of one printer's the refresh allows for |
 | `CAMERA_SETTLE_S` | 10 s | How long a refresh or the boot check waits for a printer's camera that is still opening before moving it to a new address |
-| `RUNTIME_LOAD_ALLOWANCE_S` | 60 s | What loading the model after a runtime switch is allowed, on top of the drain |
+| `RUNTIME_LOAD_ALLOWANCE_S` | 60 s | What loading the model after a model or runtime switch is allowed, on top of the drain |
 | `RECENT_EVENTS_MAX` | 100 | The alert, warning and error events `recent_events()` keeps. An `error` that answers a command goes to its caller and is not kept |
 | `UPDATE_CHECK_INTERVAL_S`, `UPDATE_RETRY_S` | 86400 s, 900 s | The gap between update checks, and after one that failed |
 | `RUNTIME_DRAIN_TIMEOUT_S` | 10 s | How long a runtime switch waits for the inferences in flight |
@@ -826,7 +830,7 @@ for development and packaging.
 
 | Variable | Does | Default |
 |---|---|---|
-| `MODEL_DIR` | The model, its metadata and prototypes | `models/` |
+| `MODEL_DIR` | The folder holding one folder per detection model | `models/` |
 | `STATIC_DIR` | The built dashboard the hub serves | `web/dist` |
 | `MEDIAMTX_BINARY` | The MediaMTX binary the hub supervises, 1.19.0 or newer. The hub starts it with a random login for its control API and for reading streams, which `mediamtx.yml` grants to nobody. Unset, the hub expects one already running | Unset |
 | `MEDIAMTX_CONFIG` | The config that binary starts with. The hub adds its login as the second entry of `authInternalUsers`, so a config of your own has to declare exactly one user there, as `mediamtx.yml` does. A second one would be overwritten | `mediamtx.yml` |
@@ -860,7 +864,7 @@ printguard/
     prints.py        print library records: formats, names and which printers a file may go to
     gcode.py         what a sliced file says about itself: estimates, printer model, preview
     scheduler.py     fair allocation of inference across cameras
-    vision.py        image transform, preprocessing, prototype classification and the defect score
+    vision.py        image transform, preprocessing and the defect score for every model
     history.py       per-monitor risk buckets and the alert log, in memory
     reviews.py       the frames kept from each watched print, and which ones are worth keeping
     feedback.py      uploads a reviewed print's frames to the training inbox
@@ -881,7 +885,7 @@ printguard/
     app.py           the FastAPI app: engine socket, publish socket, HLS proxy, plugin routes and gate
     platform.py      the hub's Platform: capture, MediaMTX, httpx, the state file and the file store
     public_network.py the connection a plugin without net:local gets, which resolves a name once, checks every address and connects to one that passed
-    inference.py     LiteRT and ONNX Runtime selection and the worker benchmark
+    inference.py     loading a detection model, LiteRT and ONNX Runtime selection and the worker benchmark
     events.py        the per-socket queue that conflates state and result events and gives up on a reader 256 events behind
     publish.py       pushes browser recordings, MJPEG sources, capture devices and the Bambu chamber camera into MediaMTX over RTSP, a live view from a thread of its own
     state_file.py    the state file: background saves, and what a damaged or unreachable one does
@@ -904,7 +908,7 @@ web/                 React + Tailwind UI (presentation only)
   scripts/           the plugin linter
 feedback-worker/     the Cloudflare Worker and R2 inbox that take training frames, and the script that empties it
 plugins/             first-party plugins and the hash-pinned catalogue they are verified by, with `plugin.d.ts`, the manifest's JSON Schema (`plugin.schema.json`, written by `schema.py`) and `pin.py`, which re-pins the catalogue
-models/              TFLite and ONNX encoders, normalisation metadata, class prototypes
+models/              legacy/, light/ and standard/, each a TFLite and an ONNX model and its metadata, with Legacy's class prototypes
 tests/               engine simulation, adapter contracts, the hub and the plugin sandbox (pytest)
 packaging/           the desktop app build: PyInstaller spec and its entry script, build script, `notarise.sh` for the macOS disk image, macOS entitlements and the Windows app config
 templates/           the Unraid container template

@@ -31,9 +31,9 @@ flowchart LR
     act --> cool["Cooldown"]
 ```
 
-The score is the model's own confidence that the frame shows a failing print, so 0.5 is where it
-changes its mind. It only ever approaches 1, and few frames of a real failure pass 0.95, which is
-why the threshold stops there. At the default settings one bad frame does nothing. A defect has
+The score is the [detection model's](hardware.md#detection-models) own confidence that the frame
+shows a failing print, so 0.5 is where it changes its mind. It only ever approaches 1, and Light
+passes 0.95 on only one in twelve frames of a real failure, which is why the threshold stops there. At the default settings one bad frame does nothing. A defect has
 to hold for a run of frames before the monitor acts, and the cooldown keeps one failure from
 alerting twice.
 

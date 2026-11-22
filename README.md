@@ -21,18 +21,22 @@ pushes a snapshot to your phone. There's no cloud and no subscription, and your 
 stay on your hardware. A defect snapshot goes to the alert channels and the MQTT broker you set up, and nothing else leaves
 unless you [send some frames to help train the model](docs/feedback.md).
 
-The detector is my own, a ShuffleNetV2 encoder of about 5 MB trained for this in
-[Edge-FDM-Fault-Detection](https://github.com/oliverbravery/Edge-FDM-Fault-Detection). Against
-Obico's Spaghetti Detective, the only other open model, over the same four unseen test sets:
+The detection models are my own, trained for this in
+[Edge-FDM-Fault-Detection](https://github.com/oliverbravery/Edge-FDM-Fault-Detection). You pick
+one of three, and Settings charts them against Obico's Spaghetti Detective, the only other open
+model. On 1,534 frames from 30 PrintGuard hubs that none of them was trained on:
 
-| On a Raspberry Pi 4B | PrintGuard | Spaghetti Detective |
-|---|---|---|
-| Accuracy | 93.6% | 53.8% |
-| F1 score | 0.937 | 0.411 |
-| Images a second | 15.1 | 0.35 |
+| | Standard | Light | Legacy | Spaghetti Detective |
+|---|---|---|---|---|
+| Failed prints caught | 10 of 20 | 5 of 20 | 1 of 20 | 3 of 20 |
+| Good prints alarmed | 1 of 70 | 1 of 70 | 1 of 70 | 0 of 70 |
+| Size | 12.9 MB | 9.5 MB | 4.8 MB | 193 MB |
+| One CPU thread, M1 Max | 28.7 ms | 11.2 ms | 5.3 ms | 360 ms |
 
-43x the throughput and more than double the F1. Method and results are in the
-[dissertation](https://github.com/oliverbravery/Edge-FDM-Fault-Detection/blob/main/dissertation.pdf).
+Standard is the default, and Light is there for a slower machine or many cameras. Legacy is the
+ShuffleNetV2 model from the
+[dissertation](https://github.com/oliverbravery/Edge-FDM-Fault-Detection/blob/main/dissertation.pdf)
+that PrintGuard ran before 3.0.0.
 
 ![PrintGuard dashboard: three cameras at a glance, one print mid-failure and auto-paused](docs/assets/dashboard.png)
 
@@ -223,9 +227,9 @@ meets WCAG 2.2 AA contrast. A guide behind the **?** in the header explains ever
 
 ## Hardware acceleration
 
-A Raspberry Pi 4 handles a camera or two on its CPU. PrintGuard carries both
+A Raspberry Pi 4 runs every model on its CPU. PrintGuard carries each model for both
 [LiteRT](https://github.com/google-ai-edge/LiteRT) and [ONNX Runtime](https://onnxruntime.ai/)
-models and benchmarks them on your machine at start, keeping whichever is faster. ONNX Runtime
+and benchmarks them on your machine at start, keeping whichever is faster. ONNX Runtime
 then uses the best provider available: Core ML on macOS, Windows ML on Windows 11 24H2 or newer,
 OpenVINO on Intel, TensorRT on NVIDIA. Two extra image tags exist for GPUs:
 
@@ -260,7 +264,7 @@ report, or downloads the same diagnostics as a zip with every credential strippe
 | [Monitoring](docs/monitoring.md) | Thresholds, defect response, framing the camera and risk history |
 | [Notifications](docs/notifications.md) | Alert channels, what gets sent and the fault grace period |
 | [Training frames](docs/feedback.md) | Sending labelled frames to help train the model, what's sent and the limits |
-| [Hardware](docs/hardware.md) | Image variants, model runtimes, GPU and NPU acceleration |
+| [Hardware](docs/hardware.md) | Detection models, image variants, model runtimes, GPU and NPU acceleration |
 | [Deployment](docs/deployment.md) | Reaching a hub from outside your LAN, hardening it, environment variables and backups |
 | [API & MCP](docs/api.md) | REST API, MCP server and Home Assistant, with scoped tokens |
 | [Plugins](docs/plugins.md) | Installing plugins and what they can reach |
