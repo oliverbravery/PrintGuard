@@ -5,7 +5,7 @@ import { alertOutcome } from "../history";
 import { awaitingReview, framesLabel } from "../review";
 import { useStore } from "../store";
 import type { Monitor } from "../types";
-import { Feed } from "./Feed";
+import { Feed, useCovered } from "./Feed";
 import { PluginNodeView, usePluginSurface } from "./PluginNode";
 import { activeJob, HeaterReadouts, jobText, PreheatPane, PrintActions, ProgressBar } from "./PrinterControls";
 import { RiskMeter } from "./RiskMeter";
@@ -46,7 +46,10 @@ function ControlPane({ monitor }: { monitor: Monitor }) {
     <>
       <Block>
         <div className="flex items-center justify-between gap-2">
-          {printer ? <DeviceStatus state={device} /> : <Status tone={state.tone}>{state.text}</Status>}
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <Status tone={state.tone}>{state.text}</Status>
+            <DeviceStatus state={device} />
+          </span>
           <Link to={`/monitors/${monitor.id}/edit`} className="btn-inline">
             Edit
           </Link>
@@ -104,7 +107,7 @@ function TunePane({ monitor }: { monitor: Monitor }) {
           min={0.05}
           max={0.95}
           step={0.01}
-          hint="Raise to cut false alarms. Lower to catch subtler failures."
+          hint="The score a frame must reach to count as a defect. Raise to cut false alarms. Lower to catch subtler failures."
           onChange={(v) => updateMonitor(monitor.id, { threshold: v })}
         />
       </Block>
@@ -116,7 +119,7 @@ function TunePane({ monitor }: { monitor: Monitor }) {
           max={30}
           step={1}
           format={String}
-          hint="Raise to ride out brief blips. Lower to react faster."
+          hint="Flagged frames in a row before it acts. Raise to ride out brief blips. Lower to react faster."
           onChange={(v) => updateMonitor(monitor.id, { consecutive: v })}
         />
       </Block>
@@ -131,6 +134,7 @@ function TunePane({ monitor }: { monitor: Monitor }) {
           max={600}
           step={10}
           format={String}
+          hint="Quiet gap after acting before it can act again. Raise to avoid repeat alerts on one failure."
           onChange={(v) => updateMonitor(monitor.id, { cooldown_s: v })}
         />
       </Block>
@@ -149,8 +153,8 @@ function PreheatPaneFor({ monitor }: { monitor: Monitor }) {
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
   const control = engine?.integrations.find((i) => i.id === printer?.provider)?.heater_control ?? false;
   if (!printer) return <p className="px-4 py-3 text-sm text-text-1">Bind a printer to this monitor to preheat it.</p>;
-  if (!control || !printer.device_state)
-    return <p className="px-4 py-3 text-sm text-text-1">{printer.name} doesn't let PrintGuard set its temperatures.</p>;
+  if (!control) return <p className="px-4 py-3 text-sm text-text-1">{printer.name} doesn't let PrintGuard set its temperatures.</p>;
+  if (!printer.device_state) return <p className="px-4 py-3 text-sm text-text-1">Waiting for {printer.name} to report its temperatures.</p>;
   return <PreheatPane printer={printer} />;
 }
 
@@ -160,12 +164,14 @@ export function MonitorHero({ monitor }: { monitor: Monitor }) {
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
   const device = engine?.printers.find((p) => p.id === monitor.printer_id)?.device_state;
   const tools = usePluginSurface("monitor", monitor.id);
+  const covered = useCovered();
   const prefix = "hero";
   return (
     <section aria-label={`${monitor.name}, selected monitor`} className="grid border-b border-rule lg:grid-cols-[minmax(0,1.32fr)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col border-rule max-lg:border-b lg:border-r">
         <Feed
           camera={camera}
+          active={!covered}
           banner={monitor.alert && <span className="mono relative z-[4] bg-bad px-4 py-1.5 text-xs font-bold tracking-[0.2em] text-on-bad">DEFECT DETECTED</span>}
         >
           {activeJob(device) && <ProgressBar state={device} className="absolute inset-x-0 bottom-0 z-[3] h-1" />}
@@ -173,7 +179,11 @@ export function MonitorHero({ monitor }: { monitor: Monitor }) {
         <div className="mono flex min-h-11 items-stretch border-t border-rule text-xs">
           <p className="flex min-w-0 flex-1 items-center justify-between gap-3 px-4 py-2">
             <span className="truncate">{camera ? `${camera.name} · ${sourceLabel(camera.source)}` : "No camera"}</span>
-            {camera?.online && <span className="whitespace-nowrap text-text-2">{camera.achieved_fps.toFixed(1)} fps</span>}
+            {camera?.online && (
+              <span className="whitespace-nowrap text-text-2">
+                {monitor.watching ? `${camera.achieved_fps.toFixed(1)}/${camera.target_fps.toFixed(1)} fps · ` : ""}max {camera.max_fps.toFixed(0)}
+              </span>
+            )}
           </p>
           {tools.map(({ plugin, node }) => (
             <div key={plugin.id} className="flex items-center border-l border-rule px-2">

@@ -1,6 +1,7 @@
 import { Link, Navigate, useNavigate, useParams } from "react-router";
 import { useStore } from "../store";
 import { ConfirmButton } from "./ConfirmButton";
+import { Feed, useCovered } from "./Feed";
 import { NameField } from "./NameField";
 import { Page } from "./Page";
 import { PluginNodeView, usePluginSurface } from "./PluginNode";
@@ -22,9 +23,11 @@ export function MonitorEditPage() {
   const { engine, send, isPending, updateMonitor } = useStore();
   const monitor = engine?.monitors.find((m) => m.id === monitorId);
   const settingsPanels = usePluginSurface("settings", monitorId ?? "");
+  const covered = useCovered();
   if (!monitor) return <Navigate to="/" replace />;
   const removing = isPending("monitor.remove");
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
+
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
   return (
     <Page title={`${monitor.name} settings`} back={{ to: `/monitors/${monitor.id}`, label: "Monitors" }} subview actions={<SaveStatus scope={`monitor:${monitor.id}`} />}>
@@ -47,6 +50,11 @@ export function MonitorEditPage() {
           <Toggle label="Push notifications" on={monitor.notify} onChange={(v) => updateMonitor(monitor.id, { notify: v })} />
         </Section>
         <Section title="Camera">
+          {camera && (
+            <div className="max-w-md">
+              <Feed camera={camera} active={!covered} />
+            </div>
+          )}
           <select className="field" aria-label="Camera" value={monitor.camera_id} onChange={(e) => updateMonitor(monitor.id, { camera_id: e.target.value })}>
               <option value="">No camera</option>
               {(engine?.cameras ?? []).map((c) => (

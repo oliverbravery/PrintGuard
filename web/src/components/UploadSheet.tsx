@@ -30,7 +30,8 @@ function TemperatureField({
     <label className="flex items-center gap-2">
       <span className="label w-12">{heater}</span>
       <input
-        className="field !w-20 text-right"
+        className="field text-right"
+        style={{ width: "5rem", flex: "none" }}
         type="number"
         inputMode="numeric"
         min={1}

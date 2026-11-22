@@ -25,7 +25,7 @@ export function ModelPicker() {
               >
                 <span className="flex items-center justify-between gap-2">
                   <span className="text-sm font-bold">{option.name}</span>
-                  {chosen && <span className="label !text-accent">in use</span>}
+                  {chosen && <span className="label text-accent">in use</span>}
                 </span>
                 <span className="text-xs leading-snug text-text-1">{option.about}</span>
                 <span className="mono mt-auto flex flex-wrap gap-x-2 pt-1 text-xs text-text-2">

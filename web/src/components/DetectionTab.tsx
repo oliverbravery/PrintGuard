@@ -25,10 +25,18 @@ export function DetectionTab() {
         Automatic benchmarks the model on both runtimes and keeps the faster. ONNX Runtime can use Core ML,
         Windows ML, OpenVINO or NVIDIA hardware. LiteRT runs on the CPU.
       </span>
-      <div className="flex items-center justify-between gap-3 border border-line-0 px-3 py-2">
-        <span className="text-sm text-text-1">Active compute</span>
-        <span className="chip">{engine?.stats.inference_device ?? "initialising"}</span>
-      </div>
+      <dl className="grid grid-cols-3 border border-line-0">
+        {[
+          ["Active compute", engine?.stats.inference_device ?? "initialising"],
+          ["Capacity", engine ? `${engine.stats.capacity_fps.toFixed(1)} fps` : "-"],
+          ["Latency", engine ? `${engine.stats.infer_ms.toFixed(0)} ms` : "-"],
+        ].map(([label, value], index) => (
+          <div key={label} className={`min-w-0 px-3 py-2 ${index ? "border-l border-line-0" : ""}`}>
+            <dt className="label">{label}</dt>
+            <dd className="mono truncate text-sm">{value}</dd>
+          </div>
+        ))}
+      </dl>
       <div className="flex justify-end">
         <SaveStatus scope="settings:detection" />
       </div>

@@ -15,8 +15,9 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Changed
 
+- The dashboard is redesigned. The selected monitor's feed and controls sit at the top with the rest listed below, and Prints, Cameras, Printers and Settings each have their own page.
 - Hubs run Standard after updating. It's about 5x slower than the old model on a CPU, so pick Light, or Legacy for the old model, if the capacity readout falls below what your cameras need.
-- The runtime setting has moved from the Advanced tab in Settings to the Detection tab.
+- The runtime setting has moved from Advanced in Settings to Detection.
 - The image and the desktop apps are about 45 MB larger, since they carry the new models.
 
 ### Removed

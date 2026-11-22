@@ -50,28 +50,30 @@ export function MonitorsPage() {
   const panels = visible.flatMap((tile) => (tile.plugin ? [tile.plugin] : []));
   const panelIds = panels.map((plugin) => plugin.id);
   const reorderPanels = useReorder(visibleIds);
-  const selected = monitorId ? engine.monitors.find((m) => m.id === monitorId) : (monitors[0] ?? engine.monitors[0]);
+  const selected = monitorId ? engine.monitors.find((m) => m.id === monitorId) : monitors[0];
   if (monitorId && !selected) return <Navigate to="/" replace />;
-  if (!selected)
+  const panelStrip = panels.length > 0 && (
+    <Sortable ids={panelIds} pinned={layout.pinned} strategy={rectSortingStrategy} disabled={!customising} onReorder={reorderPanels}>
+      <div className="grid md:grid-cols-2 2xl:grid-cols-3">
+        {panels.map((plugin) => (
+          <PluginPanel key={plugin.id} plugin={plugin} visible={visibleIds} group={panelIds} />
+        ))}
+      </div>
+    </Sortable>
+  );
+  if (engine.monitors.length === 0)
     return (
       <Page title="Monitors">
         <GettingStarted />
+        {panelStrip}
       </Page>
     );
   return (
     <Page title="Monitors" titleHidden>
-      <Switcher monitors={monitors} selectedId={selected.id} />
-      <MonitorHero monitor={selected} />
-      <FleetLedger monitors={monitors} selectedId={selected.id} visible={visibleIds} hidden={hidden} />
-      {panels.length > 0 && (
-        <Sortable ids={panelIds} pinned={layout.pinned} strategy={rectSortingStrategy} disabled={!customising} onReorder={reorderPanels}>
-          <div className="grid md:grid-cols-2 2xl:grid-cols-3">
-            {panels.map((plugin) => (
-              <PluginPanel key={plugin.id} plugin={plugin} visible={visibleIds} group={panelIds} />
-            ))}
-          </div>
-        </Sortable>
-      )}
+      {selected && <Switcher monitors={monitors} selectedId={selected.id} />}
+      {selected && <MonitorHero monitor={selected} />}
+      <FleetLedger monitors={monitors} selectedId={selected?.id ?? null} visible={visibleIds} hidden={hidden} />
+      {panelStrip}
     </Page>
   );
 }

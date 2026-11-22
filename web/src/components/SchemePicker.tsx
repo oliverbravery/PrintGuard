@@ -20,18 +20,16 @@ export function SchemePicker() {
   };
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px border border-line-1 bg-line-0 sm:grid-cols-4">
         {SCHEMES.map((opt) => (
           <button
             key={opt.id}
             aria-pressed={theme === opt.id}
             onClick={() => select(opt.id)}
-            className={`flex cursor-pointer flex-col items-center gap-1 border px-2 py-3 transition-colors ${
-              theme === opt.id ? "border-accent bg-accent/5 text-text-0" : "border-line-0 text-text-1 hover:border-line-1"
-            }`}
+            className="flex min-h-16 cursor-pointer flex-col items-center justify-center gap-1 bg-ink-0 px-2 py-3 text-text-1 hover:bg-ink-1 hover:text-text-0 aria-pressed:bg-text-0 aria-pressed:text-ink-0"
           >
             <span className="text-base leading-none">{opt.glyph}</span>
-            <span className="text-xs">{opt.name}</span>
+            <span className="mono text-xs font-medium uppercase tracking-[0.06em]">{opt.name}</span>
           </button>
         ))}
       </div>

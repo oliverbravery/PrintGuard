@@ -169,7 +169,7 @@ interface PgStore {
   flushUpdates(): void;
   discover(): void;
   openDialog(dialog: DialogKind): void;
-  leavePage(): void;
+  leavePage(sectionChanged: boolean): void;
   fetchHistory(monitorId: string): void;
   fetchReview(id: string): void;
   stagePrints(files: File[]): void;
@@ -883,9 +883,9 @@ export const useStore = create<PgStore>((set, get) => {
       set({ dialog, reportResult: null });
     },
 
-    leavePage() {
+    leavePage(sectionChanged) {
       get().flushUpdates();
-      set({ discovered: null, printerTest: null, notifyTest: null, createdToken: null, savedAt: {}, snapshotCache: {} });
+      set(sectionChanged ? { discovered: null, printerTest: null, notifyTest: null, createdToken: null, savedAt: {}, snapshotCache: {} } : { snapshotCache: {} });
     },
 
     fetchHistory(monitorId) {

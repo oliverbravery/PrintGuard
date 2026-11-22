@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { registerFeed } from "../float";
 import { renderVideoFrame, useVideoStream } from "../image";
+import { useStore } from "../store";
 import type { Camera } from "../types";
+
+export function useCovered(): boolean {
+  return useStore((s) => s.dialog !== null || s.staged.length > 0);
+}
 
 export function Feed({
   camera,
@@ -57,7 +62,7 @@ export function Feed({
   }, [camera?.id, useCanvas, brightness, contrast, sharpness, crop, rotation]);
 
   return (
-    <div className={`feed relative aspect-video overflow-hidden bg-ink-1 ${compact ? "border border-line-0" : ""}`}>
+    <div data-camera={camera?.id} className={`feed relative aspect-video overflow-hidden bg-ink-1 ${compact ? "border border-line-0" : ""}`}>
       <video
         ref={videoRef}
         autoPlay
@@ -81,9 +86,9 @@ export function Feed({
                 {!camera ? "no camera bound" : !active ? "feed paused" : camera.standby || camera.online ? "starting stream" : "no signal"}
               </span>
             )}
-            {tapToPlay && !compact && (
-              <button className="btn pointer-events-auto relative z-[3]" onClick={() => void videoRef.current?.play()}>
-                Tap to play
+            {tapToPlay && (
+              <button className={`${compact ? "btn-inline" : "btn"} pointer-events-auto relative z-[3]`} onClick={() => void videoRef.current?.play()}>
+                {compact ? "Play" : "Tap to play"}
               </button>
             )}
           </div>

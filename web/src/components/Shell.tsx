@@ -35,6 +35,7 @@ function useSection(): string {
 
 function TopNav() {
   const section = useSection();
+  const update = useStore((s) => s.engine?.update?.available ?? false);
   return (
     <nav aria-label="Primary" className="topbar-nav">
       {DESTINATIONS.map(({ to, label, matches }, index) => (
@@ -43,6 +44,12 @@ function TopNav() {
             {String(index + 1).padStart(2, "0")}
           </span>
           {label}
+          {to === "/settings" && update && (
+            <>
+              <span aria-hidden className="size-2 bg-accent lg:hidden" />
+              <span className="sr-only lg:hidden">, update available</span>
+            </>
+          )}
         </Link>
       ))}
     </nav>
@@ -202,7 +209,7 @@ function useFocusOnNavigate() {
     if (shown.current.pathname === pathname) return;
     const sectionChanged = shown.current.section !== section;
     shown.current = { pathname, section };
-    leavePage();
+    leavePage(sectionChanged);
     if (sectionChanged) window.scrollTo(0, 0);
     const main = document.getElementById("main");
     const focused = document.activeElement as HTMLElement | null;

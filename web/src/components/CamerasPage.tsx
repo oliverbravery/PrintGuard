@@ -7,7 +7,7 @@ import { publishStream, published } from "../stream";
 import { cameraStatus, sourceLabel } from "../cameras";
 import { ConfirmButton } from "./ConfirmButton";
 import { CropEditor } from "./CropEditor";
-import { Feed } from "./Feed";
+import { Feed, useCovered } from "./Feed";
 import { NameField } from "./NameField";
 import { SaveStatus } from "./SaveStatus";
 import { Slider } from "./Slider";
@@ -44,6 +44,7 @@ function CameraEditor({ camera }: { camera: Camera }) {
       ? "Passed in by the deployment, remove its devices entry to remove this camera."
       : null;
   const detectFpsCeiling = Math.min(UNCAPPED_DETECT_FPS, Math.ceil(camera.max_fps));
+  const covered = useCovered();
   return (
     <>
       <DetailHead title={camera.name}>
@@ -62,11 +63,14 @@ function CameraEditor({ camera }: { camera: Camera }) {
       </DetailHead>
       <div className="grid xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <div className="min-w-0 border-b border-line-0 xl:border-r">
-          <Feed camera={camera} />
+          <Feed camera={camera} active={!covered} />
           <div className="mono flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line-0 px-4 py-2 text-xs">
             <Status tone={camera.online ? "ok" : camera.standby ? "idle" : "bad"}>{cameraStatus(camera)}</Status>
             <span className="min-w-0 truncate text-text-1">{sourceLabel(camera.source)}</span>
-            <span className="text-text-2">{camera.max_fps.toFixed(0)} fps max</span>
+            <span className="text-text-2">
+              {camera.in_use ? `${camera.achieved_fps.toFixed(1)}/${camera.target_fps.toFixed(1)} fps · ` : "idle · "}
+              {camera.max_fps.toFixed(0)} fps max
+            </span>
             {camera.source.path && published.has(camera.source.path) && <span className="chip chip-accent">publishing</span>}
             {owner && <span className="chip">via {owner.name}</span>}
             {camera.declared && <span className="chip">passed in</span>}
@@ -344,6 +348,7 @@ export function CamerasPage() {
         {shown.map((camera) => (
           <CameraLink key={camera.id} camera={camera} selected={camera.id === selected?.id} />
         ))}
+        {group === "cameras" && own.length === 0 && <p className="border-b border-line-0 px-4 py-3 text-sm text-text-2">No cameras registered yet.</p>}
         {group === "cameras" ? (
           <Link to="/cameras/new" aria-current={adding ? "page" : undefined} className="list-row font-mono text-xs font-semibold uppercase tracking-[0.06em]">
             + Register a camera

@@ -4,13 +4,17 @@ import { awaitingReview } from "../review";
 import { useStore } from "../store";
 import type { Monitor } from "../types";
 import { ConfirmButton } from "./ConfirmButton";
-import { Feed } from "./Feed";
+import { Feed, useCovered } from "./Feed";
 import { LayoutControls, useReorder } from "./LayoutControls";
 import { PluginNodeView, usePluginSurface } from "./PluginNode";
-import { activeJob, heaterText, ProgressBar } from "./PrinterControls";
-import { RiskMeter } from "./RiskMeter";
+import { activeJob, HEATERS, heaterText, ProgressBar } from "./PrinterControls";
+import { riskColor, RiskMeter } from "./RiskMeter";
 import { Sortable, SortableItem, type SortableHandle, verticalListSortingStrategy } from "./Sortable";
 import { DeviceStatus, monitorState, Status } from "./Status";
+
+function counted(count: number, noun: string): string {
+  return count ? `${count} ${noun}${count === 1 ? "" : "s"}` : "";
+}
 
 const COLUMNS = "grid-cols-[6.5rem_minmax(0,1fr)_auto] @3xl:grid-cols-[8rem_minmax(0,1.3fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,1fr)]";
 
@@ -27,6 +31,7 @@ function Row({ monitor, selected, handle, visible, group }: { monitor: Monitor; 
   const tools = usePluginSurface("monitor", monitor.id);
   const score = camera?.online && monitor.watching ? (history[monitor.id]?.at(-1)?.score ?? 0) : null;
   const state = monitorState(monitor, Boolean(camera?.online));
+  const covered = useCovered();
   return (
     <li
       ref={handle?.setNodeRef}
@@ -35,8 +40,8 @@ function Row({ monitor, selected, handle, visible, group }: { monitor: Monitor; 
         handle?.isDragging ? "z-10 bg-ink-1" : ""
       }`}
     >
-      <div className="p-2" aria-hidden>
-        <Feed camera={camera} compact />
+      <div className="p-2">
+        <Feed camera={camera} compact active={!covered} />
       </div>
       <Cell>
         <Link
@@ -53,7 +58,7 @@ function Row({ monitor, selected, handle, visible, group }: { monitor: Monitor; 
         {activeJob(device) && <ProgressBar state={device} className="h-0.5" />}
       </Cell>
       <Cell className="mono text-sm @max-3xl:hidden">
-        <span>{device?.nozzle && device.bed ? `${heaterText(device.nozzle)} · ${heaterText(device.bed)}` : "-"}</span>
+        <span>{HEATERS.flatMap((name) => (device?.[name] ? [heaterText(device[name])] : [])).join(" · ") || "-"}</span>
         <span className="text-xs text-text-2">{camera?.online && monitor.watching ? `${camera.achieved_fps.toFixed(1)} fps` : state.text}</span>
       </Cell>
       <Cell className="@max-3xl:hidden">
@@ -64,7 +69,15 @@ function Row({ monitor, selected, handle, visible, group }: { monitor: Monitor; 
           <LayoutControls id={monitor.id} name={monitor.name} handle={handle} visible={visible} group={group} />
         ) : (
           <>
-            {monitor.alert || !printer ? <Status tone={state.tone}>{state.text}</Status> : <DeviceStatus state={device} />}
+            <span className="flex flex-wrap justify-end gap-x-3">
+              <Status tone={state.tone}>{state.text}</Status>
+              <DeviceStatus state={device} />
+              {score !== null && (
+                <span className="mono text-xs font-semibold @3xl:hidden" style={{ color: riskColor(score, monitor.threshold) }}>
+                  risk {Math.round(score * 100)}%
+                </span>
+              )}
+            </span>
             <div className="relative z-[1] flex flex-wrap justify-end gap-1">
               {awaiting && (
                 <Link to={`/monitors/${monitor.id}/review/${awaiting.id}`} className="btn-inline btn-inline-accent" aria-label={`Review ${awaiting.frames} frames from ${monitor.name}`}>
@@ -127,12 +140,18 @@ export function FleetLedger({ monitors, selectedId, visible, hidden }: { monitor
           </span>
         ))}
       </div>
+      {customising && <p className="border-b border-line-0 px-4 py-2 text-sm text-text-2">Drag a row or use its arrows to reorder. Pinned rows stay at the top.</p>}
       {customising && <HiddenTray hidden={hidden} />}
       {monitors.length === 0 && !customising && hidden.length > 0 && (
         <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-          <p className="text-sm text-text-1">Every monitor is hidden.</p>
+          <p className="text-sm text-text-1">
+            {[counted(hidden.filter((tile) => tile.monitor).length, "monitor"), counted(hidden.filter((tile) => tile.plugin).length, "plugin panel")]
+              .filter(Boolean)
+              .join(" and ")}{" "}
+            hidden
+          </p>
           <button className="btn-inline" onClick={() => setCustomising(true)}>
-            Show them
+            Layout
           </button>
         </div>
       )}

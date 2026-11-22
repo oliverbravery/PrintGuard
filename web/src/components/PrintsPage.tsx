@@ -202,7 +202,11 @@ export function PrintsPage() {
   );
   return (
     <Page title="Prints" back={printId ? { to: "/prints", label: "Back" } : undefined} backOnPhones subview={Boolean(printId)}>
-      <Split list={list} detail={selected ? <PrintDetail key={selected.id} print={selected} /> : null} detailShown={Boolean(printId)} />
+      <Split
+        list={list}
+        detail={selected ? <PrintDetail key={selected.id} print={selected} /> : <p className="px-4 py-6 text-sm text-text-2">Open a sliced file from the library to see its toolpath.</p>}
+        detailShown={Boolean(printId)}
+      />
     </Page>
   );
 }

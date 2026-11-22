@@ -13,6 +13,7 @@ export function Sparkline({ points, threshold }: { points: ScorePoint[]; thresho
           .map((p, i) => `${i === 0 ? "M" : "L"}${((i / (points.length - 1)) * W).toFixed(1)},${(H - p.score * H).toFixed(1)}`)
           .join(" ")
       : "";
+  if (points.length < 2) return <p className="mono flex h-10 items-center text-xs text-text-2">awaiting results</p>;
   return (
     <svg aria-hidden viewBox={`0 0 ${W} ${H}`} className="h-10 w-full" preserveAspectRatio="none">
       <line

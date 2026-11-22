@@ -200,10 +200,8 @@ interface Scene {
   width: number;
   height: number;
   theme: "dark" | "light";
-  detailId?: string;
-  printId?: string;
+  route?: string;
   customising?: boolean;
-  settingsTab?: string;
   dialog?: string;
   history?: Record<string, ScorePoint[]>;
   hideFeeds?: boolean;
@@ -244,7 +242,6 @@ async function openReview(page: Page): Promise<void> {
   await page.evaluate(
     ({ review, frames, timeline, pictures }) => {
       (window as unknown as { __pg: { setState: (s: unknown) => void } }).__pg.setState({
-        reviewId: review.id,
         reviewData: { [review.id]: { ...review, frames, timeline } },
         snapshotCache: {
           ...Object.fromEntries(frames.map((frame) => [frame.id, frame.score > 0.5 ? pictures.defect : pictures.healthy])),
@@ -254,7 +251,7 @@ async function openReview(page: Page): Promise<void> {
     },
     { review: REVIEW, frames: REVIEW_FRAMES, timeline: REVIEW_TIMELINE, pictures: FRAMES },
   );
-  await page.getByRole("button", { name: "No, something went wrong" }).click();
+  await page.getByRole("radio", { name: "No, something went wrong" }).check();
   await page.getByRole("button", { name: /^Frame \d+ of \d+ at .* marked Good/ }).last().click();
 }
 
@@ -277,7 +274,6 @@ async function openHistory(page: Page): Promise<void> {
   await page.evaluate(
     ({ history, picture }) => {
       (window as unknown as { __pg: { setState: (s: unknown) => void } }).__pg.setState({
-        statsMonitorId: "m2",
         historyData: { m2: history },
         snapshotCache: Object.fromEntries(history.snaps.map((snap) => [snap.id, picture])),
       });
@@ -287,25 +283,20 @@ async function openHistory(page: Page): Promise<void> {
   await page.getByRole("button", { name: /^Snapshot at/ }).first().waitFor();
 }
 
-async function openCameraEditor(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Edit", exact: true }).first().click();
-  await page.getByRole("slider", { name: "Detection rate" }).scrollIntoViewIfNeeded();
-}
-
 const SCENES: Scene[] = [
-  { name: "review", width: 1360, height: 860, theme: "dark", mutate: (e) => void (e.reviews = [REVIEW]), prepare: openReview },
-  { name: "history", width: 1360, height: 860, theme: "dark", mutate: (e) => void (e.reviews = PRINTS_KEPT), prepare: openHistory },
-  { name: "camera-editor", width: 1360, height: 680, theme: "dark", dialog: "cameras", prepare: openCameraEditor },
-  { name: "settings-storage", width: 1360, height: 860, theme: "dark", settingsTab: "storage", mutate: (e) => void (e.reviews = PRINTS_KEPT) },
-  { name: "settings-detection", width: 1360, height: 1240, theme: "dark", settingsTab: "detection" },
+  { name: "review", width: 1360, height: 860, theme: "dark", route: "/monitors/m2/review/r1", mutate: (e) => void (e.reviews = [REVIEW]), prepare: openReview },
+  { name: "history", width: 1360, height: 860, theme: "dark", route: "/monitors/m2/history", mutate: (e) => void (e.reviews = PRINTS_KEPT), prepare: openHistory },
+  { name: "camera-editor", width: 1360, height: 760, theme: "dark", route: "/cameras/c1" },
+  { name: "settings-storage", width: 1360, height: 860, theme: "dark", route: "/settings/storage", mutate: (e) => void (e.reviews = PRINTS_KEPT) },
+  { name: "settings-detection", width: 1360, height: 1240, theme: "dark", route: "/settings/detection" },
 
-  { name: "dashboard", width: 1360, height: 620, theme: "dark" },
-  { name: "dashboard-light", width: 1360, height: 620, theme: "light" },
-  { name: "printer-detail", width: 1360, height: 860, theme: "dark", detailId: "m1" },
-  { name: "prints", width: 1360, height: 860, theme: "dark", dialog: "prints", mutate: idlePrinters },
-  { name: "print-viewer", width: 1360, height: 860, theme: "dark", printId: "f1", mutate: idlePrinters },
+  { name: "dashboard", width: 1360, height: 900, theme: "dark", route: "/monitors/m2" },
+  { name: "dashboard-light", width: 1360, height: 900, theme: "light", route: "/monitors/m2" },
+  { name: "printer-detail", width: 1360, height: 600, theme: "dark", route: "/monitors/m1" },
+  { name: "prints", width: 390, height: 844, theme: "dark", route: "/prints", mutate: idlePrinters },
+  { name: "print-viewer", width: 1360, height: 860, theme: "dark", route: "/prints/f1", mutate: idlePrinters },
   {
-    name: "customise", width: 1360, height: 860, theme: "dark", customising: true,
+    name: "customise", width: 1360, height: 900, theme: "dark", customising: true,
     mutate: (e) => {
       e.settings.layout = {
         monitors: { order: [], pinned: ["m1"], hidden: ["m3"] },
@@ -313,15 +304,14 @@ const SCENES: Scene[] = [
     },
   },
   {
-    name: "plugins", width: 1360, height: 860, theme: "dark", settingsTab: "plugins", catalogue: CATALOGUE,
+    name: "plugins", width: 1360, height: 860, theme: "dark", route: "/settings/plugins", catalogue: CATALOGUE,
     mutate: (e) => {
       e.plugins = [INSTALLED as never];
     },
   },
   {
-    name: "plugin-page", width: 1360, height: 900, theme: "dark", settingsTab: "plugins", catalogue: CATALOGUE,
+    name: "plugin-page", width: 1360, height: 900, theme: "dark", route: "/settings/plugins/spotify", catalogue: CATALOGUE,
     prepare: async (page) => {
-      await page.getByRole("button", { name: "Spotify", exact: true }).click();
       await page.waitForTimeout(700);
       await page.waitForFunction(() => Array.from(document.images).every((i) => i.complete));
     },
@@ -400,11 +390,12 @@ const CROPS: Crop[] = [
     mutate: (e) => {
       e.monitors = e.monitors.slice(0, 2);
     },
-    target: (page) => page.locator(".tile-alert"),
+    route: "/monitors/m2",
+    target: (page) => page.getByRole("region", { name: /selected monitor$/ }),
   },
   {
     id: "standby", ...DESK, pad: 0, hideFeeds: true, mutate: stoodDown, history: { m3: series(() => 0) },
-    target: (page) => page.locator(".tile").nth(1),
+    target: (page) => page.locator("main li").nth(1),
   },
   {
     id: "checklist", ...DESK, height: 1000,
@@ -413,27 +404,28 @@ const CROPS: Crop[] = [
       e.printers = [];
       e.monitors = [];
     },
-    target: (page) => page.locator(".panel").filter({ hasText: "GET PRINTGUARD WATCHING" }).first(),
+    target: (page) => page.getByRole("heading", { name: "Get PrintGuard watching" }).locator("xpath=../.."),
   },
   {
-    id: "cameras", ...DESK,
-    target: (page) => page.locator("section").filter({ hasText: "CAMERA REGISTRY" }).locator(".panel").first(),
+    id: "cameras", ...DESK, route: "/cameras", pad: 0,
+    target: (page) => page.getByRole("tablist", { name: "Camera groups" }).locator("xpath=../.."),
   },
   {
-    id: "tuning", ...DESK, height: 1500, detailId: "m1",
-    target: (page) => page.locator("section").filter({ hasText: "Watch this monitor" }).first(),
+    id: "tuning", ...DESK, route: "/monitors/m1", pad: 0,
+    prepare: (page) => page.getByRole("tab", { name: "Tune" }).click(),
+    target: (page) => page.getByRole("tabpanel", { name: "Tune" }),
   },
   {
-    id: "printers", ...DESK, height: 1000, dialog: "printers", pad: 0,
-    target: (page) => page.locator("dialog > .panel"),
+    id: "printers", ...DESK, height: 1000, route: "/printers/p1", pad: 0,
+    target: (page) => page.locator("main"),
   },
   {
-    id: "prints", ...DESK, height: 1000, dialog: "prints", pad: 0, mutate: idlePrinters,
-    target: (page) => page.locator("dialog > .panel"),
+    id: "prints", ...DESK, height: 1000, route: "/prints/f1", pad: 0, mutate: idlePrinters,
+    target: (page) => page.locator("main"),
   },
   {
-    id: "alerts", ...DESK, height: 1200, settingsTab: "alerts",
-    target: (page) => page.locator("#settings-panel-alerts"),
+    id: "alerts", ...DESK, height: 1200, route: "/settings/alerts",
+    target: (page) => page.getByRole("region", { name: "Alerts" }),
     mutate: (e) => {
       e.notifiers = NOTIFIERS as never;
       e.settings.notifiers = { ntfy: {} };
@@ -442,11 +434,11 @@ const CROPS: Crop[] = [
   },
   {
     id: "customise", ...DESK, customising: true, pad: 0,
-    target: (page) => page.locator(".tile").first(),
+    target: (page) => page.locator("main section").filter({ has: page.getByRole("heading", { name: /^Fleet/ }) }),
   },
   {
-    id: "plugins", ...DESK, height: 1600, settingsTab: "plugins", catalogue: CATALOGUE,
-    target: (page) => page.locator("#settings-panel-plugins"),
+    id: "plugins", ...DESK, height: 1600, route: "/settings/plugins", catalogue: CATALOGUE,
+    target: (page) => page.getByRole("region", { name: "Plugins" }),
     mutate: (e) => {
       e.plugins = [INSTALLED as never];
     },
@@ -562,7 +554,7 @@ async function stage(browser: Browser, scene: Scene): Promise<{ page: Page; clos
     if (wanted.startsWith("plugins/") && existsSync(local)) await route.fulfill({ path: local });
     else await route.fulfill({ status: 404, body: "" });
   });
-  await page.goto("/");
+  await page.goto(`/#${scene.route ?? "/"}`);
   await page.evaluate(
     ({ state, theme }) => {
       document.documentElement.dataset.theme = theme;
@@ -573,21 +565,19 @@ async function stage(browser: Browser, scene: Scene): Promise<{ page: Page; clos
       theme: scene.theme,
       state: {
         phase: "ready", engine: built, history: { ...history, ...scene.history },
-        detailId: scene.detailId ?? null, printId: scene.printId ?? null, customising: scene.customising ?? false,
-        dialog: scene.dialog ?? (scene.settingsTab ? "settings" : null), settingsTab: scene.settingsTab ?? null,
-        catalogue: scene.catalogue ?? null,
+        customising: scene.customising ?? false, dialog: scene.dialog ?? null, catalogue: scene.catalogue ?? null,
         ...(scene.plugins ? { link: null } : {}),
       },
     },
   );
   if (scene.plugins) await runPlugins(page, scene.plugins);
-  await page.waitForSelector(scene.settingsTab || scene.dialog || scene.printId ? "dialog" : built.monitors.length ? ".aspect-video" : "main");
-  if (scene.printId) await page.waitForSelector("dialog.modal-sheet input[type=range]");
+  await page.waitForSelector(scene.dialog ? "dialog" : "main h1");
+  if (scene.route?.startsWith("/prints/")) await page.waitForSelector("main input[type=range]");
   await page.addStyleTag({ content: "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}" });
   await page.evaluate((frames) => {
     for (const el of document.querySelectorAll<HTMLElement>(".aspect-video")) {
       const img = document.createElement("img");
-      img.src = el.closest(".tile-alert") ? frames.defect : frames.healthy;
+      img.src = el.dataset.camera === "c2" ? frames.defect : frames.healthy;
       img.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:3";
       el.appendChild(img);
     }
@@ -610,6 +600,7 @@ async function capture(browser: Browser, scene: Scene): Promise<void> {
 
 async function captureCrop(browser: Browser, crop: Crop, theme: "dark" | "light"): Promise<void> {
   const { page, close } = await stage(browser, { ...crop, name: crop.id, theme });
+  if (crop.prepare) await crop.prepare(page);
   await page.addStyleTag({ content: `*{outline:none!important}${crop.hideFeeds ? ".aspect-video{display:none}" : ""}` });
   const box = (await crop.target(page).boundingBox())!;
   const pad = crop.pad ?? 10;
@@ -698,12 +689,12 @@ const PLUGIN_SHOTS: PluginShot[] = [
     id: "picture-in-picture",
     file: "monitor.png",
     scene: { width: 1200, height: 700, plugins: ["spotify", "picture-in-picture"], mutate: live },
-    target: (page) => page.locator(".tile").first(),
+    target: (page) => page.getByRole("region", { name: /selected monitor$/ }),
   },
   {
     id: "alert-sounds",
     file: "settings.png",
-    scene: { width: 1000, height: 1400, detailId: "m1", plugins: ["alert-sounds", "progress-reports"], mutate: surfaces },
+    scene: { width: 1000, height: 1400, route: "/monitors/m1/edit", plugins: ["alert-sounds", "progress-reports"], mutate: surfaces },
     prepare: async (page) => {
       await page.locator("section").filter({ hasText: "Alert sounds" }).getByRole("switch").click();
       await page.waitForTimeout(500);
@@ -713,7 +704,7 @@ const PLUGIN_SHOTS: PluginShot[] = [
   {
     id: "progress-reports",
     file: "settings.png",
-    scene: { width: 1000, height: 1400, detailId: "m1", plugins: ["alert-sounds", "progress-reports"], mutate: surfaces },
+    scene: { width: 1000, height: 1400, route: "/monitors/m1/edit", plugins: ["alert-sounds", "progress-reports"], mutate: surfaces },
     prepare: async (page) => {
       await page.locator("section").filter({ hasText: "Progress reports" }).getByRole("switch").click();
       await page.waitForTimeout(500);

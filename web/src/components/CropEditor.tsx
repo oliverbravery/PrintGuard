@@ -107,7 +107,7 @@ export function CropEditor({
           {editing ? (
             <>
               <button
-                className="btn !py-1 !px-2.5 !text-xs"
+                className="btn-inline"
                 onClick={() => {
                   onChange(null);
                   setEditing(false);
@@ -115,14 +115,14 @@ export function CropEditor({
               >
                 Reset
               </button>
-              <button className="btn btn-primary !py-1 !px-2.5 !text-xs" onClick={() => setEditing(false)}>
+              <button className="btn-inline btn-inline-accent" onClick={() => setEditing(false)}>
                 Done
               </button>
             </>
           ) : (
             <button
               key="edit"
-              className="btn !py-1 !px-2.5 !text-xs"
+              className="btn-inline"
               onClick={() => {
                 setDraft(watched);
                 setFreeform(!isSquare(fromPercent(watched), frameAspect));
@@ -139,7 +139,7 @@ export function CropEditor({
           {[false, true].map((shape) => (
             <button
               key={String(shape)}
-              className={`btn flex-1 !py-1.5 !text-xs ${freeform === shape ? "!border-accent !text-accent" : ""}`}
+              className="btn flex-1"
               aria-pressed={freeform === shape}
               onClick={() => {
                 setFreeform(shape);

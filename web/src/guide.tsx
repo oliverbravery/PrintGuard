@@ -72,8 +72,8 @@ export const INTRO: GuideSection[] = [
     body: (
       <>
         A monitor binds one camera, and optionally one printer, and carries the alert threshold, how
-        many detections in a row count as a defect, and what happens when one holds. Everything is set per monitor
-        from its detail panel.
+        many detections in a row count as a defect, and what happens when one holds. Everything is set per monitor,
+        under Tune or in its settings.
       </>
     ),
   },
@@ -91,11 +91,11 @@ export const INTRO: GuideSection[] = [
     visual: (
       <ul className="space-y-2">
         {WATCH_STATES.map((state) => (
-          <li key={state.led} className="flex gap-3 rounded border border-line-0 bg-ink-0/40 px-3.5 py-2.5">
+          <li key={state.led} className="flex gap-3 border border-line-0 px-3.5 py-2.5">
             <span className={`led ${state.led} mt-[0.4rem]`} />
             <div className="min-w-0">
               <div className="text-sm text-text-0">{state.when}</div>
-              <div className="text-xs leading-relaxed text-text-2">{state.then}</div>
+              <div className="text-sm text-text-2">{state.then}</div>
             </div>
           </li>
         ))}
@@ -122,8 +122,8 @@ export const INTRO: GuideSection[] = [
     body: (
       <>
         Register a camera, then add a monitor binding it. Connect a printer and a notification channel
-        such as ntfy or Telegram for the full net. The rest of the guide sits behind the ? in the
-        header, or under More on a phone.
+        such as ntfy or Telegram for the full net. The rest of the guide sits behind the ? in the top
+        bar.
       </>
     ),
     action: { label: "Register a camera", to: "/cameras/new" },
@@ -199,8 +199,8 @@ export const GUIDE: GuideSection[] = [
     body: (
       <>
         A monitor binds one camera (and optionally one printer) and carries the detection thresholds
-        and defect response. Inference is shared fairly across every monitor on watch. Its status dot
-        is green while watching, grey in standby or offline, and red during a defect alert.
+        and defect response. Inference is shared fairly across every monitor on watch. Its status reads
+        watching, standby or no signal, and turns to defect during an alert.
       </>
     ),
     action: { label: "Add a monitor", dialog: "monitor" },
@@ -215,7 +215,7 @@ export const GUIDE: GuideSection[] = [
         Every frame is scored with the model's confidence that the print is failing.{" "}
         <strong>Alert threshold</strong> sets how high that score must reach, and a defect must hold
         for a number of <strong>consecutive detections</strong> before PrintGuard acts. Tune both per
-        monitor from its detail panel.
+        monitor under Tune.
       </>
     ),
   },
@@ -241,7 +241,7 @@ export const GUIDE: GuideSection[] = [
         Add a notification channel, whether <strong>ntfy</strong>, <strong>Pushover</strong>,{" "}
         <strong>Telegram</strong>, <strong>Discord</strong> or <strong>Desktop notification</strong>{" "}
         in the desktop app, and PrintGuard sends a snapshot the moment a defect holds. Turn
-        notifications on per monitor in its detail panel.
+        notifications on per monitor in its settings.
       </>
     ),
     action: { label: "Set up alerts", to: "/settings/alerts" },
@@ -266,8 +266,7 @@ export const GUIDE: GuideSection[] = [
     shot: "customise",
     body: (
       <>
-        Reorder and hide monitors and cameras with the ▦ Customise toggle, pin a monitor to the
-        front, and switch between
+        Reorder, pin and hide monitors with Layout above the monitor list, and switch between
         light, dark, glass and your own custom themes. Your layout and theme sync to every browser that opens
         the hub.
       </>
@@ -328,7 +327,7 @@ export const GUIDE: GuideSection[] = [
     title: "Report a bug",
     body: (
       <>
-        Report a bug from the <Bug className="inline h-[1.15em] w-[1.15em] align-[-0.2em]" aria-hidden /> chip in the header, or from More on a phone,
+        Report a bug from the <Bug className="inline h-[1.15em] w-[1.15em] align-[-0.2em]" aria-hidden /> icon in the top bar,
         anonymously, no account needed. A diagnostics bundle goes with it, with every credential stripped and no
         camera frames unless you attach them. Download the same bundle from that dialog to read it or send it somewhere else yourself.
       </>

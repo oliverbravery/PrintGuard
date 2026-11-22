@@ -273,6 +273,12 @@ body {
   color: var(--color-ink-0);
 }
 
+.btn[aria-pressed="true"] {
+  background: var(--color-text-0);
+  border-color: var(--color-text-0);
+  color: var(--color-ink-0);
+}
+
 .btn-primary {
   background: var(--color-accent);
   border-color: var(--color-accent);
