@@ -31,7 +31,7 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
             )}{" "}
             with this redirect URI, then paste its client id below.
           </span>
-          <code className="mono block select-all break-all rounded border border-line-0 bg-ink-2 px-2 py-1 text-xs text-text-1">
+          <code className="mono block select-all break-all border border-line-0 bg-ink-2 px-2 py-1 text-xs text-text-1">
             {redirect}
           </code>
           <SignInAddresses oauth={plugin.manifest.oauth} />

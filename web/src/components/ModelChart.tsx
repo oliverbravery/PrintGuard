@@ -156,7 +156,7 @@ export function ModelChart({ selected }: { selected?: ModelId }) {
             type="button"
             aria-pressed={metric.id === option.id}
             onClick={() => setMetric(option)}
-            className={`cursor-pointer rounded border px-2 py-1 text-xs transition-colors ${
+            className={`cursor-pointer border px-2 py-1 text-xs transition-colors ${
               metric.id === option.id ? "border-accent bg-accent/5 text-text-0" : "border-line-0 text-text-1 hover:border-line-1"
             }`}
           >
@@ -173,7 +173,7 @@ export function ModelChart({ selected }: { selected?: ModelId }) {
             onClick={() => toggle(key)}
             onPointerEnter={() => setPreview(key)}
             onPointerLeave={() => setPreview(null)}
-            className={`inline-flex cursor-pointer items-center gap-1.5 rounded border px-1.5 py-0.5 text-xs text-text-0 ${
+            className={`inline-flex cursor-pointer items-center gap-1.5 border px-1.5 py-0.5 text-xs text-text-0 ${
               pinned === key ? "border-line-1 bg-text-0/5" : "border-transparent"
             }`}
           >
@@ -261,7 +261,7 @@ export function ModelChart({ selected }: { selected?: ModelId }) {
           )}
         </svg>
         {tipped && (
-          <div ref={tip} className="pointer-events-none absolute z-10 min-w-48 rounded border border-line-1 bg-ink-2 px-3 py-2.5 text-xs shadow-lg">
+          <div ref={tip} className="pointer-events-none absolute z-10 min-w-48 border border-line-1 bg-ink-2 px-3 py-2.5 text-xs shadow-lg">
             <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-text-0">
               <Swatch family={tipped.model.family} size={12} />
               {tipped.model.name}
@@ -281,7 +281,7 @@ export function ModelChart({ selected }: { selected?: ModelId }) {
           </div>
         )}
       </div>
-      <div className="overflow-x-auto rounded border border-line-0">
+      <div className="overflow-x-auto border border-line-0">
         <table className="w-full whitespace-nowrap text-xs">
           <thead>
             <tr className="text-text-2">

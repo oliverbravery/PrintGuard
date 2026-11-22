@@ -73,7 +73,7 @@ function Readouts() {
   if (!stats) return null;
   return (
     <div className="topbar-readouts">
-      <Link to="/settings/detection" className="topbar-readout max-xl:hidden" aria-label={`Compute: ${stats.inference_device}. Choose the detection model and runtime`}>
+      <Link to="/settings/detection" className="topbar-readout topbar-compute" aria-label={`Compute: ${stats.inference_device}. Choose the detection model and runtime`}>
         <span>{stats.inference_device.toLowerCase()}</span>
         <span className="label">Compute</span>
       </Link>
@@ -97,7 +97,7 @@ function VersionCell() {
   const available = update?.available;
   return (
     <button
-      className={`topbar-cell max-md:hidden ${available ? "text-accent" : ""}`}
+      className={`topbar-cell max-lg:hidden ${available ? "text-accent" : ""}`}
       title={available ? `Update available: v${update!.latest}` : `PrintGuard v${version}`}
       onClick={() => openDialog("update")}
     >
@@ -116,7 +116,7 @@ function ThemeCell() {
   return (
     <>
       <button
-        className="topbar-cell tuner-anchor max-md:hidden"
+        className="topbar-cell tuner-anchor max-w-40 max-lg:hidden"
         aria-label={`Theme: ${name}. Switch theme`}
         onClick={() => {
           const next = nextScheme(theme);
@@ -125,7 +125,7 @@ function ThemeCell() {
           if (next === GLASS) document.getElementById(GLASS_TUNER)?.showPopover?.();
         }}
       >
-        {name}
+        <span className="truncate">{name}</span>
       </button>
       <GlassTuner />
     </>
@@ -138,11 +138,11 @@ function TopBar() {
   return (
     <header className="topbar">
       <Link to="/" className="topbar-brand" aria-label="PrintGuard monitors">
-        <Wordmark />
+        <Wordmark size="text-base" />
       </Link>
       <TopNav />
       <span role="status" className="topbar-status">
-        {reconnecting && <span className="boot-cursor">Reconnecting</span>}
+        {reconnecting && <span className="boot-cursor truncate px-4">Reconnecting</span>}
       </span>
       <Readouts />
       <VersionCell />

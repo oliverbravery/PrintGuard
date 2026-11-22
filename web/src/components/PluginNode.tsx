@@ -85,7 +85,7 @@ function NodeView({ node, pluginId, mayViewCameras }: { node: Node; pluginId: st
 
   if (node.type === "image") {
     const url = pluginAssets[pluginId]?.[node.asset ?? ""];
-    return url ? <img src={url} alt={node.label ?? ""} className="max-h-40 max-w-full rounded border border-line-0" /> : null;
+    return url ? <img src={url} alt={node.label ?? ""} className="max-h-40 max-w-full border border-line-0" /> : null;
   }
 
   if (node.type === "float") {

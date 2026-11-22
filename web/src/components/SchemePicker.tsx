@@ -26,7 +26,7 @@ export function SchemePicker() {
             key={opt.id}
             aria-pressed={theme === opt.id}
             onClick={() => select(opt.id)}
-            className={`flex cursor-pointer flex-col items-center gap-1 rounded border px-2 py-3 transition-colors ${
+            className={`flex cursor-pointer flex-col items-center gap-1 border px-2 py-3 transition-colors ${
               theme === opt.id ? "border-accent bg-accent/5 text-text-0" : "border-line-0 text-text-1 hover:border-line-1"
             }`}
           >

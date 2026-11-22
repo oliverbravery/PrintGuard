@@ -128,6 +128,10 @@ body {
   border: 1px solid var(--color-line-0);
 }
 
+.surface {
+  background: var(--color-ink-0);
+}
+
 :root[data-glass] {
   --painted-surface: var(--glass-surface, rgb(0 0 0 / 0.1));
   --painted-glass: blur(30px) saturate(180%);
@@ -167,16 +171,19 @@ body {
 }
 
 :root[data-glass] .panel,
+:root[data-glass] .surface,
+:root[data-glass] .app-main,
 :root[data-glass] .sheet,
 :root[data-glass] .topbar,
-:root[data-glass] .dock,
-:root[data-glass] .plate {
+:root[data-glass] .dock {
   background: var(--painted-surface) !important;
   backdrop-filter: var(--painted-glass);
   border-color: var(--painted-edge);
 }
 
 :root[data-glass] .btn:not(.btn-primary),
+:root[data-glass] .cell-action:not(.cell-action-primary),
+:root[data-glass] .btn-inline,
 :root[data-glass] .chip,
 :root[data-glass] .field {
   background: var(--painted-wash) !important;
@@ -188,17 +195,16 @@ body {
   border-color: color-mix(in srgb, var(--painted-ink) 55%, transparent);
 }
 
-:root[data-glass] .plate {
-  padding-inline: 0.5rem;
-  margin-inline-start: -0.5rem;
-}
-
 :root[data-glass] .feed {
   background: transparent;
 }
 
 [data-painted] {
   isolation: isolate;
+}
+
+[data-painted] .app-main {
+  background: color-mix(in srgb, var(--color-ink-0) 90%, transparent);
 }
 
 [data-painted]::before {
@@ -330,8 +336,14 @@ button.chip:hover {
 .chip-accent { color: var(--color-accent); border-color: currentColor; }
 
 .app {
+  display: flex;
+  flex-direction: column;
   min-height: 100dvh;
   padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
+}
+
+.app-main {
+  flex: 1;
 }
 
 .topbar {
@@ -361,7 +373,7 @@ button.chip:hover {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding-inline: 1rem;
+  padding-inline: 0.75rem;
   border-right: 1px solid var(--color-line-0);
   font-family: var(--font-mono);
   font-size: 0.75rem;
@@ -383,6 +395,7 @@ button.chip:hover {
 }
 
 .topbar-index {
+  display: none;
   color: var(--color-text-2);
 }
 
@@ -393,8 +406,8 @@ button.chip:hover {
 .topbar-status {
   display: flex;
   flex: 1;
+  min-width: 0;
   align-items: center;
-  padding-inline: 1rem;
   font-family: var(--font-mono);
   font-size: 0.75rem;
   text-transform: uppercase;
@@ -402,7 +415,7 @@ button.chip:hover {
 }
 
 .topbar-readouts {
-  display: flex;
+  display: none;
 }
 
 .topbar-readout {
@@ -463,8 +476,24 @@ a.topbar-readout:hover {
   background: color-mix(in srgb, var(--color-accent) 86%, var(--color-text-0));
 }
 
-@media (width < 64rem) {
+@media (width >= 80rem) {
+  .topbar-tab {
+    padding-inline: 1rem;
+  }
+
+  .topbar-index {
+    display: inline;
+  }
+}
+
+@media (width >= 90rem) {
   .topbar-readouts {
+    display: flex;
+  }
+}
+
+@media (width < 100rem) {
+  .topbar-compute {
     display: none;
   }
 }

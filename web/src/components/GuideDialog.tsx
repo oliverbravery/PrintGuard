@@ -15,7 +15,7 @@ export function GuideEntry({ section, lead, fill }: { section: GuideSection; lea
     <section className={`reveal ${fill ? "flex h-full min-h-0 flex-col" : ""}`}>
       <div className="mb-1.5 flex shrink-0 items-center gap-2.5">
         <span className={`led ${section.led}`} />
-        <h3 className={lead ? "display text-base font-bold" : "display text-sm font-semibold tracking-[0.14em]"}>
+        <h3 className={lead ? "text-lg font-bold" : "text-base font-bold"}>
           {section.title}
         </h3>
       </div>

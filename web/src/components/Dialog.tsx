@@ -93,7 +93,7 @@ export function CloseButton({ label, onClick }: { label: string; onClick: () => 
   return (
     <button
       type="button"
-      className="-my-2 -mr-2.5 grid h-10 w-10 pointer-coarse:h-11 pointer-coarse:w-11 shrink-0 cursor-pointer place-items-center rounded text-text-2 transition-colors hover:text-accent"
+      className="-my-2 -mr-4 grid size-12 shrink-0 cursor-pointer place-items-center border-l border-rule text-text-1 transition-colors hover:bg-ink-1 hover:text-text-0"
       onClick={() => {
         commitFocusedEdit();
         onClick();
@@ -124,18 +124,18 @@ export function Dialog({
   return (
     <Modal onClose={onClose} labelledBy={titleId}>
       <div
-        className={`panel rise-in flex w-full flex-col overflow-hidden ${size === "wide" ? "sm:max-w-2xl" : "sm:max-w-lg"} ${
+        className={`panel rise-in flex w-full flex-col overflow-hidden border-rule ${size === "wide" ? "sm:max-w-2xl" : "sm:max-w-lg"} ${
           fixed ? "h-[min(92dvh,46rem)]" : "max-h-[92dvh]"
         }`}
       >
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line-0 px-5 py-3">
-          <h2 id={titleId} className="display min-w-0 truncate text-sm font-semibold text-text-1">
+        <div className="flex min-h-12 shrink-0 items-center justify-between gap-3 border-b border-rule px-4 py-2">
+          <h2 id={titleId} className="min-w-0 truncate text-base font-bold">
             {title}
           </h2>
           <CloseButton label="Close dialog" onClick={onClose} />
         </div>
-        {toolbar && <div className="shrink-0 px-5">{toolbar}</div>}
-        <div className={`min-h-0 flex-1 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] sm:pb-5 ${fixed ? "" : "overflow-y-auto overscroll-contain"}`}>
+        {toolbar && <div className="shrink-0">{toolbar}</div>}
+        <div className={`min-h-0 flex-1 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:pb-4 ${fixed ? "" : "overflow-y-auto overscroll-contain"}`}>
           {children}
         </div>
       </div>
@@ -163,10 +163,10 @@ export function Sheet({
   const titleId = useId();
   return (
     <Modal onClose={onClose} variant="sheet" labelledBy={titleId}>
-      <aside className={`sheet slide-in flex h-full w-full flex-col border-l border-line-0 bg-ink-1 ${width}`}>
-        <div className="flex shrink-0 items-center gap-2.5 border-b border-line-0 px-5 py-3.5">
+      <aside className={`sheet surface slide-in flex h-full w-full flex-col border-l border-rule ${width}`}>
+        <div className="flex min-h-12 shrink-0 items-center gap-2.5 border-b border-rule px-4 py-2">
           {lead}
-          <h2 id={titleId} className="display min-w-0 flex-1 truncate text-lg font-semibold">
+          <h2 id={titleId} className="min-w-0 flex-1 truncate text-base font-bold">
             {title}
           </h2>
           {meta}

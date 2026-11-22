@@ -11,7 +11,7 @@ function BedCheck({ print, printer, onStart, onClose }: { print: PrintFile; prin
   return (
     <Dialog title={`Print ${print.name} on ${printer.name}`} onClose={onClose}>
       <div className="space-y-4">
-        <div className="overflow-hidden rounded border border-line-0">
+        <div className="overflow-hidden border border-line-0">
           <Feed camera={engine ? bedCamera(engine, printer.id) : undefined} />
         </div>
         <p className="text-sm text-text-0">Is the build plate on and the bed clear?</p>

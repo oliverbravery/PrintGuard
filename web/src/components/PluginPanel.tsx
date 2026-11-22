@@ -34,7 +34,7 @@ export function PluginPanel({ plugin, visible, group }: { plugin: PluginRecord; 
     <section
       ref={handle?.setNodeRef}
       style={handle?.style}
-      className={`flex flex-col border-b border-line-0 bg-ink-0 md:border-r ${handle?.isDragging ? "z-10" : ""}`}
+      className={`flex flex-col border-b border-line-0 md:border-r ${handle?.isDragging ? "z-10" : ""}`}
     >
       <div className="flex min-h-11 items-center gap-2 border-b border-line-0 px-4 py-1.5">
         <h3 className="min-w-0 flex-1 truncate text-sm font-bold">{plugin.manifest.name}</h3>

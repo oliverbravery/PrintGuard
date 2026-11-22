@@ -64,17 +64,17 @@ export function StorageTab() {
         </>
       )}
       <div className="grid grid-cols-2 gap-2 pt-2">
-        <div className="rounded border border-line-0 px-3 py-2">
+        <div className="border border-line-0 px-3 py-2">
           <span className="label block">Recordings</span>
           <span className="mono text-sm text-text-0">{megabytes(recordingBytes)}</span>
         </div>
-        <div className="rounded border border-line-0 px-3 py-2">
+        <div className="border border-line-0 px-3 py-2">
           <span className="label block">Kept frames</span>
           <span className="mono text-sm text-text-0">{megabytes(keptBytes)}</span>
         </div>
       </div>
       {recorded.length > 0 && (
-        <ul className="divide-y divide-line-0 rounded border border-line-0" aria-label="Recordings">
+        <ul className="divide-y divide-line-0 border border-line-0" aria-label="Recordings">
           {recorded.map((review) => (
             <li key={review.id} className="flex items-center gap-3 px-3 py-2">
               <span className="min-w-0 flex-1">
@@ -100,7 +100,7 @@ export function StorageTab() {
         </div>
       )}
       {engine?.feedback_hub && (
-        <div className="flex items-center justify-between gap-3 rounded border border-line-0 px-3 py-2">
+        <div className="flex items-center justify-between gap-3 border border-line-0 px-3 py-2">
           <span className="text-xs text-text-1">Hub ID</span>
           <span className="mono text-xs break-all text-text-2">{engine.feedback_hub}</span>
         </div>

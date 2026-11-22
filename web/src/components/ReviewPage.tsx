@@ -312,7 +312,7 @@ export function ReviewPage() {
             </>
           )}
           {switchedOff && <p className="px-4 py-3 text-sm text-text-2">The end-of-print review is switched off in Settings, so nothing can be sent.</p>}
-          <div className="sticky bottom-0 z-10 grid grid-cols-2 border-t border-rule bg-ink-0 pb-[env(safe-area-inset-bottom)]">
+          <div className="surface sticky bottom-0 z-10 grid grid-cols-2 border-t border-rule pb-[env(safe-area-inset-bottom)]">
             {review.status === "ready" ? (
               <button
                 className="cell-action"

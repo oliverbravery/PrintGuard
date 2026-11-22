@@ -35,7 +35,7 @@ export function PluginIcon({ url, name, size }: { url: string | null; name: stri
     return (
       <span
         aria-hidden
-        className="grid shrink-0 place-items-center rounded-xl border border-line-1 bg-ink-2 text-accent display font-bold"
+        className="grid shrink-0 place-items-center border border-line-1 bg-ink-2 text-accent display font-bold"
         style={{ width: size, height: size, fontSize: size * 0.44 }}
       >
         {name.slice(0, 1).toUpperCase()}
@@ -49,7 +49,7 @@ export function PluginIcon({ url, name, size }: { url: string | null; name: stri
       width={size}
       height={size}
       loading="lazy"
-      className="shrink-0 rounded-xl border border-line-0 bg-ink-2"
+      className="shrink-0 border border-line-0 bg-ink-2"
       style={{ width: size, height: size }}
       onError={() => setBroken(true)}
     />
@@ -147,7 +147,7 @@ function PluginCard({ item, onOpen }: { item: StoreItem; onOpen: () => void }) {
   }, [plugin?.id, reconnecting]);
 
   return (
-    <div className="relative flex items-center gap-3 rounded border border-line-0 bg-ink-1 p-3 text-left transition-colors hover:border-accent has-[:focus-visible]:border-accent">
+    <div className="relative flex items-center gap-3 border border-line-0 bg-ink-1 p-3 text-left transition-colors hover:border-accent has-[:focus-visible]:border-accent">
       <PluginIcon url={plugin ? installedIcon(plugin, page) : pluginFile(entry!, entry!.icon)} name={name} size={44} />
       <div className="min-w-0 flex-1 space-y-0.5">
         <span className="flex items-center gap-2 text-xs text-text-0">
@@ -209,7 +209,7 @@ function PluginPage({
       <div className="flex items-start gap-4">
         <PluginIcon url={icon} name={name} size={64} />
         <div className="min-w-0 flex-1 space-y-1">
-          <h3 className="display text-base font-bold leading-tight">{name}</h3>
+          <h3 className="text-base font-bold leading-tight">{name}</h3>
           <span className="block text-xs text-text-2">
             {author}
             {version && ` · v${version}`}
@@ -229,7 +229,7 @@ function PluginPage({
                 src={shot.src}
                 alt={`${name} screenshot`}
                 loading="lazy"
-                className="block w-full rounded border border-line-0"
+                className="block w-full border border-line-0"
               />
             </a>
           ))}
