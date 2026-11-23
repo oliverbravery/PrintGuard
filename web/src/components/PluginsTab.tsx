@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Link, useNavigate, useParams } from "react-router";
+import { useShallow } from "zustand/react/shallow";
 import { fromBase64, renderMarkdown } from "../markdown";
 import { pluginFile, repositoryFiles, runsHere } from "../plugins";
 import { useStore } from "../store";
@@ -31,11 +33,12 @@ function readZip(file: File): Promise<string> {
 
 export function PluginIcon({ url, name, size }: { url: string | null; name: string; size: number }) {
   const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [url]);
   if (!url || broken) {
     return (
       <span
         aria-hidden
-        className="grid shrink-0 place-items-center rounded-xl border border-line-1 bg-ink-2 text-accent display font-bold"
+        className="grid shrink-0 place-items-center border border-line-1 bg-ink-2 text-accent display font-bold"
         style={{ width: size, height: size, fontSize: size * 0.44 }}
       >
         {name.slice(0, 1).toUpperCase()}
@@ -49,14 +52,14 @@ export function PluginIcon({ url, name, size }: { url: string | null; name: stri
       width={size}
       height={size}
       loading="lazy"
-      className="shrink-0 rounded-xl border border-line-0 bg-ink-2"
+      className="shrink-0 border border-line-0 bg-ink-2"
       style={{ width: size, height: size }}
       onError={() => setBroken(true)}
     />
   );
 }
 
-function Runs({ platforms }: { platforms: string[] | undefined }) {
+function Runs({ platforms, needs }: { platforms: string[] | undefined; needs?: string }) {
   const engine = useStore((s) => s.engine);
   const labels = engine?.plugin_platforms ?? {};
   const host = engine?.host ?? "";
@@ -70,19 +73,20 @@ function Runs({ platforms }: { platforms: string[] | undefined }) {
         </span>
       ))}
       {!here && <span className="chip chip-bad">Not on {labels[host] ?? host}</span>}
+      {needs && <span className="chip chip-bad">Needs PrintGuard {needs}</span>}
     </div>
   );
 }
 
 function InstallButton({ entry, installed }: { entry: CatalogueEntry; installed: boolean }) {
   const installPlugin = useStore((s) => s.installPlugin);
-  const isPending = useStore((s) => s.isPending);
+  const installing = useStore((s) => s.isPending("plugin.install"));
   const host = useStore((s) => s.engine?.host ?? "");
   const here = runsHere(entry.platforms, host);
   return (
     <button
       className="btn btn-primary shrink-0"
-      disabled={installed || !here || isPending("plugin.install")}
+      disabled={installed || !here || entry.supported === false || installing}
       onClick={() => installPlugin({ kind: "github", repo: entry.repo, path: entry.path ?? "", ref: entry.ref })}
     >
       {installed ? "Installed" : "Install"}
@@ -115,9 +119,10 @@ function EnableToggle({ plugin }: { plugin: PluginRecord }) {
 const IMAGE_TYPES: Record<string, string> = { png: "png", jpg: "jpeg", jpeg: "jpeg", webp: "webp", gif: "gif", svg: "svg+xml" };
 
 function dataUrl(page: Record<string, string>, path: string | undefined): string | null {
-  const data = path ? page[path] : undefined;
+  const data = path && Object.hasOwn(page, path) ? page[path] : undefined;
   if (!data || !path) return null;
-  const kind = IMAGE_TYPES[path.split(".").pop()!.toLowerCase()] ?? "png";
+  const ext = path.split(".").pop()!.toLowerCase();
+  const kind = Object.hasOwn(IMAGE_TYPES, ext) ? IMAGE_TYPES[ext] : "png";
   return `data:image/${kind};base64,${data}`;
 }
 
@@ -147,7 +152,7 @@ function PluginCard({ item, onOpen }: { item: StoreItem; onOpen: () => void }) {
   }, [plugin?.id, reconnecting]);
 
   return (
-    <div className="relative flex items-center gap-3 rounded border border-line-0 bg-ink-1 p-3 text-left transition-colors hover:border-accent has-[:focus-visible]:border-accent">
+    <div className="relative flex items-center gap-3 border border-line-0 bg-ink-1 p-3 text-left transition-colors hover:border-accent has-[:focus-visible]:border-accent">
       <PluginIcon url={plugin ? installedIcon(plugin, page) : pluginFile(entry!, entry!.icon)} name={name} size={44} />
       <div className="min-w-0 flex-1 space-y-0.5">
         <span className="flex items-center gap-2 text-xs text-text-0">
@@ -155,8 +160,9 @@ function PluginCard({ item, onOpen }: { item: StoreItem; onOpen: () => void }) {
             {name}
           </button>
           {attention && <span className="chip chip-bad">needs attention</span>}
+          {entry?.supported === false && <span className="chip chip-bad">needs v{entry.min_printguard}</span>}
         </span>
-        <span className="clamp-2 block text-[0.7rem] leading-snug text-text-2">{description}</span>
+        <span className="clamp-2 block text-xs leading-snug text-text-2">{description}</span>
       </div>
       <span className="relative">{plugin ? <EnableToggle plugin={plugin} /> : <InstallButton entry={entry!} installed={false} />}</span>
     </div>
@@ -169,13 +175,13 @@ function PluginPage({
   author,
   version,
   platforms,
+  needs,
   action,
   media,
   readme,
   fallback,
   manifest,
   origin,
-  onBack,
   meta,
   extra,
   children,
@@ -185,13 +191,13 @@ function PluginPage({
   author: string;
   version: string;
   platforms: string[] | undefined;
+  needs?: string;
   action?: ReactNode;
   media: { src: string; href?: string }[];
   readme: { text: string; base?: string; skip?: string[]; sources?: Record<string, string>; imagePrefixes: string[] } | null | undefined;
   fallback: string;
   manifest: PluginManifest;
   origin: string;
-  onBack: () => void;
   meta?: ReactNode;
   extra?: ReactNode;
   children?: ReactNode;
@@ -201,20 +207,20 @@ function PluginPage({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <button className="btn" onClick={onBack}>
+        <Link to="/settings/plugins" className="btn">
           Back to all plugins
-        </button>
+        </Link>
         {extra}
       </div>
       <div className="flex items-start gap-4">
         <PluginIcon url={icon} name={name} size={64} />
         <div className="min-w-0 flex-1 space-y-1">
-          <h3 className="display text-base font-bold leading-tight">{name}</h3>
-          <span className="block text-[0.7rem] text-text-2">
+          <h3 className="text-base font-bold leading-tight">{name}</h3>
+          <span className="block text-xs text-text-2">
             {author}
             {version && ` · v${version}`}
           </span>
-          <Runs platforms={platforms} />
+          <Runs platforms={platforms} needs={needs} />
         </div>
         {action}
       </div>
@@ -229,7 +235,7 @@ function PluginPage({
                 src={shot.src}
                 alt={`${name} screenshot`}
                 loading="lazy"
-                className="block w-full rounded border border-line-0"
+                className="block w-full border border-line-0"
               />
             </a>
           ))}
@@ -237,10 +243,10 @@ function PluginPage({
       )}
 
       {readme === undefined ? (
-        <span className="block text-[0.7rem] text-text-2">Reading its page…</span>
+        <span className="block text-xs text-text-2">Loading details…</span>
       ) : readme ? (
         <div
-          className="changelog text-[0.78rem]"
+          className="changelog text-xs"
           dangerouslySetInnerHTML={{
             __html: renderMarkdown(readme.text, {
               base: readme.base,
@@ -252,7 +258,7 @@ function PluginPage({
           }}
         />
       ) : (
-        <p className="text-[0.78rem] leading-relaxed text-text-1">{fallback}</p>
+        <p className="text-xs leading-relaxed text-text-1">{fallback}</p>
       )}
 
       {children}
@@ -283,14 +289,19 @@ function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () 
 
   useEffect(() => {
     if (!fromRepo) return;
+    setFetched(undefined);
     const stop = new AbortController();
     const url = pluginFile(plugin.source, "README.md");
     if (!url) return setFetched(null);
     fetch(url, { signal: stop.signal })
-      .then(async (answer) => setFetched(answer.ok ? await answer.text() : null))
-      .catch(() => setFetched(null));
+      .then(async (answer) => {
+        if (!stop.signal.aborted) setFetched(answer.ok ? await answer.text() : null);
+      })
+      .catch(() => {
+        if (!stop.signal.aborted) setFetched(null);
+      });
     return () => stop.abort();
-  }, [plugin.id]);
+  }, [plugin.id, plugin.source.ref]);
 
   const origin = fromRepo
     ? `${plugin.source.repo}${plugin.source.path ? `/${plugin.source.path}` : ""} @ ${String(plugin.source.ref).slice(0, 7)}`
@@ -329,7 +340,6 @@ function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () 
       fallback={manifest.description}
       manifest={manifest}
       origin={origin}
-      onBack={onBack}
       extra={
         <ConfirmButton
           onConfirm={() => {
@@ -350,8 +360,8 @@ function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () 
               </button>
             )}
           </div>
-          {plugin.failure && <span className="block text-[0.7rem] text-bad">Stopped: {plugin.failure}</span>}
-          {!accepted && <span className="block text-[0.7rem] text-warn">Waiting on permissions you have not accepted.</span>}
+          {plugin.failure && <span className="block text-xs text-bad">Stopped: {plugin.failure}</span>}
+          {!accepted && <span className="block text-xs text-warn">Waiting for you to review and accept its permissions.</span>}
         </div>
       }
     >
@@ -411,7 +421,7 @@ function readableManifest(entry: CatalogueEntry, raw: Record<string, unknown>): 
   };
 }
 
-function StoreDetail({ entry, installed, onBack }: { entry: CatalogueEntry; installed: boolean; onBack: () => void }) {
+function StoreDetail({ entry, installed }: { entry: CatalogueEntry; installed: boolean }) {
   const [readme, setReadme] = useState<string | null | undefined>(undefined);
   const [manifest, setManifest] = useState<PluginManifest>(bareManifest(entry));
 
@@ -424,12 +434,16 @@ function StoreDetail({ entry, installed, onBack }: { entry: CatalogueEntry; inst
       return answer.ok ? answer : null;
     };
     grab("README.md")
-      .then(async (answer) => setReadme(answer ? await answer.text() : null))
-      .catch(() => setReadme(null));
+      .then(async (answer) => {
+        if (!stop.signal.aborted) setReadme(answer ? await answer.text() : null);
+      })
+      .catch(() => {
+        if (!stop.signal.aborted) setReadme(null);
+      });
     grab("plugin.json")
       .then(async (answer) => {
         const raw = answer ? await answer.json() : null;
-        if (raw && typeof raw === "object") setManifest(readableManifest(entry, raw));
+        if (!stop.signal.aborted && raw && typeof raw === "object") setManifest(readableManifest(entry, raw));
       })
       .catch(() => {});
     return () => stop.abort();
@@ -442,6 +456,7 @@ function StoreDetail({ entry, installed, onBack }: { entry: CatalogueEntry; inst
       author={entry.author ?? ""}
       version={entry.version ?? ""}
       platforms={entry.platforms}
+      needs={entry.supported === false ? entry.min_printguard : undefined}
       action={<InstallButton entry={entry} installed={installed} />}
       media={(entry.media ?? []).flatMap((shot) => {
         const src = pluginFile(entry, shot);
@@ -455,17 +470,28 @@ function StoreDetail({ entry, installed, onBack }: { entry: CatalogueEntry; inst
       fallback={entry.description ?? ""}
       manifest={manifest}
       origin={`${entry.repo}${entry.path ? `/${entry.path}` : ""} @ ${entry.ref.slice(0, 7)}`}
-      onBack={onBack}
     />
   );
 }
 
 export function PluginsTab() {
-  const { engine, catalogue, reconnecting, fetchCatalogue, installPlugin, isPending, toast } = useStore();
+  const { engine, catalogue, reconnecting, fetchCatalogue, installPlugin, installing, toast } = useStore(
+    useShallow((s) => ({
+      engine: s.engine,
+      catalogue: s.catalogue,
+      reconnecting: s.reconnecting,
+      fetchCatalogue: s.fetchCatalogue,
+      installPlugin: s.installPlugin,
+      installing: s.isPending("plugin.install"),
+      toast: s.toast,
+    })),
+  );
   const [repo, setRepo] = useState("");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const { pluginId: openId } = useParams();
+  const navigate = useNavigate();
+  const setOpenId = (id: string | null) => navigate(id ? `/settings/plugins/${id}` : "/settings/plugins");
   const file = useRef<HTMLInputElement>(null);
   const plugins = engine?.plugins ?? [];
   const labels = engine?.plugin_platforms ?? {};
@@ -498,9 +524,9 @@ export function PluginsTab() {
   });
 
   const opened = items.find((item) => item.id === openId);
-  if (opened?.plugin) return <InstalledDetail plugin={opened.plugin} onBack={() => setOpenId(null)} />;
+  if (opened?.plugin) return <InstalledDetail key={opened.id} plugin={opened.plugin} onBack={() => setOpenId(null)} />;
   if (opened?.entry) {
-    return <StoreDetail entry={opened.entry} installed={false} onBack={() => setOpenId(null)} />;
+    return <StoreDetail key={opened.id} entry={opened.entry} installed={false} />;
   }
 
   const installFromRepo = () => {
@@ -512,10 +538,9 @@ export function PluginsTab() {
   return (
     <div className="space-y-4">
       <div>
-        <span className="label block">Plugins</span>
-        <span className="mt-1 block text-[0.7rem] leading-relaxed text-text-2">
-          Third-party code, installed switched off. Verified ones match the catalogue by hash. Read the rest before you
-          enable them.
+        <span className="block text-sm text-text-2">
+          Plugins are third-party code and always install switched off. Verified plugins match PrintGuard's catalogue by
+          hash; check the code before enabling anything else.
         </span>
       </div>
 
@@ -559,7 +584,7 @@ export function PluginsTab() {
       />
 
       {(catalogue === null || listed.length === 0) && (
-        <span className="block text-[0.7rem] text-text-2">
+        <span className="block text-xs text-text-2">
           {catalogue === null
             ? "Loading the catalogue…"
             : items.length === 0
@@ -584,12 +609,13 @@ export function PluginsTab() {
         className="flex gap-2"
         onSubmit={(event) => {
           event.preventDefault();
+          if (!repo.trim() || installing) return;
           installFromRepo();
         }}
       >
         <input className="field flex-1" placeholder={REPO_HINT} aria-label="GitHub repository" value={repo} onChange={(event) => setRepo(event.target.value)} />
-        <button type="submit" className="btn whitespace-nowrap" disabled={!repo.trim() || isPending("plugin.install")}>
-          {isPending("plugin.install") ? "…" : "Install"}
+        <button type="submit" className="btn whitespace-nowrap" disabled={!repo.trim() || installing}>
+          {installing ? "…" : "Install"}
         </button>
       </form>
       <div className="flex items-center gap-2">
@@ -606,10 +632,14 @@ export function PluginsTab() {
             event.target.value = "";
             if (!chosen) return;
             if (chosen.size > MAX_ZIP_BYTES) return toast("error", `${chosen.name} is over 12 MB, the most a plugin can be`);
-            installPlugin({ kind: "file", filename: chosen.name }, await readZip(chosen));
+            try {
+              installPlugin({ kind: "file", filename: chosen.name }, await readZip(chosen));
+            } catch {
+              toast("error", `Could not read ${chosen.name}`);
+            }
           }}
         />
-        <span className="text-[0.7rem] text-text-2">A zipped folder with plugin.json and plugin.js or worker.js.</span>
+        <span className="text-xs text-text-2">A .zip containing plugin.json plus plugin.js or worker.js.</span>
       </div>
     </div>
   );

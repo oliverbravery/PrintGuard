@@ -194,7 +194,7 @@ class CrealityAdapter(IntegrationAdapter):
         "Works with the K1, K2, Ender-3 V3, Hi and CR-10 SE on stock firmware. The printer has no password, "
         "so keep it on a network you trust. A rooted printer running Moonraker connects as Klipper."
     )
-    experimental = True
+    experimental = False
     formats = ("gcode",)
     heater_control = True
     slow_action_s = _COMMAND_TIMEOUT_S

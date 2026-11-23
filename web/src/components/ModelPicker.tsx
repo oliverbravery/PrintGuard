@@ -19,16 +19,16 @@ export function ModelPicker() {
                 type="button"
                 aria-pressed={chosen}
                 onClick={() => updateSettings({ model: option.id }, "model")}
-                className={`flex cursor-pointer flex-col gap-1 rounded border px-3 py-2.5 text-left transition-colors ${
+                className={`flex cursor-pointer flex-col gap-1 border px-3 py-2.5 text-left transition-colors ${
                   chosen ? "border-accent bg-accent/5" : "border-line-0 hover:border-line-1"
                 }`}
               >
                 <span className="flex items-center justify-between gap-2">
-                  <span className="display text-sm font-semibold tracking-[0.1em] text-text-0">{option.name}</span>
-                  {chosen && <span className="label !text-accent">in use</span>}
+                  <span className="text-sm font-bold">{option.name}</span>
+                  {chosen && <span className="label text-accent">in use</span>}
                 </span>
                 <span className="text-xs leading-snug text-text-1">{option.about}</span>
-                <span className="mono mt-auto flex flex-wrap gap-x-2 pt-1 text-[0.65rem] text-text-2">
+                <span className="mono mt-auto flex flex-wrap gap-x-2 pt-1 text-xs text-text-2">
                   <span className="whitespace-nowrap">
                     Caught {stats.caught} of {GOLD_TEST.failedPrints}
                   </span>

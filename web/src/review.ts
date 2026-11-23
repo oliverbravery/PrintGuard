@@ -1,6 +1,6 @@
 import type { ReviewSummary } from "./types";
 
-export const LIMIT_REASON = "This runs on a free service with a fixed amount of room, so there's a daily limit.";
+export const LIMIT_REASON = "The training inbox runs on a small free-tier bucket I pay for out of pocket, so there's a daily limit.";
 export const FRAMES_PER_DAY = 60;
 
 export function recordedFrameKey(reviewId: string, index: number): string {
@@ -66,7 +66,10 @@ export function statusText(review: ReviewSummary): string {
   return review.status === "ready" ? "waiting for review" : "not reviewed";
 }
 
-export function awaitingReview(reviews: ReviewSummary[], monitorId: string): ReviewSummary | undefined {
-  const lastPrint = reviews.filter((review) => review.monitor_id === monitorId && review.status !== "running").at(-1);
-  return lastPrint?.status === "ready" ? lastPrint : undefined;
+export function printsToReview(reviews: ReviewSummary[], monitorId: string): ReviewSummary[] {
+  return reviews.filter((review) => review.monitor_id === monitorId && review.status !== "running" && review.frames > 0).reverse();
+}
+
+export function printedAt(review: ReviewSummary): string {
+  return new Date((review.ended ?? review.started) * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }

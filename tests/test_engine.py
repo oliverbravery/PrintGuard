@@ -3368,12 +3368,12 @@ async def test_prints_queued_to_send_do_not_push_out_the_print_that_just_ended(m
     frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
     monitor = {"id": "m", "threshold": 0.75, "printer_id": "", "enabled": False}
     for started in (0.0, 100.0, 200.0):
-        await library.sample(monitor, frame, 0.1, started, recording=False)
+        await library.sample(monitor, frame, 0.1, started, recording=False, answered=True)
         library.settle({"m": monitor}, {}, set(), True)
         if started < 200.0:
             library.submit(library.public(0)[-1]["id"], set(), set(), "")
 
-    await library.sample(monitor, frame, 0.1, 300.0, recording=False)
+    await library.sample(monitor, frame, 0.1, 300.0, recording=False, answered=True)
 
     assert [review["status"] for review in library.public(0)] == ["queued", "queued", "ready", "running"], "the print waiting for its review was deleted"
 
@@ -3386,7 +3386,7 @@ async def test_a_print_left_with_no_frames_is_dropped_before_one_with_alert_fram
     await library.keep_alert("m", {"ts": 0.0, "score": 0.9, "action": "none"}, frame)
     library.settle({"m": monitor}, {}, set(), True)
     for started in (100.0, 200.0):
-        await library.sample(monitor, frame, 0.1, started, recording=False)
+        await library.sample(monitor, frame, 0.1, started, recording=False, answered=True)
         library.settle({"m": monitor}, {}, set(), True)
     await library.stop_asking()
 
@@ -3402,7 +3402,7 @@ async def test_removing_a_monitor_forgets_every_print_even_when_a_frame_cannot_b
     frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
     monitor = {"id": "m", "threshold": 0.75, "printer_id": "", "enabled": False}
     for started in (0.0, 100.0, 200.0):
-        await library.sample(monitor, frame, 0.1, started, recording=False)
+        await library.sample(monitor, frame, 0.1, started, recording=False, answered=True)
         library.settle({"m": monitor}, {}, set(), True)
     remove = platform.files.remove
     stuck = next(iter(platform.files.blobs))
@@ -3427,10 +3427,10 @@ async def test_two_prints_beginning_at_the_cap_do_not_evict_the_same_review(monk
     frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
     first, second = ({"id": name, "threshold": 0.75, "printer_id": "", "enabled": False} for name in ("first", "second"))
     for monitor in (first, second):
-        await library.sample(monitor, frame, 0.1, 0.0, recording=False)
+        await library.sample(monitor, frame, 0.1, 0.0, recording=False, answered=True)
     library.settle({"first": first, "second": second}, {}, set(), True)
 
-    kept = await asyncio.gather(library.sample(first, frame, 0.1, 10.0, recording=False), library.sample(second, frame, 0.1, 10.0, recording=False), return_exceptions=True)
+    kept = await asyncio.gather(library.sample(first, frame, 0.1, 10.0, recording=False, answered=True), library.sample(second, frame, 0.1, 10.0, recording=False, answered=True), return_exceptions=True)
 
     assert kept == [True, True], "one of the two prints lost its frame"
     running = [review["frames"] for review in library.public(0) if review["status"] == "running"]
@@ -3444,7 +3444,7 @@ async def test_a_print_beginning_while_the_review_is_switched_off_keeps_no_frame
     library = reviews.ReviewLibrary(platform)
     frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
     monitor = {"id": "m", "threshold": 0.75, "printer_id": "", "enabled": False}
-    await library.sample(monitor, frame, 0.1, 0.0, recording=False)
+    await library.sample(monitor, frame, 0.1, 0.0, recording=False, answered=True)
     library.settle({"m": monitor}, {}, set(), True)
     remove = platform.files.remove
     evicting = asyncio.Event()
@@ -3455,7 +3455,7 @@ async def test_a_print_beginning_while_the_review_is_switched_off_keeps_no_frame
         await remove(key)
 
     monkeypatch.setattr(platform.files, "remove", slow_remove)
-    sampling = asyncio.create_task(library.sample(monitor, frame, 0.1, 100.0, recording=False))
+    sampling = asyncio.create_task(library.sample(monitor, frame, 0.1, 100.0, recording=False, answered=True))
     await evicting.wait()
     await library.stop_asking()
     await sampling
@@ -3540,7 +3540,10 @@ async def test_a_reviewed_print_is_sent_with_its_labels(monkeypatch) -> None:
         alert = next(frame for frame in review["frames"] if frame["kind"] == "alert")
         spaced = [frame for frame in review["frames"] if frame["kind"] == "spaced"]
         assert review["status"] == "ready" and len(spaced) >= 2
-        await engine.handle({"cmd": "review.send", "id": review["id"], "failures": [alert["id"]], "removed": [spaced[0]["id"]], "printer": "  Voron   2.4 "})
+        await engine.handle({"cmd": "printer.add", "printer": {"name": "P", "model": "  Voron   2.4 ", **OCTOPRINT}})
+        printer_id = next(iter(engine.printers.items))
+        await engine.handle({"cmd": "monitor.update", "id": review["monitor_id"], "patch": {"printer_id": printer_id}})
+        await engine.handle({"cmd": "review.send", "id": review["id"], "failures": [alert["id"]], "removed": [spaced[0]["id"]], "printer": "typed in the review"})
         outcome = await _sent(events)
         state = engine.state_event()
 
@@ -3550,11 +3553,24 @@ async def test_a_reviewed_print_is_sent_with_its_labels(monkeypatch) -> None:
     assert by_frame[alert["id"]]["label"] == "failure" and by_frame[spaced[1]["id"]]["label"] == "good"
     sent = by_frame[alert["id"]]
     assert sent["authorization"] == f"Bearer {TOKEN}" and sent["jpeg"] == b"\xff\xd8fake"
-    assert (sent["print"], sent["kind"], sent["printer"], sent["provider"], sent["version"]) == (review["id"], "alert", "Voron 2.4", "none", platform.version)
+    assert (sent["print"], sent["kind"], sent["printer"], sent["provider"], sent["version"]) == (review["id"], "alert", "Voron 2.4", "octoprint", platform.version)
     assert sent["threshold"] == 0.75 and sent["score"] == alert["score"] and sent["ts"] == alert["ts"]
     assert state["feedback_hub"] == "a" * 32 and TOKEN not in json.dumps(state), "the state names the hub and never carries its token"
     assert platform.state["feedback_token"] == TOKEN, "the token is kept so the hub registers once"
     assert platform.http_calls.count(("POST", f"{feedback.ENDPOINT}/register")) == 1
+
+
+async def test_an_ignored_print_is_deleted_with_its_frames_and_recording(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.2)
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        review = await _finished_review(engine)
+        assert _kept_files(platform) and _recording_files(platform)
+        await engine.request({"cmd": "review.delete", "id": review["id"]})
+        assert engine.state_event()["reviews"] == []
+        assert not _kept_files(platform) and not _recording_files(platform)
+        with pytest.raises(RuntimeError, match="no review"):
+            await engine.request({"cmd": "review.delete", "id": review["id"]})
 
 
 def test_a_typed_printer_model_is_cut_to_what_the_inbox_takes() -> None:
@@ -5301,6 +5317,29 @@ async def test_a_plugin_for_another_platform_is_refused_from_any_source() -> Non
         assert engine.plugins.get("demo") is None
 
 
+async def test_a_plugin_for_a_newer_printguard_is_refused_and_marked_in_the_catalogue() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    manifest = {**MANIFEST, "min_printguard": "9.0.0"}
+    listed = [{"id": "demo", "name": "Demo", "min_printguard": "9.0.0"}, {"id": "spare", "name": "Spare", "min_printguard": platform.version}, {"id": "any", "name": "Any"}]
+    platform.responses = {plugins.CATALOGUE_URL: (200, {"plugins": listed})}
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        with pytest.raises(RuntimeError, match="needs PrintGuard 9.0.0 or newer"):
+            await engine.request({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest)})
+        assert engine.plugins.get("demo") is None
+        await engine.handle({"cmd": "plugin.catalogue"})
+
+    answer = next(e for e in events if e.get("event") == "catalogue")
+    assert [entry["supported"] for entry in answer["plugins"]] == [False, True, True]
+
+
+def test_min_printguard_is_a_plain_version() -> None:
+    """The oldest PrintGuard a plugin runs on reads as three numbers or not at all."""
+    assert plugins.sanitise_manifest({**MANIFEST, "min_printguard": "3.0.0"})["min_printguard"] == "3.0.0"
+    assert "min_printguard" not in plugins.sanitise_manifest(MANIFEST), "a plugin without one keeps the digest it was pinned with"
+    with pytest.raises(ValueError, match="min_printguard"):
+        plugins.sanitise_manifest({**MANIFEST, "min_printguard": "3.0"})
+
+
 async def test_plugins_survive_a_restart() -> None:
     platform = FakePlatform(infer_s=0.02)
     async with running_engine(platform, camera_fps=[]) as (engine, _):
@@ -6532,6 +6571,27 @@ async def test_editing_an_idle_printers_connection_does_not_make_a_print(monkeyp
         assert engine.state_event()["reviews"] == [] and not platform.files.blobs
 
 
+async def test_a_print_whose_printer_never_answers_is_recorded_and_reviewed_once_switched_off(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
+    monkeypatch.setattr(reviews, "RECORD_EVERY_S", 0.05)
+    platform = FakePlatform(infer_s=0.02)
+    platform.device_status = "Detecting serial connection"
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        monitor_id = next(iter(engine.monitors))
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id}})
+        await asyncio.sleep(0.6)
+        assert engine.printers.get(printer_id).reported_status is None
+        running = engine.state_event()["reviews"]
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": False}})
+        await asyncio.sleep(0.2)
+        finished = engine.state_event()["reviews"]
+
+    assert [review["status"] for review in running] == ["running"], "a watched print is kept before its printer ever answers"
+    assert [review["status"] for review in finished] == ["ready"], "switching the monitor off sends the print to review"
+    assert finished[0]["recording"]["frames"] > 1, "the print was recorded to scrub through"
+
+
 async def test_prints_sent_together_register_the_hub_once(monkeypatch) -> None:
     monkeypatch.setattr(reviews, "SPACED_START_S", 0.1)
     platform = FakePlatform(infer_s=0.02)
@@ -7039,11 +7099,11 @@ async def test_a_monitor_edited_while_another_keeps_its_frame_is_scored_as_it_no
         await asyncio.sleep(0.3)
         sample, keeping, edited = engine.reviews.sample, asyncio.Event(), asyncio.Event()
 
-        async def slow_sample(monitor, frame, score, ts, recording):
+        async def slow_sample(monitor, frame, score, ts, recording, answered):
             if monitor["id"] == first and platform.failing and not edited.is_set():
                 keeping.set()
                 await edited.wait()
-            return await sample(monitor, frame, score, ts, recording)
+            return await sample(monitor, frame, score, ts, recording, answered)
 
         engine.reviews.sample = slow_sample
         platform.failing = True

@@ -1,6 +1,8 @@
-import { renderMarkdown } from "../markdown";
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
+import { renderMarkdown } from "../markdown";
 import { useStore } from "../store";
+import { webUrl } from "../urls";
 import { CopyButton } from "./CopyButton";
 import { Dialog } from "./Dialog";
 import { NewTab } from "./NewTab";
@@ -8,9 +10,17 @@ import { NewTab } from "./NewTab";
 const PULL_COMMAND = "docker compose pull && docker compose up -d";
 
 export function UpdateDialog() {
-  const { engine, releases, reconnecting, send, isPending, openDialog } = useStore();
+  const { engine, releases, reconnecting, send, checking, openDialog } = useStore(
+    useShallow((s) => ({
+      engine: s.engine,
+      releases: s.releases,
+      reconnecting: s.reconnecting,
+      send: s.send,
+      checking: s.isPending("update.check"),
+      openDialog: s.openDialog,
+    })),
+  );
   const update = engine?.update ?? null;
-  const checking = isPending("update.check");
   const current = engine?.version || update?.current;
   const available = update?.available ?? false;
   const [selected, setSelected] = useState<string | null>(null);
@@ -21,6 +31,8 @@ export function UpdateDialog() {
 
   const release = releases.find((entry) => entry.version === selected) ?? releases[0] ?? null;
   const date = release?.published_at ? new Date(release.published_at).toLocaleDateString() : null;
+  const releasesUrl = webUrl(update?.releases_url ?? release?.url ?? "");
+  const downloadUrl = update?.download ? webUrl(update.download) : null;
 
   return (
     <Dialog title={available ? "Update available" : "Updates"} onClose={() => openDialog(null)}>
@@ -70,36 +82,38 @@ export function UpdateDialog() {
               className="changelog max-h-[40dvh] overflow-y-auto pr-1"
               dangerouslySetInnerHTML={{ __html: renderMarkdown(release.notes || "_No release notes._", { base: release.files_url }) }}
             />
-            <a
-              href={update?.releases_url ?? release.url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[0.7rem] text-accent underline hover:opacity-80 inline-block"
-            >
-              All releases on GitHub <NewTab />
-            </a>
+            {releasesUrl && (
+              <a
+                href={releasesUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-accent underline hover:opacity-80 inline-block"
+              >
+                All releases on GitHub <NewTab />
+              </a>
+            )}
           </div>
         )}
 
         {available && (
           <div className="hairline pt-4 space-y-2">
             <span className="label block">Update the hub</span>
-            {update!.download ? (
+            {downloadUrl ? (
               <>
-                <a className="btn btn-primary inline-block" href={update!.download} target="_blank" rel="noreferrer">
+                <a className="btn btn-primary inline-block" href={downloadUrl} target="_blank" rel="noreferrer">
                   Download v{update!.latest} <NewTab />
                 </a>
-                <p className="text-[0.7rem] text-text-2">
-                  Quit PrintGuard from the tray, replace the app with the downloaded one, and open it again.
+                <p className="text-xs text-text-2">
+                  Quit PrintGuard from the menu bar or system tray, replace the app with the new download and open it again.
                 </p>
               </>
             ) : (
               <>
-                <p className="text-[0.7rem] text-text-2">
-                  Pull the new image and recreate the container where your compose file lives:
+                <p className="text-xs text-text-2">
+                  Pull the new image and recreate the container from the folder with your compose file:
                 </p>
                 <div className="flex items-center gap-2">
-                  <code className="mono text-[0.68rem] text-text-0 break-all flex-1">{PULL_COMMAND}</code>
+                  <code className="mono text-xs text-text-0 break-all flex-1">{PULL_COMMAND}</code>
                   <CopyButton text={PULL_COMMAND} />
                 </div>
               </>
@@ -107,7 +121,7 @@ export function UpdateDialog() {
           </div>
         )}
 
-        <p className="text-[0.7rem] text-text-2">
+        <p className="text-xs text-text-2">
           {update ? `Last checked ${new Date(update.checked_at * 1000).toLocaleString()}.` : "No check has run yet."}
         </p>
       </div>

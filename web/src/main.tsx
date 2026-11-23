@@ -2,6 +2,7 @@ import { Component, StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { markLastInput } from "./a11y";
 import { App } from "./App";
+import { DrawFailure } from "./components/DrawFailure";
 import { captureErrors } from "./log";
 import "./styles.css";
 
@@ -13,17 +14,7 @@ class RenderFailure extends Component<{ children: ReactNode }, { failed: boolean
   }
 
   render() {
-    if (!this.state.failed) return this.props.children;
-    return (
-      <main role="alert" className="grid min-h-dvh place-items-center p-6 text-center">
-        <div className="space-y-3">
-          <p className="text-text-0">PrintGuard hit an error drawing this page.</p>
-          <button className="btn btn-primary" onClick={() => location.reload()}>
-            Reload
-          </button>
-        </div>
-      </main>
-    );
+    return this.state.failed ? <DrawFailure /> : this.props.children;
   }
 }
 

@@ -27,7 +27,7 @@ export function Slider({
     <label className="block">
       <div className="flex justify-between mb-1">
         <span id={labelId} className="label">{label}</span>
-        <span className="mono text-[0.72rem] text-text-0">{format(value)}</span>
+        <span className="mono text-xs text-text-0">{format(value)}</span>
       </div>
       {marks && (
         <span aria-hidden className="relative mx-[7px] block h-2 pointer-coarse:mx-3">
@@ -45,7 +45,7 @@ export function Slider({
         aria-describedby={hint ? hintId : undefined}
         onChange={(e) => onChange(Number(e.target.value))}
       />
-      {hint && <p id={hintId} className="text-[0.7rem] leading-snug text-text-2 mt-1">{hint}</p>}
+      {hint && <p id={hintId} className="text-xs leading-snug text-text-2 mt-1">{hint}</p>}
     </label>
   );
 }

@@ -23,9 +23,11 @@ export function Toggle({
         aria-checked={on}
         aria-labelledby={labelId}
         className="toggle"
-        data-on={on}
         onClick={() => onChange(!on)}
-      />
+      >
+        <span aria-hidden>Off</span>
+        <span aria-hidden>On</span>
+      </button>
     </label>
   );
 }

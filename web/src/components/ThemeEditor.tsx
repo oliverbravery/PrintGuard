@@ -15,7 +15,7 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
         type="color"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-7 w-8 pointer-coarse:h-11 pointer-coarse:w-11 cursor-pointer rounded border border-line-1 bg-transparent p-0"
+        className="h-7 w-8 pointer-coarse:h-11 pointer-coarse:w-11 cursor-pointer border border-line-1 bg-transparent p-0"
         aria-label={`${label} colour`}
       />
       <input className="field mono" aria-label={`${label} hex`} style={{ width: "5.5rem" }} value={text} spellCheck={false} onChange={(e) => commit(e.target.value)} />
@@ -68,7 +68,7 @@ export function ThemeEditor({
         </div>
       ))}
 
-      <span className="block text-[0.7rem] text-text-2">Changes preview live. Save to keep this theme and switch to it.</span>
+      <span className="block text-xs text-text-2">Changes preview live. Hit Save to keep this theme and switch to it.</span>
       <div className="flex gap-2">
         <button className="btn flex-1" onClick={onCancel}>
           Cancel

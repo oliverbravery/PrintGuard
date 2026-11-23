@@ -1,42 +1,40 @@
 import { savedChannels, useStore } from "../store";
+import { type Target, useGo } from "./Page";
 import { Progress } from "./Progress";
-import type { DialogKind } from "../store";
 
-interface Step {
+type Step = Target & {
   n: number;
   title: string;
   why: string;
   done: boolean;
-  dialog: DialogKind;
-  focusCameraId?: string;
   optional?: boolean;
-}
+};
 
 function StepRow({ step, primary }: { step: Step; primary: boolean }) {
-  const openDialog = useStore((s) => s.openDialog);
+  const go = useGo();
   return (
-    <li className="flex items-center gap-3 rounded border border-line-0 bg-ink-0/40 px-3.5 py-2.5">
+    <li className="flex items-center gap-3 border-b border-line-0 px-4 py-3">
       <span
-        className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[0.72rem] font-semibold ${
-          step.done ? "bg-accent text-on-accent" : "border border-line-1 text-text-2"
+        className={`mono grid size-7 shrink-0 place-items-center text-xs font-semibold ${
+          step.done ? "bg-text-0 text-ink-0" : "border border-line-1 text-text-1"
         }`}
       >
         {step.done ? "✓" : step.n}
       </span>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 text-sm text-text-0">
+        <div className="flex items-center gap-2 text-sm font-semibold">
           {step.title}
           {step.optional && <span className="label">optional</span>}
         </div>
-        <div className="text-xs text-text-2">{step.why}</div>
+        <div className="text-sm text-text-2">{step.why}</div>
       </div>
       {step.done ? (
-        <span className="label shrink-0 text-accent">done</span>
+        <span className="label shrink-0 text-ok">done</span>
       ) : (
         <button
           className={`btn shrink-0 ${primary ? "btn-primary" : ""}`}
           aria-label={`Open ${step.title}`}
-          onClick={() => openDialog(step.dialog, step.focusCameraId)}
+          onClick={() => go(step)}
         >
           Open
         </button>
@@ -53,39 +51,38 @@ export function GettingStarted() {
     {
       n: 1,
       title: "Register a camera",
-      why: "The video source PrintGuard watches.",
+      why: "Add the camera feed you want PrintGuard to watch.",
       done: engine.cameras.length > 0,
-      dialog: "cameras",
+      dialog: "camera",
     },
     {
       n: 2,
       title: "Frame the print",
-      why: "The model watches a square, so crop it to the print.",
+      why: "Crop the feed tightly around the print bed so the model focuses on the print.",
       done: engine.cameras.some((c) => c.crop),
-      dialog: "cameras",
-      focusCameraId: engine.cameras[0]?.id,
+      ...(engine.cameras[0] ? { to: `/cameras/${engine.cameras[0].id}` } : { dialog: "camera" as const }),
       optional: true,
     },
     {
       n: 3,
       title: "Connect a printer",
-      why: "Lets PrintGuard pause or cancel on a defect.",
+      why: "Let PrintGuard pause or cancel prints automatically when something fails.",
       done: engine.printers.length > 0,
-      dialog: "printers",
+      dialog: "printer",
       optional: true,
     },
     {
       n: 4,
       title: "Set up alerts",
-      why: "Get a snapshot on your phone when a defect holds.",
+      why: "Get a snapshot on your phone as soon as a defect is spotted.",
       done: Object.keys(savedChannels(engine)).length > 0,
-      dialog: "settings",
+      to: "/settings/alerts",
       optional: true,
     },
     {
       n: 5,
       title: "Add a monitor",
-      why: "Bind a camera and start watching.",
+      why: "Link a camera and printer together to start watching.",
       done: engine.monitors.length > 0,
       dialog: "monitor",
     },
@@ -94,30 +91,22 @@ export function GettingStarted() {
   const primaryStep = steps.find((s) => !s.optional && !s.done) ?? steps.find((s) => !s.done);
 
   return (
-    <div className="reveal grid place-items-center py-16 sm:py-20">
-      <div className="panel relative w-full min-w-0 max-w-xl p-7 sm:p-9">
-        <span className="corner corner-tl !border-text-2" />
-        <span className="corner corner-tr !border-text-2" />
-        <span className="corner corner-bl !border-text-2" />
-        <span className="corner corner-br !border-text-2" />
-        <div className="mb-1 flex items-center gap-2.5">
-          <span className="led led-infer" />
-          <h2 className="display text-xl font-bold">GET PRINTGUARD WATCHING</h2>
-        </div>
-        <p className="mb-5 text-sm text-text-1">
-          Register a camera and add a monitor to start watching. Connect a printer and alerts for the
-          full safety net.
+    <div className="mx-auto w-full min-w-0 max-w-2xl px-4 py-10 sm:py-16">
+      <div className="border border-rule">
+        <div className="border-b border-rule px-4 py-4">
+          <h2 className="text-xl font-bold tracking-[-0.02em]">Get PrintGuard watching</h2>
+        <p className="mt-1 text-sm text-text-1">
+          Add a camera and create a monitor to get started. Connect a printer and an alert channel too
+          if you want auto-pause and phone notifications.
         </p>
-        <Progress label="Setup progress" value={doneCount} total={steps.length} className="mb-4" />
-        <ol className="space-y-2.5">
+        <Progress label="Setup progress" value={doneCount} total={steps.length} className="mt-4" />
+        </div>
+        <ol>
           {steps.map((step) => (
             <StepRow key={step.n} step={step} primary={step === primaryStep} />
           ))}
         </ol>
-        <button
-          className="tap-target mt-5 text-xs text-text-2 underline transition-colors hover:text-accent"
-          onClick={() => openDialog("intro")}
-        >
+        <button className="btn-inline m-4" onClick={() => openDialog("intro")}>
           How PrintGuard works
         </button>
       </div>

@@ -3,7 +3,7 @@ import type { PrintMeta } from "../types";
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="panel px-3 py-2">
+    <div className="border border-line-0 px-3 py-2">
       <div className="mono truncate text-sm text-text-0">{value}</div>
       <div className="label mt-0.5">{label}</div>
     </div>

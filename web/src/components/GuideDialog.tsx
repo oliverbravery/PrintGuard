@@ -1,34 +1,35 @@
-import { GUIDE, SHOT_SIZES, type GuideSection } from "../guide";
+import { GUIDE, type GuideSection } from "../guide";
+import { SHOT_SIZES } from "../guideShots";
 import { useStore } from "../store";
 import { Dialog } from "./Dialog";
 import { NewTab } from "./NewTab";
+import { useGo } from "./Page";
 
 const REPO = "https://github.com/oliverbravery/PrintGuard";
 const MODEL = "https://github.com/oliverbravery/Edge-FDM-Fault-Detection";
 
 export function GuideEntry({ section, lead, fill }: { section: GuideSection; lead?: boolean; fill?: boolean }) {
-  const openDialog = useStore((s) => s.openDialog);
-  const openSettings = useStore((s) => s.openSettings);
+  const go = useGo();
   const { action } = section;
   const [shotWidth, shotHeight] = section.shot ? SHOT_SIZES[section.shot] : [];
   return (
     <section className={`reveal ${fill ? "flex h-full min-h-0 flex-col" : ""}`}>
       <div className="mb-1.5 flex shrink-0 items-center gap-2.5">
         <span className={`led ${section.led}`} />
-        <h3 className={lead ? "display text-base font-bold" : "display text-sm font-semibold tracking-[0.14em]"}>
+        <h3 className={lead ? "text-lg font-bold" : "text-base font-bold"}>
           {section.title}
         </h3>
       </div>
-      <p className={`shrink-0 leading-relaxed text-text-1 ${lead ? "text-sm" : "text-[0.84rem]"}`}>{section.body}</p>
+      <p className={`shrink-0 leading-relaxed text-text-1 ${lead ? "text-sm" : "text-sm"}`}>{section.body}</p>
       {section.shot && (
-        <figure className={`shot ${fill ? "shot-fill" : ""}`}>
+        <figure className={`shot ${fill ? "shot-fill" : ""}`} style={{ "--shot-width": `${shotWidth! / 2}px`, "--shot-ratio": shotWidth! / shotHeight! } as React.CSSProperties}>
           <img className="shot-dark" src={`guide/${section.shot}-dark.jpg`} alt="" loading="lazy" width={shotWidth} height={shotHeight} />
           <img className="shot-light" src={`guide/${section.shot}-light.jpg`} alt="" loading="lazy" width={shotWidth} height={shotHeight} />
         </figure>
       )}
       {section.visual && <div className="mt-3">{section.visual}</div>}
       {action && (
-        <button className="btn mt-2.5" onClick={() => (action.tab ? openSettings(action.tab) : openDialog(action.dialog))}>
+        <button className="btn mt-2.5" onClick={() => go(action)}>
           {action.label}
         </button>
       )}
@@ -42,15 +43,15 @@ export function GuideDialog() {
     <Dialog title="Guide" size="wide" onClose={() => openDialog(null)}>
       <div className="space-y-6">
         <p className="text-sm text-text-1">
-          What everything on the dashboard means, and what you can do with it. Use a section's action
-          to jump straight in.
+          A quick rundown of what everything on the dashboard does. Use the button under any section
+          to jump straight there.
         </p>
         {GUIDE.map((section) => (
           <GuideEntry key={section.id} section={section} />
         ))}
         <footer className="hairline flex flex-wrap gap-x-6 gap-y-2 pt-4">
           <a
-            className="mono text-[0.66rem] text-text-2 transition-colors hover:text-accent"
+            className="mono text-xs text-text-2 transition-colors hover:text-accent"
             href={REPO}
             target="_blank"
             rel="noreferrer"
@@ -58,7 +59,7 @@ export function GuideDialog() {
             Documentation <NewTab />
           </a>
           <a
-            className="mono text-[0.66rem] text-text-2 transition-colors hover:text-accent"
+            className="mono text-xs text-text-2 transition-colors hover:text-accent"
             href={MODEL}
             target="_blank"
             rel="noreferrer"

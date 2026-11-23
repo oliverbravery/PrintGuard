@@ -34,9 +34,9 @@ export const BENCHMARKS: Benchmark[] = [
 ];
 
 export const MODELS: { id: ModelId; name: string; about: string }[] = [
-  { id: "standard", name: "Standard", about: "The most accurate. It catches twice as many failed prints as Light." },
-  { id: "light", name: "Light", about: "About 2.5x faster than Standard, for a slower CPU or many cameras." },
-  { id: "legacy", name: "Legacy", about: "The model PrintGuard started with. The fastest, but it misses most failures." },
+  { id: "standard", name: "Standard", about: "The most accurate option. Catches twice as many failed prints as Light." },
+  { id: "light", name: "Light", about: "Roughly 2.5x faster than Standard, ideal for slower CPUs or multi-camera setups." },
+  { id: "legacy", name: "Legacy", about: "The original dissertation model. Fastest of the three, though it misses most failures." },
 ];
 
 export function benchmark(id: Benchmark["id"]): Benchmark {

@@ -2,6 +2,9 @@ declare global {
   /** Colour a `chip` node is drawn in. */
   type PluginChipTone = "ok" | "warn" | "bad" | "accent";
 
+  /** An icon a `button` can show in place of its label, drawn with the dashboard's own icons. */
+  type PluginButtonIcon = "play" | "pause" | "stop" | "previous" | "next" | "refresh";
+
   /** One note in a sound, played with a fast attack and a decay to silence. */
   interface PluginTone {
     /** Pitch in hertz, 20 to 12000. */
@@ -39,8 +42,18 @@ declare global {
     | { type: "input"; value?: string; label?: string; action: string; kind?: "text" | "number"; placeholder?: string; secret?: boolean }
     /** A switch, handed `true` or `false` as the arg. */
     | { type: "toggle"; on?: boolean; label?: string; action: string }
-    /** Calls your `action` handler with `action` as the name and `arg` as given. */
-    | { type: "button"; label: string; action: string; arg?: unknown }
+    /**
+     * Calls your `action` handler with `action` as the name and `arg` as given.
+     * With an `icon` it shows the icon, and `label` is what a screen reader says.
+     */
+    | { type: "button"; label: string; action: string; arg?: unknown; icon?: PluginButtonIcon; disabled?: boolean }
+    /**
+     * Your panel's row, drawn like a monitor's. `image` sits where a camera's frame
+     * would, as an image you shipped named as it is in `assets`, or a base64 `data:`
+     * URL of a PNG, JPEG, WebP or GIF. `actions` are drawn at the end of the row.
+     * It only counts as the whole view, so one inside another node is dropped.
+     */
+    | { type: "item"; title: string; description?: string; image?: string; actions?: (PluginNode | null | false | undefined)[] }
     /** Calls your `action` handler with the chosen option's value as the arg. Its `label` is drawn above it. */
     | { type: "select"; value?: string; label?: string; action: string; options: { value: string; label: string }[] };
 
@@ -305,11 +318,21 @@ declare global {
     theme: Record<string, string>;
     /** The names of the secrets your plugin holds, never their values. `oauth` is there once the user has signed in. */
     secrets: string[];
-    /** Called once the panel is drawn, then on every state change and every event you named. */
-    on<K extends keyof PluginEvents | "ready" | "state">(
+    /**
+     * Called once the panel is drawn, then on every state change and every event you named.
+     * `action` is a press on a node your `view` drew.
+     */
+    on<K extends keyof PluginEvents | "ready" | "state" | "action">(
       event: K,
-      handler: (event: K extends keyof PluginEvents ? PluginEvents[K] : PluginState) => void,
+      handler: (
+        event: K extends keyof PluginEvents ? PluginEvents[K] : K extends "action" ? { event: "action"; name: string; arg: unknown } : PluginState,
+      ) => void,
     ): void;
+    /**
+     * Hands the dashboard a node tree to draw in place of this page, such as an
+     * `item`. Your script keeps running out of sight.
+     */
+    view(tree: PluginNode | null): void;
     /** A URL for a file you shipped, good inside this panel and nowhere else. Point an `img` at it. Audio and video play only if the plugin was granted `sound`. */
     asset(name: string): string;
   }

@@ -96,6 +96,7 @@ def entry(directory: Path) -> dict:
         "description": manifest["description"],
         "author": manifest["author"],
         "version": manifest["version"],
+        **({"min_printguard": manifest["min_printguard"]} if "min_printguard" in manifest else {}),
         "icon": manifest["icon"],
         "media": manifest["media"],
         "permissions": manifest["permissions"],

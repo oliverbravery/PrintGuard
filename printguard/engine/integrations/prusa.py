@@ -79,7 +79,7 @@ class PrusaAdapter(IntegrationAdapter):
     setup_url = "https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293"
     setup_hint = (
         "Enable PrusaLink on the printer (Settings > Network > PrusaLink) and use the password "
-        "shown there. The username is 'maker' unless you chose another setting PrusaLink up on a Raspberry Pi."
+        "shown there. The username is 'maker' unless you picked a different one when setting up PrusaLink on a Raspberry Pi."
     )
     experimental = False
     formats = ("gcode", "bgcode")

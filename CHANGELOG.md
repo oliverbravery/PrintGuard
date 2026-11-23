@@ -7,21 +7,28 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0] - 2026-11-22
+## [3.0.0] - 2026-11-23
 
 ### Added
 
-- Two new detection models, Light and Standard. On frames from 30 hubs none of the models was trained on, Standard catches 10 of 20 failed prints where the old model caught 1, with the same 1 in 70 good prints alarmed. Pick one when you first open the dashboard or in Settings under Detection, where a chart compares them with Obico's.
+- Two new detection models, **Standard** and **Light**, trained on over 9,000 real frames submitted by the community. Tested on 30 hubs none of the models had seen before, Standard catches 10 of 20 failed prints compared to 1 of 20 for the old dissertation model, with the same single false alarm out of 70 good prints. You can pick a model during first-run setup or switch any time under **Settings** -> **Detection**, which also charts them against Obico's open models.
+- Plugins now get their own rows in the fleet list, and can render cards with an image, title and buttons in the dashboard's native style.
+- Plugins can declare a `min_printguard` version in their manifest so older hubs refuse to install ones they can't run (Spotify 1.1.0 now requires 3.0.0).
 
 ### Changed
 
-- Hubs run Standard after updating. It's about 5x slower than the old model on a CPU, so pick Light, or Legacy for the old model, if the capacity readout falls below what your cameras need.
-- The runtime setting has moved from the Advanced tab in Settings to the Detection tab.
-- The image and the desktop apps are about 45 MB larger, since they carry the new models.
+- Full dashboard redesign. Your fleet sits in a side list like every other page, and selecting a monitor puts its live feed, risk score and printer controls front and centre beside it. Prints, Cameras, Printers and Settings each move onto their own full pages instead of cramped dialogs.
+- Standard is now the default model after updating. Because it's around 5x heavier on CPU than the old model, switch to **Light** (or **Legacy**) in Settings if your host's capacity readout drops below what your cameras need.
+- The inference runtime picker has moved from **Advanced** into **Settings** -> **Detection**.
+- Creality and Ultimaker integrations are no longer marked experimental.
+- Monitor settings and end-of-print review now live in **Configure** and **Review** tabs on each monitor. Reviewing a print is simpler too: just flag the frames where something went wrong instead of answering a separate pass/fail question for the whole print.
+- Printer model is now set once on the printer itself instead of being asked on every review, and clicking **Ignore** on a review deletes its kept frames and recording to free up disk space.
+- The Docker image and desktop apps are roughly 45 MB larger to bundle the new models.
+- A print is kept and recorded for review from the moment its monitor starts watching, even when the linked printer can't be reached.
 
 ### Removed
 
-- Classify results and a camera's `last_result` no longer carry `distances` or `margin`, and `result` events no longer carry `margin`, since only Legacy has prototypes to measure them against. Read `defect_score` instead.
+- Classification results and `last_result` no longer include `distances` or `margin`, and `result` events no longer include `margin` (those were specific to Legacy's prototype classifier). Read `defect_score` instead.
 
 ## [2.6.7] - 2026-11-14
 

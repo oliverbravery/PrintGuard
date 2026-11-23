@@ -18,9 +18,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import type { ReactElement, ReactNode } from "react";
 import { sharesPinning } from "../layout";
-import { SectionHead } from "./SectionHead";
 
-export { horizontalListSortingStrategy, rectSortingStrategy } from "@dnd-kit/sortable";
+export { rectSortingStrategy, verticalListSortingStrategy } from "@dnd-kit/sortable";
 
 type SortableState = ReturnType<typeof useSortable>;
 
@@ -78,28 +77,4 @@ export function SortableItem({ id, children }: { id: string; children: (handle: 
     listeners,
     style: { transform: CSS.Transform.toString(transform), transition },
   });
-}
-
-export function HiddenTray({
-  label,
-  items,
-  onShow,
-}: {
-  label: string;
-  items: { id: string; name: string }[];
-  onShow: (id: string) => void;
-}) {
-  if (items.length === 0) return null;
-  return (
-    <div className="mt-6">
-      <SectionHead title={label} />
-      <div className="flex flex-wrap gap-2">
-        {items.map((item) => (
-          <button key={item.id} className="btn !py-1.5 !px-3 !text-[0.68rem]" onClick={() => onShow(item.id)}>
-            {item.name} · show
-          </button>
-        ))}
-      </div>
-    </div>
-  );
 }

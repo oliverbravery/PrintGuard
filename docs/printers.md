@@ -6,7 +6,7 @@
 
 </div>
 
-Connecting a print service, sending it files and setting its temperatures.
+How to connect your printer to PrintGuard, send sliced files from the print library and control temperatures.
 
 - [How the pieces fit](#how-the-pieces-fit)
 - [Register a printer](#register-a-printer)
@@ -17,10 +17,7 @@ Connecting a print service, sending it files and setting its temperatures.
 
 ## How the pieces fit
 
-A camera and a printer are registered once each, then bound together by a monitor. One
-printer connection can back several monitors, and a monitor without a printer still watches
-and alerts. Each of the three carries a name you can change later, from **Edit** in the camera
-or printer registry and from a monitor's settings panel.
+Cameras and printers are registered once on their own pages, then linked together inside a monitor. One printer can be shared across multiple monitors (for example if you have two camera angles on the same machine), and a monitor with no printer still watches and alerts you. You can rename cameras, printers and monitors any time on their respective pages.
 
 ```mermaid
 flowchart LR
@@ -30,315 +27,186 @@ flowchart LR
     prn -. "job state gates inference" .-> mon
 ```
 
-The dotted lines are the optional parts. Bind no printer and PrintGuard still alerts you, it
-just cannot stop the print. [Cameras](cameras.md) covers the video side,
-[monitoring](monitoring.md) the thresholds and [notifications](notifications.md) the alert
-channels.
+The dotted lines are optional. Without a printer linked, PrintGuard still spots defects and alerts you, it just can't pause or cancel the job. See [Cameras](cameras.md) for video sources, [Monitoring](monitoring.md) for thresholds and [Notifications](notifications.md) for alert channels.
 
 ## Register a printer
 
-Open the printer registry, choose the service, fill in the form and press **Test connection**
-before saving. A printer with a starred field left blank is not saved, and the error names the
-field. A key or password the service rejects fails the test with that as the reason, and so does
-an address that answers but not as the service's API does, or one that redirects.
+Go to **Printers**, click **+ Add**, pick your print service, fill in the form and hit **Test connection** before saving. The optional **Printer model** field (like `Prusa MK4` or `Bambu P1S`) is only used to tag reviewed frames if you [share them for training](feedback.md). If a required field is left blank, PrintGuard refuses to save and tells you which one is missing. Invalid API keys, wrong passwords, non-API pages or redirecting URLs all fail the connection test with the reason shown.
 
-A saved key, password or access code is never shown again. Its field is empty and reads
-"Saved. Leave blank to keep it". Type in it to replace the saved one, or press **Clear** and
-save to remove it. **Test connection** on a saved printer uses the saved one while the field is
-blank. Changing the printer's address needs the key or password typed again, since a saved one
-is only kept for the address it was saved with, and the whole address typed, since the one shown
-leaves out any login or key it carries. Save stays off until both are done.
+Once saved, keys, passwords and access codes are never displayed again. Their fields stay blank with "Saved. Leave blank to keep it", and **Test connection** uses the saved secret automatically. Type a new value to replace it, or press **Clear** and save to wipe it. If you change a printer's address, PrintGuard asks you to re-enter both the full address (since saved URLs hide embedded logins) and any saved credentials, because saved secrets are only ever sent to the address they were originally saved with.
 
-Then bind
-it to a monitor and choose whether a sustained defect alerts you, pauses the print or cancels it.
+After saving, link the printer to a monitor and choose whether a sustained defect should just alert you, pause the print or cancel it.
 
-Linked printers report job name, progress, temperatures and state on every monitor that uses
-them, and they gate inference. Monitoring runs while a printer reports it is printing and stands
-down when it reports idle, paused or an error, so an idle printer costs nothing. Losing contact
-or a state the adapter cannot read keeps whatever the printer last reported, meaning a printer
-switched off after a print stays in standby while one that drops off mid-print keeps being
-watched and warns you. See [failing safely](architecture.md#failing-safely).
+Linked printers display job name, progress, temperatures and status on every monitor using them, and they also control when detection runs. PrintGuard watches while the printer is printing and drops into standby when the printer reports idle, paused or an error, so idle printers don't burn CPU. If the printer loses contact or returns an unrecognised state, PrintGuard sticks with its last known answer: a printer powered off after finishing stays on standby, while one that drops off mid-print stays watched and triggers a warning. See [failing safely](architecture.md#failing-safely).
 
 ## Supported print services
 
 | Service | Authentication | [Exposes a camera](cameras.md#printer-cameras) |
 |---|---|---|
-| [OctoPrint](https://octoprint.org) | An application key, from Settings then Application Keys in OctoPrint | Yes, its webcam stream |
-| [Klipper (Moonraker)](https://moonraker.readthedocs.io) | None on a trusted LAN. Otherwise add the hub's address to `trusted_clients` under `[authorization]` in `moonraker.conf`, or enter an API key | Yes, its configured webcams |
-| [Creality](https://github.com/CrealityOfficial/CrealityPrint/tree/v7.3.0/resources/web/deviceMgr) | None, so keep it on a trusted LAN | Its MJPEG stream on port 8080, on the models that serve one |
-| [Elegoo](https://github.com/ELEGOO-3D/elegoo-link) | Access code on a Centauri Carbon 2, or an optional Moonraker API key | Centauri chamber camera, or Moonraker's configured webcams |
-| [Prusa (PrusaLink)](https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293) | HTTP Digest, user `maker` unless you set another | No local stream |
-| [Bambu Lab](https://github.com/Doridian/OpenBambuAPI) | Access code and serial | Chamber camera |
-| [Ultimaker](https://github.com/Ultimaker/Cura/tree/main/plugins/UM3NetworkPrinting) | None, so keep it on a trusted LAN | Yes, its MJPEG stream on port 8080 |
+| [OctoPrint](https://octoprint.org) | Application key (Settings -> Application Keys in OctoPrint) | Yes, its webcam stream |
+| [Klipper (Moonraker)](https://moonraker.readthedocs.io) | None on a trusted LAN. Otherwise add your hub's IP to `trusted_clients` under `[authorization]` in `moonraker.conf`, or enter an API key | Yes, its configured webcams |
+| [Creality](https://github.com/CrealityOfficial/CrealityPrint/tree/v7.3.0/resources/web/deviceMgr) | None (keep it on a trusted LAN) | MJPEG stream on port 8080 on models that serve one |
+| [Elegoo](https://github.com/ELEGOO-3D/elegoo-link) | Access code on Centauri Carbon 2, or optional Moonraker API key | Centauri chamber camera, or Moonraker webcams |
+| [Prusa (PrusaLink)](https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293) | HTTP Digest (username `maker` by default) | No local stream |
+| [Bambu Lab](https://github.com/Doridian/OpenBambuAPI) | LAN access code and serial number | Chamber camera |
+| [Ultimaker](https://github.com/Ultimaker/Cura/tree/main/plugins/UM3NetworkPrinting) | None (keep it on a trusted LAN) | Yes, its MJPEG stream on port 8080 |
 
 <details>
 <summary><b>Bambu Lab</b>: LAN Only Mode and Developer Mode</summary>
 
-Bambu printers speak MQTT over TLS rather than HTTP.
+Bambu Lab printers talk over local MQTT over TLS rather than HTTP.
 
-1. On the printer, enable **LAN Only Mode**, then **Developer Mode** under
-   Network in Settings. Developer Mode is what lets PrintGuard pause, cancel, heat or start a
-   print.
-2. Note the access code shown there, and the serial number under Device in Settings.
-3. Register the printer with its IP address, serial number and access code.
+1. On the printer screen, turn on **LAN Only Mode**, then turn on **Developer Mode** under Settings -> Network. Developer Mode is required for PrintGuard to pause, cancel, set heater temperatures or start prints.
+2. Grab the **access code** shown on that screen, plus the **serial number** under Settings -> Device.
+3. Add the printer in PrintGuard with its IP address, serial number and access code.
 
-The chamber camera is registered automatically: RTSPS on port 322 on the X1 and H2 series, or the
-proprietary port 6000 protocol on the A1 and P1 series. The form links Bambu's
-[Enable LAN Mode](https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode) guide.
+PrintGuard registers the chamber camera automatically: RTSPS on port `322` for X1 and H2 series printers, or Bambu's proprietary port `6000` stream for A1 and P1 series. The setup form also links straight to Bambu's [Enable LAN Mode](https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode) guide.
 
-Bambu printers present self-signed certificates, so PrintGuard doesn't verify the printer it
-connects to. The access code only goes to the address you registered, so keep the printer on a
-network you trust.
+Because Bambu printers use self-signed certificates, PrintGuard skips certificate verification for them. Your access code is only ever sent to the IP you registered, so keep the printer on a trusted LAN.
 
-PrintGuard holds one connection to the printer and reads the reports it pushes. A printer that
-pushes nothing for a minute is reconnected and shown offline until it reports again. With
-Developer Mode off the printer still reports its state but rejects a pause, cancel, heater
-target or print start, and PrintGuard reports that command as failed.
+PrintGuard maintains a single persistent connection and listens to pushed reports. If nothing arrives for a minute, it reconnects and marks the printer offline until reports resume. With Developer Mode disabled, status updates still come through, though pause, cancel, preheat and print start commands are rejected by the printer and reported as failed.
 
 </details>
 
 <details>
-<summary><b>Creality</b>: the K1, K2, Ender-3 V3, Hi and CR-10 SE on stock firmware</summary>
+<summary><b>Creality</b>: K1, K2, Ender-3 V3, Hi and CR-10 SE on stock firmware</summary>
 
-Creality's stock firmware on the K1, K2, Ender-3 V3 and Hi series and the CR-10 SE serves the
-WebSocket Creality Print talks to. Register the printer with its IP address or hostname. The hub
-reaches it on port `9999`, and on port `80` to upload a print. Neither has a password, so keep
-the printer on a network you trust. A rooted printer running Moonraker connects as
-**Klipper (Moonraker)** instead.
+Stock firmware on the K1, K2, Ender-3 V3, Hi series and CR-10 SE exposes the same local WebSocket that Creality Print uses. Add the printer by IP or hostname. PrintGuard connects on port `9999` for status/control and port `80` for uploading prints. There is no password, so keep the printer on a trusted network. If your printer is rooted and running Moonraker, add it as **Klipper (Moonraker)** instead.
 
-PrintGuard holds one connection to the printer and reads the state it pushes. A printer that
-sends nothing for 20 seconds is reconnected. The printer doesn't answer a command, so a pause,
-resume, cancel or heater target counts as sent once the printer reports the state or target it
-leads to, within 10 seconds. While it pauses, stops, restores or starts a print its state shows
-as unknown and a monitor stays as it was.
+PrintGuard holds one persistent WebSocket connection and reconnects if the printer stays silent for 20 seconds. Because the firmware doesn't send direct command acknowledgements, PrintGuard confirms a pause, resume, cancel or heater change by waiting up to 10 seconds for the printer's pushed state to reflect it. While the printer is pausing, stopping, resuming or starting a print, its state shows as unknown and monitors keep their current watching state.
 
-A K1 on firmware older than 1.3.5.22, and a K1 SE or Ender-3 V3 with Creality's camera fitted,
-serve an MJPEG stream on port `8080` that's registered as the printer's camera. The K2, the Hi
-and later K1 firmware stream WebRTC with Creality's own signalling, so put
-[go2rtc](https://github.com/AlexxIT/go2rtc) in front of the camera and add it as a
-[stream URL](cameras.md#stream-urls).
+K1 printers on firmware older than 1.3.5.22, plus K1 SE and Ender-3 V3 printers with Creality's camera fitted, serve an MJPEG stream on port `8080` which PrintGuard registers automatically. The K2, Hi and newer K1 firmware use custom WebRTC signalling instead; put [go2rtc](https://github.com/AlexxIT/go2rtc) in front of the camera and add it as a [stream URL](cameras.md#stream-urls).
 
 </details>
 
 <details>
-<summary><b>Elegoo</b>: two families, Centauri Carbon and Neptune or OrangeStorm</summary>
+<summary><b>Elegoo</b>: Centauri Carbon and Neptune / OrangeStorm</summary>
 
-Choose the family that matches your printer:
+Pick the family that matches your machine:
 
-**Centauri Carbon 1 / 2** covers the Centauri Carbon and Centauri Carbon 2. PrintGuard detects which
-local protocol the printer speaks and registers its chamber camera automatically.
+**Centauri Carbon 1 / 2** covers both the Centauri Carbon and Centauri Carbon 2. PrintGuard automatically detects which local protocol the printer speaks and registers its chamber camera.
 
-- Carbon 2: enable **LAN Only Mode** in its network settings and use the access code shown
-  there.
-- Original Carbon: the IP address is enough.
+- **Carbon 2**: turn on **LAN Only Mode** in network settings and enter the access code shown on the screen.
+- **Original Carbon**: the IP address alone is enough.
 
-While a Carbon 2 starts up, loads or unloads filament, levels or calibrates outside a print,
-PrintGuard shows its state as unknown and a monitor stays as it was.
+While a Carbon 2 is booting, loading/unloading filament, levelling or calibrating outside a print, its state reads as unknown and monitors stay as they were.
 
-**Neptune 4 / OrangeStorm Giga** covers the Neptune 4 Pro, Plus and Max, the OrangeStorm Giga, and
-any other Elegoo printer running Moonraker. PrintGuard uses the stock Moonraker service on
-port `7125`, accepts an API key if you set one and registers the webcams Moonraker lists.
+**Neptune 4 / OrangeStorm Giga** covers the Neptune 4 Pro, Plus and Max, OrangeStorm Giga and other Moonraker-based Elegoo printers. PrintGuard connects to stock Moonraker on port `7125`, supports an optional API key and pulls in any webcams listed in Moonraker.
 
-All state, camera and control traffic stays between PrintGuard and the printer on your LAN.
-Elegoo's cloud is never involved.
+Everything stays on your local network; Elegoo's cloud is never used.
 
 </details>
 
 <details>
-<summary><b>Prusa</b>: PrusaLink, not PrusaConnect</summary>
+<summary><b>Prusa</b>: PrusaLink (not PrusaConnect)</summary>
 
-Prusa printers connect over **PrusaLink**, the API that runs on the printer itself on the
-MK4, MK4S, MK3.9, MK3.5, MINI, XL and CORE One, or on a Raspberry Pi attached to an MK3 or
-MK2.5. It authenticates with HTTP Digest.
+Prusa printers connect through **PrusaLink**, the local API built into the MK4, MK4S, MK3.9, MK3.5, MINI, XL and CORE One (or running on a Raspberry Pi wired to an MK3 or MK2.5), using HTTP Digest auth.
 
-1. Enable **PrusaLink** on the printer under Settings, Network, then PrusaLink.
-2. Register it with its URL and the password shown there. The username is `maker` on the printer's own firmware. PrusaLink on a Raspberry Pi uses the one you chose when setting it up, so enter that under **Username**.
+1. Turn on **PrusaLink** on the printer under Settings -> Network -> PrusaLink.
+2. Add the printer with its URL and password. On stock printer firmware the username is `maker`; if you set up PrusaLink on a Raspberry Pi with a custom username, enter that under **Username**.
 
-PrusaLink reports ERROR as error, and ATTENTION and BUSY as unknown. Buddy firmware shows a
-warning over a print that keeps running, as ATTENTION or as a paused job, so PrintGuard keeps what it
-last knew while one is up. With no job running the printer's own state is used, and unknown if it gives none.
+PrusaLink's `ERROR` maps to error, while `ATTENTION` and `BUSY` map to unknown. Buddy firmware sometimes displays a warning (`ATTENTION` or paused) while a job keeps running, so PrintGuard holds onto its last known state while one is shown. When no job is active, PrintGuard reads the printer's own state (or unknown if none is reported).
 
-PrusaConnect is not used, so no frames or job data leave hardware you own. PrusaLink's
-webcam feature pushes snapshots to PrusaConnect rather than serving a local video stream, so
-if the printer has a camera, add it separately as a [stream URL](cameras.md#stream-urls).
+PrusaConnect is never used, so nothing leaves your local network. Since PrusaLink's camera feature pushes stills to PrusaConnect rather than serving a local video stream, add any camera separately as a [stream URL](cameras.md#stream-urls).
 
 </details>
 
 <details>
-<summary><b>Ultimaker</b>: the local API Cura prints through</summary>
+<summary><b>Ultimaker</b>: local Cura network printing API</summary>
 
-Ultimaker printers connect over the local API Cura uses to print over your network, on the
-Ultimaker 3 and 3 Extended, S3, S5, S7 and Factor 4. It has no password, so keep the printer on a
-network you trust.
+Supports the Ultimaker 3, 3 Extended, S3, S5, S7 and Factor 4 via the same local API Cura uses. There is no authentication on read/print endpoints, so keep the printer on a trusted network.
 
-1. Find the printer's IP address on its screen under Preferences, then Network.
-2. Register each printer by its own address, such as `http://192.168.1.60`.
+1. Look up the printer's IP on its touchscreen under Preferences -> Network.
+2. Register each printer with its address, e.g. `http://192.168.1.60`.
 
-A finished or aborted print waiting for you to clear the bed shows as idle. While the printer
-boots, runs maintenance or waits for you mid-print, PrintGuard shows its state as unknown and a
-monitor stays as it was.
-
-The integration is experimental until it has been tried on more of these models.
+A finished or aborted job waiting for you to confirm the bed is clear reports as idle. While booting, running maintenance or paused waiting for user input mid-print, its state reads as unknown and monitors stay as they were.
 
 </details>
 
 ## Sending prints
 
-The print library holds sliced files on the hub. Open **Prints** in the header and drop files in
-or browse for them.
+The **Prints** page stores sliced files right on your hub. Drag files onto the drop zone or click **browse** to upload them.
 
 ![The print library: three sliced files with their slicer, print time and filament, with the printers each is tagged for](assets/prints.png)
 
-Each one opens in a panel that draws its toolpath on your device before
-the file is uploaded, where you can name it, tag it and correct its first layer nozzle and bed
-temperatures. The panel sends the start and end of the file to the hub to read its print time,
-filament and temperatures. Every other print temperature the slicer set moves by the same amount, while the
-temperatures a start gcode probes or wipes at stay put. A file sliced with several filaments shows
-the one its first layer prints with and moves only that filament's temperatures, and nothing moves
-past 350°C on the nozzle or 150°C on the bed. A file whose slicer lists no print
-temperatures has every set-point above zero moved. A correction that would bring a later
-layer's temperature to 0°C or below is refused, since that turns the heater off mid-print: a bed
-sliced at 60°C then 55°C can't have its first layer set under 6°C. Binary gcode keeps the temperatures it
-was sliced with, and so does a line a host numbered and checksummed, such as `N5 M104 S215*33`.
+Before uploading, a side panel renders the toolpath in your browser so you can rename the print, tag which printers it's for, and adjust its first-layer nozzle and bed temperatures. PrintGuard inspects the start and end of the file to read print time, filament usage and temperatures. If you change a first-layer temperature, every subsequent print temperature set by the slicer shifts by the same offset while start-G-code probing/wiping temperatures stay untouched. On multi-filament files, only the first-layer filament's temperatures shift, capped at 350°C (nozzle) and 150°C (bed). If the slicer didn't write temperature metadata, every non-zero setpoint shifts together. Any adjustment that would push a later layer down to 0°C or below is rejected so a heater never gets turned off mid-print (for example, a bed sliced at 60°C then 55°C can't have its first layer lowered below 6°C). Binary `.bgcode` files keep their original sliced temperatures, as do host-numbered/checksummed lines like `N5 M104 S215*33`.
 
-Each file keeps the preview, estimated time, filament and printer model its slicer wrote into it.
-Cura and a few others write no preview, so your browser draws one and adds it to the gcode as
-it's uploaded. A file uploaded through the REST API without a preview shows its format
-instead. Open a file to orbit its toolpath in 3D, layer by layer.
+Slicer thumbnails, estimated print times, filament estimates and printer models are preserved automatically. For slicers that don't embed a thumbnail (like Cura), your browser renders one from the toolpath and injects it during upload. Files uploaded via the REST API without a thumbnail show their file extension instead. Click any file in the library to explore its 3D toolpath layer by layer.
 
 ![A sliced vase in the 3D viewer with a layer slider, its print time, filament and temperatures](assets/print-viewer.png)
 
-Tag a file with the printers it was sliced for and it can only start on one of those. A tag is
-only offered for a printer whose service takes the format. A file
-with no tags can go to any printer whose service takes the format. Remove a printer and the files
-tagged only for it stay tagged, so they start nowhere until you tag them for another. Either way the printer has to
-report idle at the moment you press **Print**, so nothing lands on top of a running job.
+Tagging a file with specific printers locks it so it can only ever start on those machines (only compatible printers are selectable). Untagged files can be sent to any compatible printer. If you delete a printer, files tagged exclusively for it keep their tag and won't start anywhere until you retag them. Either way, the printer must be idle when you hit **Print**, preventing accidental prints on top of an active job.
 
-**Print** opens the printer's camera before anything is sent, so you can check the build plate is on
-and the bed is clear, then **Start print**. It shows the camera the printer's monitor watches, or
-the one the printer exposes if no monitor covers it. A print started through the REST API or MCP
-starts straight away.
+Clicking **Print** pops up the printer's live bed camera first so you can double-check that the plate is on and clear before clicking **Start print**. It shows the camera linked to that printer's monitor (or the printer's own webcam if no monitor exists). Prints triggered via the REST API or MCP start immediately without the camera check.
 
-| Service | Takes | How it starts |
+| Service | Accepted formats | How it starts |
 |---|---|---|
-| OctoPrint | `.gcode`, `.gco`, `.g` | Uploaded to local storage, selected and printed |
-| Klipper (Moonraker) | `.gcode`, `.gco`, `.g` | Uploaded to the gcodes root and printed |
-| Creality | `.gcode` | Uploaded over HTTP and started from the path the printer lists it under, once it's listed at its full size |
-| Elegoo | `.gcode` | Centauri Carbon: uploaded to internal storage and started. Neptune and OrangeStorm: through Moonraker |
-| Prusa (PrusaLink) | `.gcode`, `.bgcode` | Sent as `text/x.gcode` onto the first writable storage, the USB stick or local storage on a Raspberry Pi, and printed after upload |
-| Bambu Lab | `.3mf` sliced by Bambu Studio or Orca | Uploaded to the printer's storage over FTPS, then the first plate is started over MQTT |
+| OctoPrint | `.gcode`, `.gco`, `.g` | Uploads to local storage, selects and starts |
+| Klipper (Moonraker) | `.gcode`, `.gco`, `.g` | Uploads to the gcodes root and starts |
+| Creality | `.gcode` | Uploads over HTTP and starts once the printer lists it at full size |
+| Elegoo | `.gcode` | Centauri Carbon: uploads to internal storage and starts. Neptune/OrangeStorm: via Moonraker |
+| Prusa (PrusaLink) | `.gcode`, `.bgcode` | Uploads as `text/x.gcode` to the first writable storage (USB stick or Pi local storage) and prints |
+| Bambu Lab | `.3mf` sliced in Bambu Studio or OrcaSlicer | Uploads over FTPS and starts plate 1 via MQTT |
 
-A file the service stores but doesn't start, or a start the printer refuses, is reported as a
-failed print. OctoPrint before 1.8.0 doesn't say whether it started the file, so a stored one
-counts as started. Moonraker set to queue uploads can hold a file that can't start at once, which is
-reported as queued and may print later.
+If a service accepts the upload but fails to start the job (or rejects it), PrintGuard reports the start as failed. Older OctoPrint versions (before 1.8.0) don't report whether printing started, so a successful upload counts as started. If Moonraker is configured to queue uploads, PrintGuard reports the file as queued.
 
-A pause, cancel, heater target or file counts as sent only when the service answers in its own
-way. An address that answers with a sign-in page, as an auth proxy does once its session has
-expired, is reported as failed.
+Actions (pause, cancel, preheat, print start) only count as successful when the service returns its expected API response, so an expired auth proxy returning a login HTML page is properly flagged as failed.
 
-A file is sent under its library name, with each run of anything outside plain letters, digits,
-dots, dashes and underscores turned into one `_` and the name before the extension cut to 60
-characters. Rename it first if the printer's own file list matters to you. PrusaLink replaces a
-file of the same name already on the printer. A file can be up to 512 MB, and a 3mf whose files
-unpack to more than that between them is refused. So is an empty file, a 3mf whose plate gcode is empty, binary gcode with no gcode in it or with more than 16 MB of metadata and previews, a damaged 3mf, a 3mf with a member compressed
-with anything but stored or deflate, and a file whose comments give a print time of over a year or
-an amount of filament or a temperature no slicer would write. A file whose gcode is over 32 MB isn't drawn in the browser, since parsing it takes
-about nine times its size in memory, so it has no 3D view and no drawn preview. It uploads and
-prints as usual, and the hub still reads its print time, filament and temperatures. A smaller
-file the browser can't draw, such as on a device with no WebGL, uploads without a drawn preview
-too. Binary gcode has no 3D view and no drawn preview, since its toolpath is
-compressed, so it shows the preview PrusaSlicer embedded and nothing else. Its print time and filament can
-be blank too, where PrusaSlicer compressed them.
+When sent to a printer, filenames are sanitised from the library name (non-alphanumeric characters become `_`, stems trimmed to 60 characters), so rename files first if you care about how they appear on the printer's screen. PrusaLink overwrites an existing file with the same name. Uploads are capped at 512 MB (including unpacked `.3mf` contents). Empty files, `.3mf` files with empty plate G-code, `.bgcode` with no G-code or over 16 MB of metadata/previews, corrupt `.3mf` archives, unsupported `.3mf` compression methods (anything other than stored/deflate), and files with nonsensical metadata (print times over a year, impossible filament/temperature values) are rejected.
 
-A Bambu print uses the settings sliced into the file, with bed levelling on, flow and vibration
-calibration off, and filament from the external spool, not an AMS. Starting a 3mf
-needs Developer Mode, as a pause or cancel does. A project exported without its
-gcode is refused at upload. A Bambu printer keeps reporting a cancelled or failed job as failed until
-the next one starts, which PrintGuard shows as idle, so clear the bed before you press **Print**.
+Text G-code files over 32 MB skip browser toolpath rendering (parsing takes roughly 9x file size in RAM), so they won't have a 3D preview or browser-generated thumbnail, though they still upload, print and show slicer stats normally. Devices without WebGL behave the same way. Binary `.bgcode` files can't be rendered in 3D either since their toolpaths are compressed, so they display PrusaSlicer's embedded thumbnail (and note that compressed time/filament metadata may appear blank).
 
-An Ultimaker takes gcode, not a ufp, and queues it. A printer still holding its last print starts the
-new one once you confirm on its screen that the bed is clear.
+Bambu Lab prints use the settings sliced into the `.3mf`, with bed levelling enabled, flow/vibration calibration off, and external spool selected (not AMS). Starting prints requires Developer Mode, and unsliced `.3mf` project files without G-code are rejected at upload. Note that Bambu printers keep reporting a cancelled or failed print as failed until the next job begins; PrintGuard displays that as idle, so always check the bed before starting the next print.
 
-Files live in the data directory under `prints/`, so they survive a restart and travel with the
-`/data` volume. When the hub starts it deletes the files there that no print names and that carry a name
-it generated, and keeps the files of a print it could not read, saying so in the startup warning.
+Ultimaker accepts `.gcode` (not `.ufp`) and queues it; if the printer is waiting for bed-clear confirmation from the previous print, the new print starts once you confirm on the printer's screen.
+
+Library files live under `prints/` inside your hub's data directory so they survive restarts and backups. On startup, PrintGuard cleans up orphaned generated files in `prints/` that aren't referenced by `state.json`, while keeping files for any print record that failed to parse (with a startup warning).
 
 ## Temperatures and preheat
 
-A linked printer's nozzle and bed temperatures sit on its monitor's tile and in the monitor's
-panel, where a running print also gets a progress bar and the time left. The panel takes a
-target for either heater, applied on Enter or when you leave the field, and a row of preheat presets that set both at once.
-**Edit** beside them changes the presets, which every printer shares, and **Off** turns every
-heater off.
+Linked printers show their progress in the fleet list, and live nozzle and bed temperatures in the selected monitor's **Control** panel (alongside a progress bar and remaining time during a print). Open the **Preheat** tab to type custom targets (applied on Enter or blur) or tap one of the shared preheat presets. Click **Edit** to customise your presets, or **Heaters off** to cool everything down.
 
 | Service | Reads temperatures | Sets targets |
 |---|---|---|
-| OctoPrint | Yes | Yes, through its tool and bed endpoints, for the first nozzle |
-| Klipper (Moonraker) | Yes | Yes, with `SET_HEATER_TEMPERATURE` |
-| Creality | Yes | Yes, in whole degrees |
-| Elegoo | Yes | Yes, on both families |
-| Prusa (PrusaLink) | Yes | No, PrusaLink has no endpoint for it |
-| Bambu Lab | Yes | Yes, as the `M104` and `M140` lines Bambu Studio sends |
-| Ultimaker | Yes, for the first nozzle | No, it needs a key approved on the printer's screen |
+| OctoPrint | Yes | Yes (tool0 and bed endpoints) |
+| Klipper (Moonraker) | Yes | Yes (`SET_HEATER_TEMPERATURE`) |
+| Creality | Yes | Yes (whole degrees) |
+| Elegoo | Yes | Yes (both families) |
+| Prusa (PrusaLink) | Yes | No (PrusaLink has no heater-target endpoint) |
+| Bambu Lab | Yes | Yes (`M104` / `M140` commands, same as Bambu Studio) |
+| Ultimaker | Yes (first nozzle) | No (requires screen-approved API credentials) |
 
-A target above 350 °C for the nozzle or 150 °C for the bed, or one that isn't a number, is
-refused. The dashboard moves what you type, and each preheat preset, to the limit instead, and the
-printer's own firmware applies its limits on top. Temperatures refresh with the printer's state, about every
-five seconds. Printers are read separately, so one that isn't answering doesn't slow the others.
+Targets above 350°C (nozzle) or 150°C (bed) or non-numeric values are rejected by the engine; the UI clamps inputs and presets to those caps, and your printer's firmware still enforces its own safety limits on top. Temperatures poll every ~5 seconds alongside printer status, independently per printer so one offline machine never slows the others down.
 
 ## Networking caveats
 
-The hub makes every request to a print service itself, so the address you register has to be
-one the hub can reach, not one your browser can. The browser never calls the printer, so an
-`http://` printer works from a hub you open over HTTPS.
+The hub itself connects to your printers, never your browser. That means the address you enter must be reachable from the hub machine, and you can safely connect `http://` printers even if you access the PrintGuard dashboard over HTTPS.
 
-An address is saved with its `http://` or `https://` in front. One without, such as
-`192.168.1.50:5000`, is refused when you save or test it.
+Always include `http://` or `https://` in printer URLs; bare hostnames like `192.168.1.50:5000` are rejected.
 
-Register the address the service answers on, not one that redirects to it. A printer or an alert
-channel that answers with a redirect, such as a proxy sending `http://` to `https://`, fails with
-the address it redirects to, and **Test connection** says so too. A redirect is never followed, so
-a key or a command never reaches an address you didn't register.
+Enter the final URL the print service answers on rather than one that redirects (such as an `http://` proxy redirecting to `https://`). PrintGuard never follows redirects on printer or alert requests so keys and commands can't accidentally be forwarded somewhere you didn't configure. If an address redirects, both **Test connection** and live actions tell you the destination URL to use instead.
 
 ### Where a printer's webcam is read from
 
-OctoPrint and Moonraker usually report their webcam as a path such as `/webcam/?action=stream`,
-which their own web interface resolves against the address it's served on. PrintGuard does the
-same from the address you registered:
+OctoPrint and Moonraker normally report relative webcam paths like `/webcam/?action=stream`, which their web UIs resolve against the address you loaded them from. PrintGuard follows the same convention using the address you registered:
 
-| Registered address | Webcam is read from |
+| Registered address | Where PrintGuard looks for the webcam |
 |---|---|
-| Moonraker's own port, `7125` to `7199`, such as `http://pi.lan:7126` for a second instance | The same host on the default port, `http://pi.lan/webcam2/?action=stream` |
-| OctoPrint's own port, `http://octopi.local:5000` | The same host on the default port, `http://octopi.local/webcam/?action=stream` |
-| Any other port, such as a reverse proxy on `http://nas.lan:8080` | That port, `http://nas.lan:8080/webcam/?action=stream` |
-| No port | The same address |
+| Moonraker port (`7125` to `7199`, e.g. `http://pi.lan:7126`) | Same host on port 80 (`http://pi.lan/webcam2/?action=stream`) |
+| OctoPrint default port (`http://octopi.local:5000`) | Same host on port 80 (`http://octopi.local/webcam/?action=stream`) |
+| Any other port (e.g. reverse proxy on `http://nas.lan:8080`) | That same port (`http://nas.lan:8080/webcam/?action=stream`) |
+| No explicit port | The exact registered address |
 
-An OctoPrint container published as `5000:80` can't be told apart from OctoPrint's own port, so
-its webcam is looked for on port 80. Publish it on another port, or set an absolute stream URL
-in OctoPrint's webcam settings, which is used as it is. A stream URL on the printer's own
-loopback, such as `http://127.0.0.1:8080/?action=stream`, is read from the registered host on
-that port, so the webcam server has to listen on the network and not on loopback only. Refresh and a restart keep a camera that
-already works, so one registered before you updated stays where it was.
+If you run OctoPrint in Docker mapped as `5000:80`, PrintGuard can't tell it apart from a bare port-5000 OctoPrint install, so it checks port 80 for the webcam. Either publish it on a different port or configure an absolute webcam URL inside OctoPrint (PrintGuard uses absolute URLs as given). If a webcam URL points to loopback (`127.0.0.1`), PrintGuard substitutes the printer's registered host IP, so the webcam server needs to bind to the network rather than loopback only. Existing working cameras aren't overwritten by refreshes or updates.
 
-A Moonraker webcam set to the MediaMTX or go2rtc WebRTC service is pulled from that server's
-WHEP endpoint. One set to camera-streamer is read from its MJPEG stream, since camera-streamer
-has no WHEP endpoint. The stream is found beside the snapshot URL, or beside the WebRTC path when
-the snapshot URL is a still such as `/webcam/snap.jpg`. A webcam set to Janus with neither, to an iframe or to jMuxer isn't
-registered, since PrintGuard can't read those. Add its RTSP or MJPEG address as a
-[stream URL](cameras.md#stream-urls) instead.
+For Moonraker webcams configured as MediaMTX or go2rtc WebRTC streams, PrintGuard pulls from their WHEP endpoint. For `camera-streamer` (which doesn't expose WHEP), PrintGuard looks for its MJPEG stream beside the snapshot or WebRTC path. Janus (without an MJPEG/snapshot fallback), iframe and jMuxer webcams aren't auto-registered; add their RTSP or MJPEG feed manually as a [stream URL](cameras.md#stream-urls).
 
 ### Running in Docker
 
-The hub reaches printer services from inside the container, so
-`localhost` means the container, not your host, and a URL like `http://localhost:5000`
-fails with *all connection attempts failed*. Use `http://host.docker.internal:5000`. The
-shipped [`docker-compose.yaml`](../docker-compose.yaml) maps that name for you. On a Linux
-host the print service must also listen on `0.0.0.0` rather than loopback only.
+Inside Docker, `localhost` refers to the container itself, not your host machine, so `http://localhost:5000` will fail with *all connection attempts failed*. Use `http://host.docker.internal:5000` instead (already mapped in the shipped [`docker-compose.yaml`](../docker-compose.yaml)). On Linux hosts, make sure the print service listens on `0.0.0.0` rather than `127.0.0.1`.
 
 ### The desktop app
 
-The app runs on your computer rather than in a container, so `http://localhost:5000` reaches
-a print service on the same machine, and anything else is its LAN address.
+The desktop app runs directly on your computer rather than inside a container, so `http://localhost:5000` works for services on the same machine, and other printers just use their LAN IP or hostname.
 
-[Troubleshooting](troubleshooting.md) has more symptoms and fixes.
+Check [Troubleshooting](troubleshooting.md) if a printer still won't connect.

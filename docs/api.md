@@ -6,8 +6,7 @@
 
 </div>
 
-A hub exposes its engine to scripts, agents and Home Assistant. Each transport sends the same
-commands the dashboard sends, so none can drift from the UI.
+PrintGuard exposes its engine to scripts, AI agents and Home Assistant. Every surface sends the exact same commands as the dashboard, so none of them can drift out of sync with the UI.
 
 - [Surfaces](#surfaces)
 - [Health and version](#health-and-version)
@@ -38,41 +37,36 @@ flowchart LR
 
 | Surface | Endpoint | Auth |
 |---|---|---|
-| MCP server | `/mcp`, Streamable HTTP | Bearer token |
+| MCP server | `/mcp` (Streamable HTTP) | Bearer token |
 | REST API | `/api/v1` | Bearer token |
 | Health probe | `/api/health` | None |
 | Home Assistant | Your MQTT broker | Broker credentials |
 
-The MCP tools are derived from the REST routes and call them in process. The three image tools
-are the exception and read the engine directly.
+MCP tools are generated automatically from the REST routes and call them in-process (the three image tools read the engine directly so they can return native image content).
 
 ## Health and version
 
-`GET /api/health` is the unauthenticated readiness endpoint for uptime checks and update
-monitors. The response is never cached and carries the installed version:
+`GET /api/health` is an unauthenticated readiness endpoint for Docker healthchecks and uptime monitors. Responses are never cached and include the running version:
 
 ```json
 {"ok": true, "version": "X.Y.Z"}
 ```
 
-It returns `200 OK` only once the engine has started. Camera, printer and notifier health
-live behind the authenticated API and deliberately do not affect this probe.
+It returns `200 OK` as soon as the engine has started. Camera, printer and alert health live behind the authenticated API and intentionally don't affect this check.
 
 ## Authentication and scopes
 
-PrintGuard has no identity layer of its own, so put a proxy in front of the hub first
-([Deployment](deployment.md)). On top of that, this surface is gated by capability scopes.
+Because PrintGuard has no built-in user login, put a proxy or VPN in front of it first (see [Deployment](deployment.md)). On top of that, the API and MCP server use scoped bearer tokens so you can limit what a script or AI agent is allowed to touch.
 
 Scopes are cumulative:
 
-| Scope | Grants |
+| Scope | What it allows |
 |---|---|
-| `read` | Status of monitors, printers and cameras, the current camera frame, risk history and alert snapshots, recent events, the print library, and classifying a frame you supply |
-| `control` | Everything in `read`, plus pause, resume and cancel, setting a heater target, and starting a file from the print library |
-| `manage` | Everything in `control`, plus adding, editing and removing cameras, printers, monitors and print files, changing settings, testing services and discovering cameras |
+| `read` | Read monitor, printer and camera status, grab live frames, view risk history and alert snapshots, read recent events, inspect the print library and classify an uploaded image |
+| `control` | Everything in `read`, plus pause, resume, cancel, preheating heaters and starting prints from the library |
+| `manage` | Everything in `control`, plus adding, editing and deleting cameras, printers, monitors and print files, changing settings, running connection/alert tests and discovering cameras |
 
-Issue tokens from the **API** tab in Settings. Name a token, choose its scope and
-press **Generate**. The secret, a string starting `pg_`, is only shown once:
+Create tokens under **Settings -> API and MCP**. Give it a name, pick a scope and click **Generate**. The token (prefixed with `pg_`) is shown only once:
 
 ```http
 Authorization: Bearer pg_Zr8...agent
@@ -80,92 +74,71 @@ Authorization: Bearer pg_Zr8...agent
 
 | Token state | Behaviour |
 |---|---|
-| No tokens issued, the default | The surface is read-only and trusts whatever fronts it. Control and management stay closed |
-| Any token issued | A valid bearer is required for every request, and its scope decides what it reaches. MCP answers `401` before a session opens and hides the tools a token cannot use. The schema at `/api/v1/openapi.json` describes the API and holds nothing from your hub, so it stays open |
+| No tokens created (default) | Read endpoints stay open to whoever can reach the hub; `control` and `manage` stay locked |
+| At least one token exists | Every API and MCP request requires a valid bearer token matching the endpoint's scope. MCP returns `401` before opening a session and hides tools outside the token's scope. `/api/v1/openapi.json` stays public since it contains only the API schema and none of your hub data |
 
 > [!IMPORTANT]
-> Only a hash of a token is stored, beside its first 10 characters as a hint, so a lost token
-> cannot be recovered. Revoke it and issue another. Revocation is immediate. No REST route or
-> MCP tool issues or revokes a token, so an agent holding a `manage` token can drive printers
-> and cameras but cannot mint or escalate tokens. A plugin you grant
-> [`tokens`](plugins.md#permissions) can. Serve the hub over HTTPS so tokens never travel in
-> clear.
+> PrintGuard only stores a hash of each token alongside its first 10 characters as a hint, so lost
+> tokens can't be recovered. Revoke the old one (takes effect immediately) and generate a new one.
+> No REST route or MCP tool can mint or revoke tokens, so even a `manage` agent can't escalate its
+> own privileges (note that a plugin granted [`tokens`](plugins.md#permissions) can). Always use
+> HTTPS so bearer tokens never cross the wire in plain text.
 
 ## REST API
 
-Base path `/api/v1`. JSON in and out, except the camera frame and alert snapshot, which are
-`image/jpeg`, the print file download, and the frame and print file you upload as a raw body.
-The OpenAPI schema is served at `/api/v1/openapi.json`. There are no interactive docs pages, so the hub loads nothing from a third party.
+Base path: `/api/v1`. Everything uses JSON except live camera frames and alert snapshots (`image/jpeg`), print file downloads, and raw binary bodies uploaded to `/classify` or `/prints`. The OpenAPI schema lives at `/api/v1/openapi.json` (there are no hosted Swagger/ReDoc UI pages so the hub doesn't pull assets from external CDNs).
 
-Adding or removing a camera, printer or monitor returns the collection, as do removing a print
-file and `/cameras/refresh-printers`. Every other change returns the one thing it changed, which
-for `/prints/{id}/start` is the printer. The two test routes return the engine's `printer_test`
-or `notify_test` event as it was sent, `event` and `req_id` included.
+Creating or deleting a camera, printer or monitor returns the updated list (as do deleting a print file and `/cameras/refresh-printers`). Every other mutation returns the single modified resource (for `/prints/{id}/start`, that's the printer). The two test endpoints return the engine's `printer_test` or `notify_test` event directly (`event` and `req_id` included).
 
-| Status | When |
+| Status | Meaning |
 |---|---|
-| `400` | The engine refused the command. That covers updating, removing or starting an id nothing matches, binding a monitor to a camera or printer that isn't registered, a value a setting doesn't take such as a `rotation` of 45, a file the library doesn't take, an image that can't be decoded, and a printer that did not answer an action or a heater target in time, which reads `did not answer within 15 s, so check whether it took the command` |
-| `401` | A missing or invalid token, once a token has been issued. With none issued a missing token is never a `401`, so read routes answer and control and manage routes are a `403` |
-| `403` | A token whose scope is too narrow |
-| `404` | A read of an id nothing matches, and a printer action or heater target for a printer that isn't registered |
-| `413` | A frame over 32 MB or a print file over 512 MB |
-| `422` | A body of the wrong shape, which includes `NaN` or `Infinity` anywhere in a JSON body, a printer's `config`, a channel's config, `mqtt` or a preheat preset among them. In an upload's `nozzle` or `bed` it is a `400` |
-| `503` | A frame sent to `/classify` while two are being scored and eight more are waiting. It carries `Retry-After: 1` |
-| `504` | The engine did not finish in time |
+| `400` | The engine rejected the command: unknown ID on update/delete/start, linking a monitor to a non-existent camera or printer, an invalid enum/value like `rotation: 45`, an unsupported print file, an unreadable image, or a printer command timing out (`did not answer within 15 s, so check whether it took the command`) |
+| `401` | Missing or invalid bearer token (once at least one token exists; when no tokens exist, read routes succeed and control/manage routes return `403`) |
+| `403` | Token scope is too narrow for this endpoint, or host/origin check failed |
+| `404` | Read of an unknown ID, or printer action/heat targeting an unknown printer |
+| `413` | Image over 32 MB or print file over 512 MB |
+| `422` | Malformed request body, including `NaN`/`Infinity` anywhere in JSON (including inside printer/notifier configs, `mqtt` or preheat presets). For `/prints` query parameters `nozzle`/`bed`, invalid values return `400` |
+| `503` | `/classify` queue is full (2 scoring + 8 waiting); includes `Retry-After: 1` |
+| `504` | Engine didn't finish within the command timeout |
 
-A field a body doesn't list is ignored, a field of the body sent as `null` is left as it was,
-and a number outside its range is moved to the nearest end of it. A number sent as text or `true`
-is refused with a `422`, never converted. Three more are refused instead of moved, a
-heater target outside 0 to 350 for the nozzle or 0 to 150 for the bed, an `mqtt` `port` that isn't
-a whole number from 1 to 65535 and `mqtt` enabled with no `host`. A printer's `config`, a
-channel's config and `mqtt` are refused with a `400` for a value that isn't of its field's type,
-which is text for every field but the `enabled` and `tls` of `mqtt`, and `mqtt` for a field it
-doesn't have.
+Unknown fields in request bodies are ignored, `null` leaves existing fields untouched, and out-of-range numeric settings are clamped rather than rejected. Strings or booleans passed where numbers are expected return `422` (never coerced). Three things are strictly rejected instead of clamped: heater targets outside 0 to 350°C (nozzle) or 0 to 150°C (bed), an `mqtt` port outside 1 to 65535 (or non-integer), and enabling `mqtt` without a `host`. Printer configs, notifier configs and `mqtt` return `400` if a value doesn't match the field's declared type (everything is text except `mqtt.enabled` and `mqtt.tls`), or if `mqtt` contains unknown keys.
 
-The engine sets how long each command may take, so the REST API, MCP server and plugins all wait
-the same:
+Command timeouts are enforced by the engine identically across REST, MCP and plugins:
 
-| Request | Waits up to |
+| Operation | Timeout |
 |---|---|
-| A printer action or heater target | 15 s, 25 s on a Creality printer and 105 s on an Elegoo printer, since a Centauri Carbon 2 answers a resume only once it has reheated |
-| Adding a camera | 40 s, for a first frame |
-| `/cameras/refresh-printers` | 115 s, since each printer's cameras open one at a time |
-| Switching `model` or `inference_runtime` in `PATCH /settings` | 85 s, while the frames in flight finish and the model loads |
-| Uploading a print file | 120 s once the body has arrived |
-| `/prints/{id}/start` | 600 s, while the file is sent to the printer |
-| Any other change, and the risk history | 15 s |
+| Printer action or heater target | 15 s (25 s for Creality; 105 s for Elegoo since a Centauri Carbon 2 waits until reheated to confirm resume) |
+| Adding a camera | 40 s (waiting for first frame) |
+| `/cameras/refresh-printers` | 115 s (printers' cameras open sequentially) |
+| Changing `model` or `inference_runtime` via `PATCH /settings` | 85 s (draining in-flight frames and loading/benchmarking) |
+| Uploading a print file | 120 s (after body finishes streaming) |
+| `/prints/{id}/start` | 600 s (uploading to the printer) |
+| Everything else, including risk history | 15 s |
 
-The dashboard's socket applies none of these and waits as long as a command takes.
+The dashboard's WebSocket has no timeout and waits as long as a command takes.
 
-A hub opened at a name it doesn't know, such as a public domain, answers `403` to every
-request, this API included, until that name is in
-[`PRINTGUARD_ORIGINS`](deployment.md#host-and-origin-checking).
-
-A request to `/api/v1` or `/mcp` that carries an `Origin` header is a `403` unless the origin
-is the hub's own address or one listed in `PRINTGUARD_ORIGINS`, so a page on another site
-can't call either from a browser. curl, a script or an agent sends no `Origin` and is
-unaffected.
+Like the dashboard, `/api/v1` and `/mcp` enforce [host and origin checking](deployment.md#host-and-origin-checking): external domains must be listed in `PRINTGUARD_ORIGINS`, and browser requests carrying an `Origin` header from another site receive `403`. Scripts, `curl` and AI agents send no `Origin` header and work normally.
 
 <details open>
 <summary><b>Read</b></summary>
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/state` | Full snapshot: cameras, printers, monitors, prints, print reviews, plugins, settings, stats, the update status and what the dashboard draws its forms from. `startup_warnings` lists what the hub found wrong at start, such as a GPU it skipped, a setting it reset or a record it dropped, each with its reason, and it is kept until the hub restarts. [Architecture](architecture.md#the-protocol) lists the fields and [the resource model](#the-resource-model) what is left out |
-| `GET` | `/monitors` | List monitors with camera, linked printer and latest alert |
-| `GET` | `/monitors/{id}` | One monitor |
-| `GET` | `/monitors/{id}/history` | Its [risk history](monitoring.md#risk-history): one-minute buckets, each with the seconds `watched` in it, the alert log, the snapshot index and summary stats. `watch_min` in the stats is the time the readings spanned in whole minutes, leaving out gaps of more than 30 seconds |
-| `GET` | `/monitors/{id}/snapshots/{snap_id}` | The snapshot taken at one alert, as `image/jpeg`. `404` when the monitor has no such snapshot or its file has gone from the hub, and the answer names no path |
-| `GET` | `/printers` | List registered printers with status, progress and job |
-| `GET` | `/printers/{id}` | One printer |
-| `GET` | `/cameras` | List cameras with rate, health and latest classification |
-| `GET` | `/cameras/{id}` | One camera |
-| `GET` | `/cameras/{id}/frame` | Freshest frame as `image/jpeg`. `404` while the camera is on standby or offline, since it has no current frame |
-| `POST` | `/classify` | Classify a supplied frame, a JPEG or PNG body of up to 32 MB and 50 megapixels. No registered camera needed. A frame wider than a square is scored as overlapping squares and answered with the riskiest, as a cropped camera is. A file over 32 MB is a `413`, and one over 50 megapixels or that isn't a JPEG or PNG is a `400`. Two are read and scored at a time, here and through the MCP tool together. Eight more wait without their body being read, and one past that is a `503` |
-| `GET` | `/prints` | List the print library, each file with its format, size, tags and what the slicer wrote into it |
-| `GET` | `/prints/{id}` | One print file |
-| `GET` | `/prints/{id}/file` | Download a print file as the library keeps it |
-| `GET` | `/events` | The last 100 alerts, warnings and errors. A command the hub refused is answered to its caller and isn't among them. A printer's status and progress are in `/printers` |
+| `GET` | `/state` | Full hub snapshot: cameras, printers, monitors, prints, print reviews, plugins, settings, stats, update info, form metadata and `startup_warnings` (problems spotted at boot like a skipped GPU, reset setting or dropped record, kept until restart). See [Architecture](architecture.md#the-protocol) and [The resource model](#the-resource-model) |
+| `GET` | `/monitors` | List monitors with their linked camera, printer and latest alert |
+| `GET` | `/monitors/{id}` | Single monitor |
+| `GET` | `/monitors/{id}/history` | [Risk history](monitoring.md#risk-history): one-minute buckets (each with `watched` seconds), alert log, snapshot index and summary stats (`watch_min` excludes gaps over 30 s) |
+| `GET` | `/monitors/{id}/snapshots/{snap_id}` | Alert snapshot JPEG (`404` if missing or deleted, without leaking paths) |
+| `GET` | `/printers` | List printers with status, progress and active job |
+| `GET` | `/printers/{id}` | Single printer |
+| `GET` | `/cameras` | List cameras with FPS stats, health and latest classification |
+| `GET` | `/cameras/{id}` | Single camera |
+| `GET` | `/cameras/{id}/frame` | Latest camera frame as `image/jpeg` (`404` if camera is on standby or offline) |
+| `POST` | `/classify` | Score any supplied JPEG or PNG (up to 32 MB / 50 MP) without registering a camera. Wide images are tiled into overlapping squares and return the highest-risk score. Over 32 MB returns `413`; over 50 MP or non-JPEG/PNG returns `400`. Runs up to 2 concurrently (shared with MCP), queues 8 more, returns `503` past that |
+| `GET` | `/prints` | List print library files with format, size, printer tags and slicer metadata |
+| `GET` | `/prints/{id}` | Single print file |
+| `GET` | `/prints/{id}/file` | Download the raw stored print file |
+| `GET` | `/events` | Last 100 alerts, warnings and errors (rejected commands go only to their caller; printer status lives in `/printers`) |
 
 </details>
 
@@ -175,8 +148,8 @@ unaffected.
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/printers/{id}/action` | `{"action": "pause" \| "resume" \| "cancel"}` |
-| `POST` | `/printers/{id}/heat` | `{"nozzle", "bed"}` in °C, at least one of them, 0 turning a heater off. A target above 350 for the nozzle or 150 for the bed is refused with a `400`, as is one for a service that cannot set targets. One that isn't a number is a `422` |
-| `POST` | `/prints/{id}/start` | `{"printer_id"}`, sends the file to that printer and starts it. Refused unless the printer is idle and prints the format. A file tagged for printers only starts on those, and one with no tags starts on any |
+| `POST` | `/printers/{id}/heat` | `{"nozzle", "bed"}` in °C (at least one required; `0` turns heater off). Values over 350/150 or unsupported printers return `400`; non-numbers return `422` |
+| `POST` | `/prints/{id}/start` | `{"printer_id"}`: uploads and starts the print. Rejected if printer isn't idle, doesn't support the format, or isn't in the file's `printer_ids` tags |
 
 </details>
 
@@ -185,49 +158,46 @@ unaffected.
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/monitors` | Add a monitor, binding a camera and an optional printer |
+| `POST` | `/monitors` | Create a monitor linking a camera and optional printer |
 | `PATCH` | `/monitors/{id}` | Update a monitor |
-| `DELETE` | `/monitors/{id}` | Remove a monitor |
-| `POST` | `/printers` | Register a printer. Refused with the field named if one the service requires is blank |
-| `PATCH` | `/printers/{id}` | Update a printer. `config` replaces the stored one, [keeping the secrets a read left out](#the-resource-model) |
-| `DELETE` | `/printers/{id}` | Remove a printer |
-| `POST` | `/printers/test` | `{"provider", "config"}`, reachability only. The config is used as sent, so a stored secret is not filled in. Send the key or password with it |
-| `POST` | `/cameras` | Add a camera. Refused if its device or stream is already registered, however the address is written, or if the stream delivers no frame. [Cameras](cameras.md#stream-urls) has the errors |
+| `DELETE` | `/monitors/{id}` | Delete a monitor |
+| `POST` | `/printers` | Add a printer (fails naming any blank required field) |
+| `PATCH` | `/printers/{id}` | Update a printer (`config` replaces stored config while [preserving omitted secrets](#the-resource-model)) |
+| `DELETE` | `/printers/{id}` | Delete a printer |
+| `POST` | `/printers/test` | `{"provider", "config"}` connection test. Sent as-is without filling saved secrets |
+| `POST` | `/cameras` | Add a camera (rejects duplicates or streams that produce no frames; see [Cameras](cameras.md#stream-urls)) |
 | `PATCH` | `/cameras/{id}` | Update a camera |
-| `DELETE` | `/cameras/{id}` | Remove a camera. Refused for one its printer or the deployment manages |
-| `POST` | `/cameras/discover` | List attachable, unregistered sources |
-| `POST` | `/cameras/refresh-printers` | Register cameras newly exposed by registered printers |
-| `POST` | `/prints?filename=` | Upload a sliced file of up to 512 MB as the raw request body. `name`, a comma-separated `printer_ids` and first layer `nozzle` and `bed` temperatures are optional. A file with nothing in it, or a 3mf holding a member compressed with anything but stored or deflate, is refused |
-| `PATCH` | `/prints/{id}` | Rename a print file or change the printers it is tagged for |
-| `DELETE` | `/prints/{id}` | Remove a print file |
-| `PATCH` | `/settings` | Update `notifiers`, `mqtt`, `model`, `inference_runtime`, `preheat`, `fault_grace_s`, `update_check` or `feedback`. Each one you send replaces the stored one, [keeping the secrets a read left out](#the-resource-model). A value of the wrong type is a `422`. The theme, layout and plugin catalogue are the dashboard's own and can't be changed here |
-| `POST` | `/notifiers/test` | `{"provider", "config"}`, sends a test alert. A secret left out or blank is filled in from the saved channel, [for the address it was saved with](#the-resource-model) |
+| `DELETE` | `/cameras/{id}` | Delete a camera (refused for printer-owned or deployment-declared cameras) |
+| `POST` | `/cameras/discover` | Scan for unregistered local devices and pushed MediaMTX streams |
+| `POST` | `/cameras/refresh-printers` | Re-scan registered printers for newly exposed webcams |
+| `POST` | `/prints?filename=` | Upload a sliced file (up to 512 MB raw body). Optional query params: `name`, comma-separated `printer_ids`, first-layer `nozzle` and `bed`. Rejects empty files or `.3mf` files with unsupported compression |
+| `PATCH` | `/prints/{id}` | Rename a print or update its `printer_ids` tags |
+| `DELETE` | `/prints/{id}` | Delete a print file |
+| `PATCH` | `/settings` | Update `notifiers`, `mqtt`, `model`, `inference_runtime`, `preheat`, `fault_grace_s`, `update_check` or `feedback`. Each field replaces its stored value while [keeping omitted secrets](#the-resource-model). Wrong types return `422`. Dashboard-only settings (theme, layout, plugin catalogue) aren't exposed here |
+| `POST` | `/notifiers/test` | `{"provider", "config"}` sends a test alert (fills blank secrets from the saved channel [for the same address](#the-resource-model)) |
 
 </details>
 
-The bodies the manage routes take. Every field is optional on a `PATCH`.
+Payload shapes for manage routes (every field is optional on `PATCH`):
 
-| Body | Fields |
+| Resource | Fields |
 |---|---|
-| Monitor | `name`, `camera_id`, `printer_id`, `enabled`, `threshold`, `consecutive`, `cooldown_s`, `on_defect`, `notify`. Send `printer_id` as `""` to unlink the printer. [Monitoring](monitoring.md#monitor-settings) has the defaults and ranges |
-| New camera | `name` and a `source`, which is `{"kind": "url", "url"}` for a stream or an entry from `/cameras/discover` as it was listed |
-| Camera update | `name`, `brightness`, `contrast`, `sharpness`, `rotation` of 0, 90, 180 or 270, `detect_fps`, and `crop` as `{"x", "y", "w", "h"}` in shares of the frame, where the whole frame clears it |
-| Printer | `name`, `provider`, `config` |
+| Monitor | `name`, `camera_id`, `printer_id` (send `""` to unlink), `enabled`, `threshold`, `consecutive`, `cooldown_s`, `on_defect`, `notify`. Defaults and ranges in [Monitoring](monitoring.md#monitor-settings) |
+| New camera | `name` and `source` (`{"kind": "url", "url"}` for streams, or an object returned by `/cameras/discover`) |
+| Camera update | `name`, `brightness`, `contrast`, `sharpness`, `rotation` (`0`, `90`, `180` or `270`), `detect_fps`, `crop` (`{"x", "y", "w", "h"}` as fractions 0 to 1; full frame clears it) |
+| Printer | `name`, `provider`, `model`, `config` |
 | Print file update | `name`, `printer_ids` |
-| Settings | `notifiers` keyed by channel id, [`mqtt`](#home-assistant), `model` of `standard`, `light` or `legacy`, `inference_runtime` of `auto`, `litert` or `onnx`, `preheat` as a list of `{"name", "nozzle", "bed"}`, `fault_grace_s` in seconds (30 to 900, a number outside that is moved to the nearest end), `update_check` as true or false and `feedback` as `ask` or `off` |
+| Settings | `notifiers` (keyed by channel ID), [`mqtt`](#home-assistant), `model` (`standard`, `light`, `legacy`), `inference_runtime` (`auto`, `litert`, `onnx`), `preheat` (list of `{"name", "nozzle", "bed"}`), `fault_grace_s` (30 to 900, clamped), `update_check` (boolean), `feedback` (`ask` or `off`) |
 
-A monitor's `threshold`, `consecutive` and `cooldown_s` and a camera's `brightness`, `contrast`,
-`sharpness`, `detect_fps` and `crop` are moved to the nearest end of their range when a number falls
-outside it, and the request still answers `200`. A `rotation` that isn't one of the four and a heater target over its limit are refused.
+Monitor thresholds/streaks/cooldown and camera brightness/contrast/sharpness/detect_fps/crop clamp out-of-range numbers and still return `200`; invalid `rotation` and out-of-range heater targets are rejected.
 
-`GET /state` lists each printer service and alert channel under `integrations` and `notifiers`,
-with the config fields it takes.
+Check `integrations` and `notifiers` inside `GET /state` for the exact schema of every printer service and alert channel.
 
 ```bash
-# Status of every printer
+# List all printers
 curl -H "Authorization: Bearer $TOKEN" https://host/api/v1/printers
 
-# Save the current frame of a camera
+# Grab the latest camera frame
 curl -H "Authorization: Bearer $TOKEN" https://host/api/v1/cameras/$CAM/frame -o frame.jpg
 
 # Pause a print
@@ -238,12 +208,12 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"nozzle":210,"bed":60}' https://host/api/v1/printers/$PRINTER/heat
 
-# Classify a supplied frame, no registered camera needed
+# Classify an image on demand (no camera needed)
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: image/jpeg" \
   --data-binary @frame.jpg https://host/api/v1/classify
-# gives {"prediction":"success","defect_score":0.08}
+# -> {"prediction":"success","defect_score":0.08}
 
-# Upload a sliced file tagged for one printer, then start it there
+# Upload a sliced file tagged for one printer and start it
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/octet-stream" \
   --data-binary @benchy.gcode "https://host/api/v1/prints?filename=benchy.gcode&printer_ids=$PRINTER"
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
@@ -252,28 +222,21 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 
 ## MCP server
 
-Endpoint `https://<host>/mcp/`, transport **Streamable HTTP**, same bearer token. `/mcp`
-without the slash answers the same. Tools mirror the REST operations one to one by
-`operation_id`, with the same bodies, answers and refusals, and the list a client sees is
-filtered to the scopes its token holds. With no tokens issued that is the `read` tools. Once
-any token exists, a request with no valid bearer is a `401` before a session opens. A request
-body over 42 MB, which is room for a 32 MB image in base64, is a `413`. Two requests over 64 KB,
-which only an image can be, are read at a time. Eight more wait unread and one past that is a `503`.
+Endpoint: `https://<host>/mcp/` (Streamable HTTP, using the same bearer token; `/mcp` without a trailing slash works identically). Tools map 1:1 to REST operations by `operation_id`, sharing the same payloads, responses and error messages. Clients only see tools permitted by their token's scope (or `read` tools if no tokens exist yet). Once any token is created, missing/invalid tokens get `401` before a session opens. Request bodies cap at 42 MB (enough for a base64-encoded 32 MB image), returning `413` above that; at most 2 large (>64 KB) bodies read concurrently with 8 queued and `503` past that.
 
-A tool call with `NaN` or `Infinity` anywhere in its arguments is a tool error, and a call the
-REST route would refuse is a tool error carrying that route's status and reason.
+Arguments containing `NaN` or `Infinity` return a tool error, as do any REST errors (forwarding the status code and reason).
 
 | Scope | Tools |
 |---|---|
 | `read` | `get_state`, `list_monitors`, `get_monitor`, `get_monitor_history`, `list_printers`, `get_printer`, `list_cameras`, `get_camera`, `list_prints`, `get_print`, `recent_events` |
-| `read` | `get_camera_frame` and `get_monitor_snapshot`, which return the picture as image content an agent can look at. Each fails where its REST route answers `404` |
-| `read` | `classify_frame`, which scores a JPEG or PNG of up to 32 MB and 50 megapixels the agent supplies as base64 and needs no registered camera |
+| `read` | `get_camera_frame`, `get_monitor_snapshot` (return native image content an AI agent can view directly; fail wherever their REST route returns `404`) |
+| `read` | `classify_frame` (scores a base64 JPEG/PNG up to 32 MB / 50 MP with no registered camera needed) |
 | `control` | `control_printer`, `heat_printer`, `start_print` |
 | `manage` | `add_monitor`, `update_monitor`, `remove_monitor`, `add_printer`, `update_printer`, `remove_printer`, `test_printer`, `add_camera`, `update_camera`, `remove_camera`, `discover_cameras`, `refresh_printer_cameras`, `update_print`, `remove_print`, `update_settings`, `test_notifier` |
 
-Uploading and downloading a print file carry a binary body, so they are REST only.
+Uploading and downloading print files stay REST-only because of their raw binary bodies.
 
-Point a client at the endpoint with the token as a bearer header:
+Example MCP client config:
 
 ```json
 {
@@ -286,7 +249,7 @@ Point a client at the endpoint with the token as a bearer header:
 }
 ```
 
-Or explore it with the [MCP Inspector](https://github.com/modelcontextprotocol/inspector):
+Or test it interactively with [MCP Inspector](https://github.com/modelcontextprotocol/inspector):
 
 ```bash
 npx @modelcontextprotocol/inspector
@@ -296,136 +259,102 @@ npx @modelcontextprotocol/inspector
 
 ## Home Assistant
 
-The hub publishes every monitor to your MQTT broker as its own Home Assistant device, through
-[MQTT discovery](https://www.home-assistant.io/integrations/mqtt/#device-discovery). It needs
-the MQTT integration set up in Home Assistant and no custom component.
+PrintGuard publishes each monitor to your MQTT broker as a Home Assistant device using standard [MQTT discovery](https://www.home-assistant.io/integrations/mqtt/#device-discovery), so you only need Home Assistant's built-in MQTT integration and no custom HACS component.
 
-1. Open **Settings**, then the **Home Assistant** tab.
-2. Turn on **Publish to an MQTT broker** and enter the broker's host.
-3. Add a username and password if the broker wants them, and **Use TLS** if it serves it.
-4. Press **Save broker settings**, which waits for a host and, if you change the host or port,
-   for the password typed again. The devices appear under the MQTT integration.
+1. Open **Settings -> Home Assistant**.
+2. Switch on **Publish to an MQTT broker** and enter your broker's host.
+3. Add username, password and **Use TLS** if your broker requires them.
+4. Click **Save broker settings** (if you change the host or port, re-enter the password). Your monitors show up under Home Assistant's MQTT integration straight away.
 
-Leave the port blank for `1883`, or `8883` with TLS. A port that isn't a whole number from 1 to
-65535 is refused, and so is turning it on with no host. With TLS the broker's certificate has to be
-one the hub's system trusts, so a self-signed one is refused.
+Leave the port blank to default to `1883` (or `8883` with TLS). Ports must be whole numbers from 1 to 65535, and enabling MQTT without a host is rejected. TLS verifies the broker's certificate against the host's system trust store, so self-signed certificates are rejected.
 
-| Entity | Type | Appears |
+| Entity | Type | When it appears |
 |---|---|---|
-| Defect | Binary sensor, problem | Always |
-| Defect score | Sensor, 0 to 100% | Always |
-| State | Sensor reading `watching`, `idle`, `triggered` or `disabled` | Always |
+| Defect | Binary sensor (`problem`) | Always |
+| Defect score | Sensor (0 to 100%) | Always |
+| State | Sensor (`watching`, `idle`, `triggered`, `disabled`) | Always |
 | Enabled | Switch | Always |
-| Snapshot | Camera, the camera's picture as each defect alert fires. Nothing is published if the camera has no frame then | Always |
-| Printer | Sensor, the printer's status | With a linked printer |
-| Progress | Sensor, % | With a linked printer |
-| Pause, Resume, Cancel | Buttons | With a linked printer |
-| Nozzle, Bed | Temperature sensors, °C | Once the printer has reported that heater |
+| Snapshot | Camera (updated on each defect alert; skipped if camera has no frame) | Always |
+| Printer | Sensor (printer status) | When a printer is linked |
+| Progress | Sensor (%) | When a printer is linked |
+| Pause, Resume, Cancel | Buttons | When a printer is linked |
+| Nozzle, Bed | Temperature sensors (°C) | Once reported by the printer |
 
-Control is two-way, so an automation can arm a monitor or stop a print. A defect or a change in
-printer status is published at once, while the score, progress and temperatures are published in
-steps of 5, so a monitor never floods Home Assistant's history. Every entity shows as
-unavailable while the hub is stopped, the bridge is switched off or the connection is lost.
-Commands run side by side, up to 8 at a time and in order for one monitor, so a slow printer holds up only its own buttons.
+Control works both ways, so Home Assistant automations can toggle monitors or pause prints. Defects and printer status changes publish immediately, while score, progress and temperatures publish in increments of 5 so they don't spam Home Assistant's recorder database. Entities automatically go unavailable if PrintGuard stops, the bridge is turned off or the broker disconnects. Up to 8 inbound commands execute in parallel (preserving per-monitor order so one slow printer never blocks another).
 
-The base topic defaults to `printguard` and the discovery prefix to `homeassistant`. Change
-either in the same tab if your broker is shared. A topic holding `+` or `#` can't be used, and the
-bridge reports it once. Give each hub its own base topic if you run two
-on one broker, or stopping one marks the other's entities unavailable too.
+The default base topic is `printguard` and the discovery prefix is `homeassistant`; both can be customised in Settings (topics containing `+` or `#` are rejected once with an error). If you connect two PrintGuard hubs to the same broker, give each its own base topic so stopping one doesn't mark the other's entities unavailable.
 
-Removing a monitor removes its device and clears its retained topics. One removed while the
-broker is unreachable is cleared when the bridge reconnects, as long as the hub hasn't restarted
-in between. Unlinking a monitor's printer removes the printer's entities from its device the
-same way.
+Deleting a monitor removes its Home Assistant device and clears its retained topics (if the broker was offline at the time, cleanup runs on reconnect as long as PrintGuard hasn't restarted in between). Unlinking a printer removes its printer entities the same way.
 
-The hub publishes these retained at QoS 1, with `<base>` the base topic and `<prefix>` the
-discovery prefix:
+Retained topics published by PrintGuard at QoS 1 (`<base>` = base topic, `<prefix>` = discovery prefix):
 
-| Topic | Carries |
+| Topic | Payload |
 |---|---|
-| `<base>/status` | `online` or `offline`, which is also the bridge's last will |
-| `<prefix>/device/printguard_<monitor id>/config` | The monitor's discovery payload |
-| `<base>/monitor/<monitor id>/state` | JSON the entities read: `enabled`, `watching` and `defect` as `on` or `off`, `state`, `score`, and with a linked printer `printer_status`, `progress`, `job`, `nozzle_temp` and `bed_temp` |
-| `<base>/monitor/<monitor id>/snapshot` | The snapshot as a JPEG |
+| `<base>/status` | `online` or `offline` (also configured as the bridge's LWT) |
+| `<prefix>/device/printguard_<monitor id>/config` | Home Assistant MQTT discovery config |
+| `<base>/monitor/<monitor id>/state` | JSON read by entities: `enabled`, `watching`, `defect` (`on`/`off`), `state`, `score`, plus `printer_status`, `progress`, `job`, `nozzle_temp`, `bed_temp` when a printer is linked |
+| `<base>/monitor/<monitor id>/snapshot` | Latest defect alert JPEG |
 
-It only subscribes to these two, at QoS 1, and publishes nothing on them:
+Command topics subscribed at QoS 1 (never published to by PrintGuard):
 
-| Topic | Command |
+| Topic | Accepted values |
 |---|---|
-| `<base>/monitor/<monitor id>/enabled/set` | `on`, `true` or `1` to arm the monitor and `off`, `false` or `0` to disarm it |
-| `<base>/monitor/<monitor id>/printer_action/set` | `pause`, `resume` or `cancel` for the linked printer |
+| `<base>/monitor/<monitor id>/enabled/set` | `on`, `true`, `1` to enable; `off`, `false`, `0` to disable |
+| `<base>/monitor/<monitor id>/printer_action/set` | `pause`, `resume`, `cancel` |
 
-Any other payload on a command topic is ignored, as is one for a monitor that doesn't exist. A
-retained message on a command topic is ignored too, since the broker would replay it each time
-the hub connects, so publish commands without the retain flag. A
-command the engine refuses shows as an error in the dashboard.
+Unrecognised payloads, unknown monitor IDs and retained messages on command topics are ignored (so the broker doesn't replay an old cancel on reconnect; always publish commands unretained). Any command rejected by the engine surfaces as a dashboard error.
 
-Over REST the bridge is `mqtt` in `PATCH /settings`, an object of `enabled`, `host`, `port`,
-`username`, `password`, `tls`, `base_topic` and `discovery_prefix`. A read leaves `password` out.
+Via REST, MQTT lives under `mqtt` in `PATCH /settings` (`enabled`, `host`, `port`, `username`, `password`, `tls`, `base_topic`, `discovery_prefix`); reads omit `password`.
 
 > [!WARNING]
-> Anyone who can publish to the broker can pause and cancel your prints, so treat broker access
-> as you would the dashboard.
+> Anyone who can publish to your MQTT broker can pause or cancel your prints, so lock down broker
+> credentials just as carefully as the dashboard.
 
 ## The resource model
 
-Cameras and printers are registered resources, created and deleted only through their own
-collection. A monitor binds one camera and optionally one printer by `camera_id` and
-`printer_id`, and carries the thresholds and defect-response policy. Removing a resource
-clears it from any monitor that referenced it. A camera a printer exposes is removed with its
-printer. One the deployment passes in is only un-declared by removing its `devices` entry, so it
-stays registered and offline until you remove it.
+Cameras and printers are independent resources managed in their own collections. Monitors link one camera (`camera_id`) and optionally one printer (`printer_id`), holding thresholds and defect actions. Deleting a camera or printer clears its reference on any monitor using it. Printer-owned cameras disappear with their printer; deployment-declared USB cameras stay offline until you remove their `devices:` entry and delete them.
 
-A print file is a third resource. It carries the printers it is tagged for as `printer_ids`,
-and a removed printer stays in them, so a file tagged only for it starts nowhere until its tags
-are changed. Its `meta` holds the `slicer`, `time_s`, `filament_g`, `filament_mm`,
-`printer_model` and the first layer `nozzle` and `bed` temperatures read from the file, each
-`null` where the file did not say, and `thumbnail` is the media type of its preview or `null`.
+Print files are the third resource, carrying `printer_ids` tags (deleting a printer leaves its ID on tagged files so they don't unexpectedly become untagged and eligible for other printers), `meta` (`slicer`, `time_s`, `filament_g`, `filament_mm`, `printer_model`, first-layer `nozzle` and `bed`, all nullable) and `thumbnail` (MIME type or `null`).
 
-No stored credential leaves the hub. The dashboard, the REST API and the MCP server all read the
-engine's one snapshot, which holds none of them.
+Stored secrets never leave the hub: the dashboard, REST API and MCP server all read the same scrubbed snapshot.
 
-| In a response | What you get |
+| Field in responses | What's returned |
 |---|---|
-| A printer or notifier config field its adapter marks secret, such as an API key, access code, bot token, ntfy topic URL or Discord webhook | Left out |
-| The MQTT password | Left out |
-| `secrets_set` on a printer | The names of its secret fields that hold a saved value, such as `["api_key"]` |
-| `secrets_set` in `/state` | The same names for each alert channel and for the broker, as `{"notifiers": {"pushover": ["api_token", "user_key"]}, "mqtt": ["password"]}` |
-| An address in a config or a camera source | Without its `user:pass@`, which may hold a `/`, `?` or `#` (everything up to the last `@` counts as login, so an address with a later `@` is redacted more than it needs to be), with every query value and anything after a `#` replaced by `[redacted]`, as is any part of the path that is a UUID or 16 or more letters and digits, which is where UniFi Protect puts a stream's key |
-| A custom plugin catalogue URL | Without its login, with every query value replaced and its whole path shown as `[redacted]`. The default catalogue is shown as it is |
-| The access code in a Bambu printer camera's source | Left out |
-| A notifier this version doesn't know | Left out |
-| What a plugin has stored, and the list of API tokens | Left out of `/state`, whatever the token's scope |
+| Secret adapter fields (API keys, passwords, access codes, bot tokens, ntfy topic URLs, Discord webhooks) | Omitted |
+| MQTT password | Omitted |
+| `secrets_set` on a printer | List of secret field names currently stored, e.g. `["api_key"]` |
+| `secrets_set` in `/state` | Same map for alert channels and MQTT, e.g. `{"notifiers": {"pushover": ["api_token", "user_key"]}, "mqtt": ["password"]}` |
+| URLs in configs or camera sources | Stripped of `user:pass@` (up to the last `@`), query values and fragments replaced with `[redacted]`, and path segments that look like UUIDs or 16+ char alphanumeric tokens (like UniFi Protect stream keys) replaced with `[redacted]` |
+| Custom `catalogue_url` | Credentials stripped, query values and path replaced with `[redacted]` (default catalogue URL is shown verbatim) |
+| Bambu camera access code | Omitted |
+| Unknown notifier provider | Omitted |
+| Plugin store data and API token list | Omitted from `/state` regardless of token scope |
 
-A `PATCH` to a printer or to `/settings` takes a config back as you read it. The dashboard's
-forms save under the same rules:
+Sending a config back via `PATCH /printers/{id}` or `PATCH /settings` follows the same secret rules as the dashboard forms:
 
-| You send | The hub |
+| What you send | Hub behaviour |
 |---|---|
-| A secret field left out or blank | Keeps the stored value |
-| An address unchanged from how you read it | Keeps the stored address, credentials included |
-| A secret field as `null` | Clears it, which is how to remove the MQTT password |
-| A changed `base_url`, `host`, `port` or `url` without the secrets. A blank broker port is `8883` with TLS and `1883` without, so typing that one isn't a change | Answers `400` with `send API key again, since a stored secret is only kept for the address it was saved with`, naming the fields as the dashboard labels them. The ntfy topic URL and the Discord webhook are themselves the secret, so a new one replaces the old |
-| A printer with a different `provider` | Keeps nothing of the old config, so send the new one whole. A config field the provider does not declare is dropped |
-| An address holding `[redacted]` | Answers `400` with `the address has a hidden part, type it in full` |
-| An address that isn't a valid URL | Answers `400`, since it could not be redacted afterwards |
+| Secret omitted or blank | Keeps the saved secret |
+| Unchanged redacted URL | Keeps the saved URL including hidden credentials |
+| Secret set to `null` | Clears the saved secret (e.g. removing an MQTT password) |
+| Changed `base_url`, `host`, `port` or `url` without resending secrets (note: blank MQTT port equals `8883` with TLS or `1883` without) | Returns `400` (`send <field> again, since a stored secret is only kept for the address it was saved with`). Since ntfy URLs and Discord webhooks are themselves secrets, a new URL replaces the old one |
+| Changed printer `provider` | Drops all old config fields; send the full new config (undeclared fields are dropped) |
+| URL still containing `[redacted]` | Returns `400` (`the address has a hidden part, type it in full`) |
+| Invalid URL | Returns `400` |
 
-Every integration is normalised to one shape, so a printer reads and controls the same way
-regardless of its service:
+Every printer integration normalises to the same schema:
 
-| | Values |
+| Field | Values |
 |---|---|
 | **Status** | `printing`, `paused`, `idle`, `error`, `offline`, `unknown` |
-| **State** | `{ "status", "progress" 0-100, "job", "remaining_s", "nozzle", "bed" }`, reported on printers as `device_state`, which is `null` until the printer is first read. A heater is `{ "actual", "target" }` in °C, or `null` where the printer has none, and `remaining_s` is `null` where the service gives no estimate. `online` beside it says whether the last read gave a usable status |
-| **Actions** | `pause`, `resume`, `cancel`, and a heater target through `/heat` |
+| **State** | `{"status", "progress" (0-100), "job", "remaining_s", "nozzle", "bed"}` under `device_state` (`null` until first read). Heaters are `{"actual", "target"}` in °C or `null`; `remaining_s` is `null` if unavailable. `online` indicates whether the last poll succeeded |
+| **Actions** | `pause`, `resume`, `cancel`, plus heater targets via `/heat` |
 
 ## Reading detection state
 
-Two facts are easy to miss. A camera carries a per-frame classification, and the 0-1 defect
-score is reported per monitor rather than per camera, so the camera object has no numeric
-score field.
+Two small details are worth knowing up front: cameras carry raw per-frame classifications (`last_result`), while per-monitor scores and thresholded alerts live on monitors.
 
-The camera object, from `GET /cameras` and `GET /cameras/{id}`:
+Camera object (`GET /cameras` and `GET /cameras/{id}`):
 
 ```jsonc
 {
@@ -433,27 +362,23 @@ The camera object, from `GET /cameras` and `GET /cameras/{id}`:
   "name": "Left printer",
   "source": { /* redacted of any access_code / credentials */ },
   "printer_id": "9c41d7e0" | null,
-  "declared": false,                                        // passed in by the deployment
-  "max_fps": 5.0, "target_fps": 2.0, "achieved_fps": 1.9,   // rate, the last two 0 while offline
-  "detect_fps": 60.0,                                       // cap on target_fps, set by the user
-  "inferring": true, "in_use": true, "online": true,        // health
-  "standby": false,                                         // no monitor is watching it and nobody is viewing it
-  "reason": null,                                           // why it could not be opened, until it opens
-  "last_result": {                                          // latest classification (per FRAME)
-    "prediction": "success",                                //   "success" | "failure", at 0.5
-    "defect_score": 0.08                                    //   the model's probability of a failing print
+  "declared": false,                                        // passed in by deployment
+  "max_fps": 5.0, "target_fps": 2.0, "achieved_fps": 1.9,   // target/achieved are 0 while offline
+  "detect_fps": 60.0,                                       // user cap on target_fps
+  "inferring": true, "in_use": true, "online": true,        // health flags
+  "standby": false,                                         // true when unwatched and unviewed
+  "reason": null,                                           // failure reason if offline
+  "last_result": {                                          // latest per-frame model output
+    "prediction": "success",                                //   "success" | "failure" at 0.5
+    "defect_score": 0.08                                    //   model probability of a failing print
   },
   "brightness": 1.0, "contrast": 1.0, "sharpness": 0.0, "crop": null, "rotation": 0
 }
 ```
 
-`last_result` is the newest raw classification, or `null` before the camera has been
-inferred. `prediction` is the verdict at the model's own decision boundary of 0.5, with no
-monitor threshold applied, which makes it the quickest per-camera "failing?" read. A frame the
-model could not score leaves the previous result in place. It is kept when the camera stops
-being watched, so it is only current while `in_use` is `true`.
+`last_result` is `null` before the first scored frame, and `prediction` uses the model's fixed 0.5 boundary (no monitor threshold). If scoring a frame fails, the previous `last_result` stays put. Because `last_result` isn't cleared on standby, check `in_use: true` to be sure it's fresh.
 
-The monitor object, from `GET /monitors` and `GET /monitors/{id}`:
+Monitor object (`GET /monitors` and `GET /monitors/{id}`):
 
 ```jsonc
 {
@@ -461,36 +386,29 @@ The monitor object, from `GET /monitors` and `GET /monitors/{id}`:
   "camera_id": "1a2b3c4d",
   "printer_id": "9c41d7e0" | "",
   "name": "Left printer", "enabled": true,
-  "threshold": 0.6,            // defect score at/above which a frame counts as a failure
+  "threshold": 0.6,            // defect score cutoff for this monitor
   "consecutive": 3, "cooldown_s": 60,
   "on_defect": "pause",        // "none" | "pause" | "cancel"
   "notify": true,
-  "watching": true,            // whether it is actively inferring right now
-  "result": {                  // latest per-monitor score, or null before the first inference
+  "watching": true,            // actively inferring right now
+  "result": {                  // latest score, or null before first inference
     "score": 0.42, "ts": 1720000000.0
   },
-  "alert": {                   // set while a sustained defect holds, null again at the first frame under the threshold
+  "alert": {                   // populated during an active defect, resets to null below threshold
     "score": 0.82, "action": "pause", "ts": 1720000000.0   // action: "none" | "pause" | "cancel" | "failed"
   }
 }
 ```
 
-`alert.action` is `failed` when the printer did not take the pause or cancel. In `/state` a
-monitor has no `alert` field until its first alert.
+`alert.action` is `"failed"` if the printer rejected or missed the pause/cancel. Inside `/state`, `alert` is omitted until the monitor's first alert.
 
 ### Prediction against defect score
 
-The 0-1 defect score is the [detection model's](hardware.md#detection-models) probability that a
-frame shows a failing print, so `0.5` is the decision boundary. It appears in:
+The 0 to 1 defect score is the [detection model's](hardware.md#detection-models) probability that a frame shows a failing print (0.5 is the boundary). You'll see it in:
 
-- `result` events on the WebSocket:
-  `{ "event": "result", "monitor_id", "camera_id", "score", "prediction", "ms", "ts" }`,
-  where `prediction` has that monitor's `threshold` applied, sampled at up to 5 Hz per
-  monitor,
-- the monitor object's latest `result`, also carried by every full `state` snapshot,
-- a monitor's `alert.score` once it trips,
-- the MQTT **Defect score** sensor, published as 0-100.
+- WebSocket `result` events (`{"event": "result", "monitor_id", "camera_id", "score", "prediction", "ms", "ts"}`, where `prediction` uses that monitor's `threshold`, throttled to 5 Hz per monitor)
+- `monitor.result` in `/monitors` and full `state` snapshots
+- `monitor.alert.score` once an alert triggers
+- The MQTT **Defect score** sensor (scaled 0 to 100)
 
-To poll one camera's current verdict, read `GET /cameras/{id}` and take
-`last_result.prediction`. For a verdict at a monitor's threshold, read the monitor or the
-`result` events.
+For a quick raw per-camera read, check `last_result.prediction` on `GET /cameras/{id}`. For a monitor's thresholded state, read the monitor object or subscribe to `result` events.

@@ -20,12 +20,11 @@ uv run pytest tests/test_engine.py::test_fair_allocation_and_dedup   # a single 
 cd web && npm run typecheck               # strict TypeScript over the UI
 cd web && npm run test:sandbox            # the browser plugin sandbox in Playwright, chromium and webkit
 cd web && npm run build                   # production UI build
-cd web && npm run site                    # the GitHub Pages landing page (web/site), hot-reload
 cd feedback-worker && npm ci && npm test  # the training inbox Worker
 ```
 
 There is no Python lint step. The **tests** check in CI runs `uv run pytest`, on Python 3.12 and
-again on the image's 3.14, `npm run typecheck`, `npm run site:build` and `npm run test:sandbox` in
+again on the image's 3.14, `npm run typecheck` and `npm run test:sandbox` in
 `web/`, and the feedback Worker's `typecheck` and tests.
 
 ## Architecture
@@ -48,7 +47,9 @@ essentials a change must respect:
   is the full snapshot the UI renders, and any new engine-owned data the UI needs is added
   there. The UI is **presentation-only** - it never holds logic the engine should own, and
   it reaches the engine over one WebSocket (`/api/ws`), bar a sliced file's bytes, which go to
-  `POST /api/prints`.
+  `POST /api/prints`. Its pages are hash routes in [`web/src/router.tsx`](web/src/router.tsx),
+  so the dashboard keeps working under a proxy subpath, and only true modals stay in the store's
+  `dialog`.
 
 - **Resources vs monitors.** A **camera** (video source) and a **printer** (control-service
   connection) are registered resources, created/deleted only in their registry. A
@@ -93,10 +94,6 @@ essentials a change must respect:
 - **State** persists through `platform.load_state()`/`save_state()`, a JSON file in the
   hub's data directory.
 
-- **The website is not the dashboard.** `web/site/` is the GitHub Pages landing page, a second
-  Vite root sharing `web/src/styles.css`. The hub never serves it and it never imports the
-  store, which opens the engine socket on import.
-
 ## Conventions
 
 - **No comments, let names document intent.** The TypeScript/React UI carries **no** comments
@@ -120,8 +117,10 @@ essentials a change must respect:
   `tests/test_plugin_runtime.py` runs real JavaScript in the shipped QuickJS build to hold the
   hub's plugin sandbox to what it promises, and `web/tests/sandbox.spec.ts` does the same for
   the browser sandbox through Playwright (`npm run test:sandbox`, chromium and webkit), beside
-  `web/tests/dashboard.spec.ts`, which drives the dashboard against a faked hub, and
-  `web/tests/markdown.spec.ts` for README rendering. `tests/test_plugin_network.py` holds where
+  `web/tests/dashboard.spec.ts`, which drives the dashboard against a faked hub,
+  `web/tests/a11y.spec.ts`, which runs axe for WCAG 2.2 AA over every page and dialog in both
+  themes at phone and desktop widths, and `web/tests/markdown.spec.ts` for README rendering. The
+  faked hub and its builders live in `web/tests/fixtures.ts`. `tests/test_plugin_network.py` holds where
   a plugin's requests, sockets and sign-in may go, with `test_urls.py` and
   `test_plugin_schema.py` beside it. `tests/test_app.py` and `tests/test_platform.py` cover the
   hub's routes and its `Platform`. `tests/test_desktop.py` holds the desktop app's launch
@@ -151,8 +150,8 @@ change made wrong or redundant. Never leave a doc describing something that no l
 
 | Changed | Update |
 |---|---|
-| Install steps, ports, image tags, headline features | `README.md`, and the landing page in `web/site/Home.tsx` |
-| A supported printer service, camera source or alert channel | The lists in `README.md`, `web/site/Home.tsx` and `web/src/guide.tsx` |
+| Install steps, ports, image tags, headline features | `README.md` |
+| A supported printer service, camera source or alert channel | The lists in `README.md` and `web/src/guide.tsx` |
 | Engine protocol, events, `Platform` contract, scheduler, logging, repo layout | `docs/architecture.md` |
 | A printer integration or its setup, the print library, temperatures | `docs/printers.md` |
 | A camera source | `docs/cameras.md` |
@@ -184,7 +183,7 @@ heading in [CHANGELOG.md](CHANGELOG.md). The release branch owns the bump and th
 The changelog section is published **verbatim** as the GitHub release notes - write it for
 someone deciding whether to pull the new image, not about the implementation.
 
-Five checks are required: **tests** (`uv run pytest`, the UI's `typecheck`, `site:build` and
+Five checks are required: **tests** (`uv run pytest`, the UI's `typecheck` and
 `test:sandbox`, and the feedback Worker's `typecheck` and tests), **audit** (`uv audit` and `npm audit`
 over the lockfiles), the production **image** build (which
 also builds the UI), **version** (not yet tagged, with a matching

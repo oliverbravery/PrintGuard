@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'sha256-dtuQ7yKK0S3qxH4Q9/r9EdMvr7gUG23Ad1izvxcYJzo=' blob: 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
+      content="default-src 'none'; script-src 'sha256-GTX26voUrLqlQXk2/k0eb7i/SlErbc794WPq86CMBzs=' blob: 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
     />
     <title>PrintGuard plugin panel</title>
     <style>
@@ -25,6 +25,11 @@
           } catch {
             /* frozen on some engines; the policy above is what actually closes all but WebRTC */
           }
+        }
+        try {
+          delete Navigator.prototype.sendBeacon;
+        } catch {
+          /* as above */
         }
 
         const listeners = new Map();
@@ -88,6 +93,9 @@
           },
           background(image) {
             push({ kind: "background", image: String(image) });
+          },
+          view(tree) {
+            push({ kind: "view", tree });
           },
           log(text) {
             push({ kind: "log", text: String(text) });
@@ -165,6 +173,8 @@
               listeners.get("state")?.(pg.state);
             } else if (data.t === "event") {
               listeners.get(String(data.event.event))?.(data.event);
+            } else if (data.t === "action") {
+              listeners.get("action")?.({ event: "action", name: data.name, arg: data.arg });
             }
           } catch (err) {
             port.postMessage({ t: "failed", message: String((err && err.message) || err) });

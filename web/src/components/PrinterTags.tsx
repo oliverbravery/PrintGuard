@@ -5,7 +5,7 @@ import type { Printer } from "../types";
 export function PrinterTags({ selected, ext, onToggle }: { selected: string[]; ext: string; onToggle: (id: string) => void }) {
   const engine = useStore((s) => s.engine);
   const printers = engine?.printers ?? [];
-  if (!engine || !printers.length) return <p className="mono text-[0.68rem] text-text-2">register a printer to tag files for it</p>;
+  if (!engine || !printers.length) return <p className="mono text-xs text-text-2">register a printer to tag files for it</p>;
   const refusing = printers.filter((printer) => !printerAccepts(engine, printer, ext));
   return (
     <div className="space-y-1.5">
@@ -17,7 +17,7 @@ export function PrinterTags({ selected, ext, onToggle }: { selected: string[]; e
             <button
               key={printer.id}
               type="button"
-              className={`chip cursor-pointer hover:opacity-80 ${on ? "chip-accent" : ""} ${accepts ? "" : "opacity-40"}`}
+              className={`chip ${accepts ? "cursor-pointer hover:opacity-80" : "cursor-not-allowed opacity-40"} ${on ? "chip-accent" : ""}`}
               aria-pressed={on}
               disabled={!accepts}
               title={accepts ? `${on ? "Untag" : "Tag"} for ${printer.name}` : undefined}
@@ -30,7 +30,7 @@ export function PrinterTags({ selected, ext, onToggle }: { selected: string[]; e
         })}
       </div>
       {refusing.length > 0 && (
-        <p className="text-[0.66rem] text-text-2">
+        <p className="text-xs text-text-2">
           {refusing.map((printer) => printer.name).join(", ")} can't print .{ext} files.
         </p>
       )}

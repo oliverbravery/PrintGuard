@@ -115,7 +115,7 @@ function literalAddress(host: string): string | null {
 }
 
 export function isLocalAddress(rooted: string): boolean {
-  const host = rooted.replace(ROOT_DOT, "");
+  const host = rooted.toLowerCase().replace(ROOT_DOT, "");
   const address = literalAddress(host);
   if (address === null) return LOCAL_HOSTNAMES.includes(host) || LOCAL_SUFFIXES.some((suffix) => host.endsWith(suffix));
   if (address.length === 128 && !within(address, EMBEDDING_V4)) return within(address, LOCAL_V6) && !within(address, GLOBAL_V6);

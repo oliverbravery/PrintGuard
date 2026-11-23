@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 from typing import Any
+from urllib.parse import urlsplit
 
 from packaging.version import InvalidVersion, Version
 
@@ -18,6 +19,18 @@ RELEASES_URL = "https://api.github.com/repos/{repo}/releases"
 HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
 TIMEOUT_S = 15.0
 MAX_RELEASES_BYTES = 4 * 1024 * 1024
+
+
+def _web_url(raw: Any) -> str | None:
+    """Keeps an external release link only when it is an http or https URL with a host."""
+    if not isinstance(raw, str):
+        return None
+    url = raw.strip()
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    return url if parts.scheme in ("http", "https") and parts.netloc else None
 
 
 async def fetch_updates(http: HttpFn, repo: str, current: str, asset: str | None = None) -> dict[str, Any]:
@@ -63,7 +76,7 @@ async def fetch_updates(http: HttpFn, repo: str, current: str, asset: str | None
                     "version": str(version),
                     "name": release.get("name") or str(version),
                     "notes": (release.get("body") or "").strip(),
-                    "url": release.get("html_url") or f"https://github.com/{repo}/releases/tag/v{version}",
+                    "url": _web_url(release.get("html_url")) or f"https://github.com/{repo}/releases/tag/v{version}",
                     "files_url": f"https://github.com/{repo}/blob/{release['tag_name']}/",
                     "published_at": release.get("published_at"),
                 },
@@ -76,7 +89,7 @@ async def fetch_updates(http: HttpFn, repo: str, current: str, asset: str | None
     download = None
     if asset and available:
         download = next(
-            (a.get("browser_download_url") for a in assets_by_version[str(latest)] if a.get("name") == asset), None
+            (_web_url(a.get("browser_download_url")) for a in assets_by_version[str(latest)] if a.get("name") == asset), None
         )
     return {
         "current": current,

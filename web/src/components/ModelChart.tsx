@@ -156,7 +156,7 @@ export function ModelChart({ selected }: { selected?: ModelId }) {
             type="button"
             aria-pressed={metric.id === option.id}
             onClick={() => setMetric(option)}
-            className={`cursor-pointer rounded border px-2 py-1 text-xs transition-colors ${
+            className={`cursor-pointer border px-2 py-1 text-xs transition-colors ${
               metric.id === option.id ? "border-accent bg-accent/5 text-text-0" : "border-line-0 text-text-1 hover:border-line-1"
             }`}
           >
@@ -173,7 +173,7 @@ export function ModelChart({ selected }: { selected?: ModelId }) {
             onClick={() => toggle(key)}
             onPointerEnter={() => setPreview(key)}
             onPointerLeave={() => setPreview(null)}
-            className={`inline-flex cursor-pointer items-center gap-1.5 rounded border px-1.5 py-0.5 text-xs text-text-0 ${
+            className={`inline-flex cursor-pointer items-center gap-1.5 border px-1.5 py-0.5 text-xs text-text-0 ${
               pinned === key ? "border-line-1 bg-text-0/5" : "border-transparent"
             }`}
           >
@@ -187,7 +187,7 @@ export function ModelChart({ selected }: { selected?: ModelId }) {
           className="block w-full touch-manipulation"
           style={{ height: HEIGHT }}
           viewBox={`0 0 ${Math.max(width, 1)} ${HEIGHT}`}
-          role="img"
+          role="group"
           aria-label={`${metric.label} against latency for each model`}
           onClick={() => pinned && toggle(pinned)}
         >
@@ -261,8 +261,8 @@ export function ModelChart({ selected }: { selected?: ModelId }) {
           )}
         </svg>
         {tipped && (
-          <div ref={tip} className="pointer-events-none absolute z-10 min-w-48 rounded border border-line-1 bg-ink-2 px-3 py-2.5 text-xs shadow-lg">
-            <div className="mb-1.5 flex items-center gap-1.5 text-[0.8rem] font-semibold text-text-0">
+          <div ref={tip} className="pointer-events-none absolute z-10 min-w-48 border border-line-1 bg-ink-2 px-3 py-2.5 text-xs shadow-lg">
+            <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-text-0">
               <Swatch family={tipped.model.family} size={12} />
               {tipped.model.name}
             </div>
@@ -281,7 +281,7 @@ export function ModelChart({ selected }: { selected?: ModelId }) {
           </div>
         )}
       </div>
-      <div className="overflow-x-auto rounded border border-line-0">
+      <div className="overflow-x-auto border border-line-0">
         <table className="w-full whitespace-nowrap text-xs">
           <thead>
             <tr className="text-text-2">
@@ -319,10 +319,10 @@ export function ModelChart({ selected }: { selected?: ModelId }) {
           </tbody>
         </table>
       </div>
-      <p className="text-[0.7rem] leading-relaxed text-text-2">
-        Scored on {GOLD_TEST.frames.toLocaleString("en-GB")} frames from {GOLD_TEST.hubs} PrintGuard hubs no model was trained on, with
-        latency measured on one CPU thread of an M1 Max. Caught and false alarms count whole prints, {GOLD_TEST.failedPrints} failed and{" "}
-        {GOLD_TEST.goodPrints} good, alerting at 0.75 for 3 frames in a row. Obico's scores aren't probabilities, so its thresholds were
+      <p className="text-xs leading-relaxed text-text-2">
+        Tested on {GOLD_TEST.frames.toLocaleString("en-GB")} curated frames from {GOLD_TEST.hubs} PrintGuard hubs none of the models had seen before,
+        with latency measured on one CPU thread of an M1 Max. Caught and false alarms count whole prints ({GOLD_TEST.failedPrints} failed and{" "}
+        {GOLD_TEST.goodPrints} good), alerting after 3 frames in a row at 0.75. Obico's scores aren't probabilities, so its thresholds were
         matched on separate validation frames.
       </p>
     </div>
