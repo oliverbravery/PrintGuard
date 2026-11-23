@@ -12,10 +12,14 @@ permissions:
   contents: read
 
 jobs:
-  tests:
-    name: tests
+  pytest:
+    name: pytest (${{ matrix.python }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
@@ -27,24 +31,72 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci --prefix web
-      - run: uv sync --locked
-      - run: uv run pytest
-      - name: Run the tests again on the Python the image ships
-        run: uv run --isolated --locked --python 3.14 pytest
+      - run: uv run --locked --python ${{ matrix.python }} pytest
+
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.10.0
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            feedback-worker/package-lock.json
+      - run: npm ci --prefix web
       - run: npm run typecheck --prefix web
+      - run: npm ci --prefix feedback-worker
+      - run: npm run typecheck --prefix feedback-worker
+      - run: npm test --prefix feedback-worker
+
+  playwright:
+    name: playwright (${{ matrix.browser }} ${{ matrix.shard }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [sandbox, sandbox-webkit]
+        shard: [1/4, 2/4, 3/4, 4/4]
+        include:
+          - project: sandbox
+            browser: chromium
+          - project: sandbox-webkit
+            browser: webkit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.10.0
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web
       - id: playwright
         run: echo "version=$(node -p 'require("./web/node_modules/@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-      - name: Install chromium and webkit, or only their system libraries when the browsers came from the cache
+          key: playwright-${{ runner.os }}-${{ matrix.browser }}-${{ steps.playwright.outputs.version }}
+      - name: Install the browser, or only its system libraries when it came from the cache
         working-directory: web
-        run: npx playwright install --with-deps chromium webkit
-      - run: npm run test:sandbox --prefix web
-      - run: npm ci --prefix feedback-worker
-      - run: npm run typecheck --prefix feedback-worker
-      - run: npm test --prefix feedback-worker
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - working-directory: web
+        run: npx playwright test --project=${{ matrix.project }} --shard=${{ matrix.shard }}
+
+  tests:
+    name: tests
+    needs: [pytest, typecheck, playwright]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every test job must have passed, under a name branch protection can require
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: for result in $RESULTS; do [ "$result" = success ]; done
 
   audit:
     name: audit
