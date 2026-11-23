@@ -52,9 +52,25 @@ jobs:
       - run: npm run typecheck --prefix feedback-worker
       - run: npm test --prefix feedback-worker
 
+  playwright-version:
+    name: playwright version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.lockfile.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: web/package-lock.json
+          sparse-checkout-cone-mode: false
+      - id: lockfile
+        run: echo "version=$(jq -r '.packages["node_modules/@playwright/test"].version' web/package-lock.json)" >> "$GITHUB_OUTPUT"
+
   playwright:
     name: playwright (${{ matrix.browser }} ${{ matrix.shard }})
+    needs: playwright-version
     runs-on: ubuntu-24.04
+    container: mcr.microsoft.com/playwright:v${{ needs.playwright-version.outputs.version }}-noble
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -74,15 +90,6 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci --prefix web
-      - id: playwright
-        run: echo "version=$(node -p 'require("./web/node_modules/@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ matrix.browser }}-${{ steps.playwright.outputs.version }}
-      - name: Install the browser, or only its system libraries when it came from the cache
-        working-directory: web
-        run: npx playwright install --with-deps ${{ matrix.browser }}
       - working-directory: web
         run: npx playwright test --project=${{ matrix.project }} --shard=${{ matrix.shard }}
 
