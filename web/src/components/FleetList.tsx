@@ -1,4 +1,4 @@
-import { Pencil } from "lucide-react";
+import { GripVertical } from "lucide-react";
 import { Link } from "react-router";
 import { useShallow } from "zustand/react/shallow";
 import { section, toggleHidden, type Tile } from "../layout";
@@ -102,7 +102,7 @@ export function FleetList({ monitors, selectedId, visible, hidden }: { monitors:
                 title={customising ? undefined : "Layout"}
                 onClick={() => setCustomising(!customising)}
               >
-                {customising ? "Done" : <Pencil size={14} aria-hidden />}
+                {customising ? "Done" : <GripVertical size={16} aria-hidden />}
               </button>
             </>
           }
@@ -118,17 +118,12 @@ export function FleetList({ monitors, selectedId, visible, hidden }: { monitors:
       )}
       {customising && <HiddenTray hidden={hidden} />}
       {monitors.length === 0 && !customising && hidden.length > 0 && (
-        <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-          <p className="text-sm text-text-1">
-            {[counted(hidden.filter((tile) => tile.monitor).length, "monitor"), counted(hidden.filter((tile) => tile.plugin).length, "plugin panel")]
-              .filter(Boolean)
-              .join(" and ")}{" "}
-            hidden
-          </p>
-          <button className="btn-inline" onClick={() => setCustomising(true)}>
-            Layout
-          </button>
-        </div>
+        <p className="px-4 py-3 text-sm text-text-1">
+          {[counted(hidden.filter((tile) => tile.monitor).length, "monitor"), counted(hidden.filter((tile) => tile.plugin).length, "plugin panel")]
+            .filter(Boolean)
+            .join(" and ")}{" "}
+          hidden
+        </p>
       )}
       <Sortable ids={group} pinned={pinned} strategy={verticalListSortingStrategy} disabled={!customising} onReorder={reorder}>
         <ul>

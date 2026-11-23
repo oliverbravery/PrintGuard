@@ -2501,7 +2501,7 @@ test("a dashboard with every monitor hidden says so and opens the layout", async
   await dashboard(page, { engine: withLayout({ hidden: ["m1"] }) });
   await expect(page.getByText("1 monitor hidden")).toBeVisible();
 
-  await page.getByRole("main").getByRole("button", { name: "Layout" }).last().click();
+  await page.getByRole("main").getByRole("button", { name: "Layout" }).click();
   await expect(page.getByRole("button", { name: "Prusa · show" })).toBeVisible();
 });
 

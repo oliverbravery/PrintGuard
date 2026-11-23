@@ -169,7 +169,7 @@ Pick between **System**, **Light**, **Dark** and **Glass**, or build your own co
 </tr>
 </table>
 
-Click the pencil above the fleet list to drag monitors into any order (or move them with the arrow buttons), pin important ones to the top and hide any you don't want to see. On a phone, the fleet fills the screen and tapping a monitor opens its full view.
+Click the six-dot button above the fleet list to drag monitors into any order (or move them with the arrow buttons), pin important ones to the top and hide any you don't want to see. On a phone, the fleet fills the screen and tapping a monitor opens its full view.
 
 ![Layout mode: reorder, pin and hide monitors](docs/assets/customise.png)
 

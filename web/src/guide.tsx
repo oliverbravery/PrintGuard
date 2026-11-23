@@ -266,7 +266,7 @@ export const GUIDE: GuideSection[] = [
     shot: "customise",
     body: (
       <>
-        Hit the pencil above the fleet list to reorder, pin or hide monitors, and switch between Light, Dark, Glass or your own
+        Hit the six-dot button above the fleet list to reorder, pin or hide monitors, and switch between Light, Dark, Glass or your own
         custom colour themes. Both your layout and theme are saved on the hub so every device you open it on matches.
       </>
     ),
