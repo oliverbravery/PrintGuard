@@ -705,10 +705,10 @@ const PLUGIN_SHOTS: PluginShot[] = [
     scene: { width: 1000, height: 1400, route: "/monitors/m1", plugins: ["alert-sounds", "progress-reports"], mutate: surfaces },
     prepare: async (page) => {
       await page.getByRole("tab", { name: "Configure" }).click();
-      await page.locator("section").filter({ hasText: "Alert sounds" }).getByRole("switch").click();
+      await page.getByRole("switch", { name: "Sound an alert" }).click();
       await page.waitForTimeout(500);
     },
-    target: (page) => page.locator("section").filter({ hasText: "Alert sounds" }).first(),
+    target: (page) => page.getByRole("heading", { name: "Alert sounds", level: 3 }).locator(".."),
   },
   {
     id: "progress-reports",
@@ -716,10 +716,10 @@ const PLUGIN_SHOTS: PluginShot[] = [
     scene: { width: 1000, height: 1400, route: "/monitors/m1", plugins: ["alert-sounds", "progress-reports"], mutate: surfaces },
     prepare: async (page) => {
       await page.getByRole("tab", { name: "Configure" }).click();
-      await page.locator("section").filter({ hasText: "Progress reports" }).getByRole("switch").click();
+      await page.getByRole("switch", { name: "Send progress reports" }).click();
       await page.waitForTimeout(500);
     },
-    target: (page) => page.locator("section").filter({ hasText: "Progress reports" }).first(),
+    target: (page) => page.getByRole("heading", { name: "Progress reports", level: 3 }).locator(".."),
   },
 ];
 
