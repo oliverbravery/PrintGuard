@@ -30,6 +30,10 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 - Classification results and `last_result` no longer include `distances` or `margin`, and `result` events no longer include `margin` (those were specific to Legacy's prototype classifier). Read `defect_score` instead.
 
+### Fixed
+
+- The dashboard and its camera feeds work behind a proxy that serves the hub under a path, such as Home Assistant Ingress.
+
 ## [2.6.7] - 2026-11-14
 
 ### Added
