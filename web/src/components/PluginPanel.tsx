@@ -40,7 +40,7 @@ function PluginRow({ plugin, handle, visible, group }: { plugin: PluginRecord; h
       thumb={item && <div className="aspect-video w-20 shrink-0 overflow-hidden border border-line-0 bg-ink-1">{image && <img src={image} alt="" className="size-full object-contain" />}</div>}
       below={
         item?.actions?.length ? (
-          <div className="flex flex-wrap justify-end gap-1">
+          <div className="flex flex-wrap justify-center gap-1">
             {item.actions.map((action, index) => (
               <PluginNodeView key={index} plugin={plugin} node={action} panel={panel} />
             ))}
