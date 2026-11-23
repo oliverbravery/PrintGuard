@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-import { camera, dashboard, engine, monitor, printer, review } from "./fixtures";
+import { camera, dashboard, emit, engine, monitor, printer, review } from "./fixtures";
 
 const WCAG_22_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
@@ -79,3 +79,19 @@ for (const theme of ["dark", "light"] as const) {
     });
   }
 }
+
+test.describe("glass", () => {
+  test.use({ contextOptions: { reducedMotion: "reduce" } });
+
+  for (const tone of [0, 1]) {
+    test(`an armed confirm button on ${tone ? "light" : "dark"} glass meets WCAG 2.2 AA`, async ({ page }) => {
+      await dashboard(page, { engine: state }, "/monitors/m1");
+      await emit(page, { event: "state", ...state, settings: { ...state.settings, theme: "glass", glass: { opacity: 0, tone } } });
+      await page.getByRole("tab", { name: "Configure" }).click();
+      await page.getByRole("button", { name: "Delete monitor" }).click();
+      await expect(page.getByRole("button", { name: "Confirm" })).toBeVisible();
+      const { violations, incomplete } = await new AxeBuilder({ page }).withRules(["color-contrast"]).include(".btn-armed").analyze();
+      expect([...violations, ...incomplete].map(({ id }) => id)).toEqual([]);
+    });
+  }
+});

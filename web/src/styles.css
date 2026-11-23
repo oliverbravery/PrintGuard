@@ -190,8 +190,8 @@ body {
   border-color: var(--painted-edge);
 }
 
-:root[data-glass] .btn:not(.btn-primary),
-:root[data-glass] .cell-action:not(.cell-action-primary),
+:root[data-glass] .btn:not(.btn-primary, .btn-armed, .btn-danger:hover),
+:root[data-glass] .cell-action:not(.cell-action-primary, .btn-armed),
 :root[data-glass] .btn-inline,
 :root[data-glass] .chip,
 :root[data-glass] .field {
@@ -307,8 +307,7 @@ body {
 }
 
 .btn-armed,
-.btn-armed:hover,
-:root[data-glass] .btn-armed {
+.btn-armed:hover {
   background: var(--color-bad) !important;
   border-color: var(--color-bad);
   color: var(--color-on-bad);
