@@ -27,7 +27,7 @@ Frames are saved exactly as the model saw them (after rotation, crop and brightn
 
 PrintGuard also records one frame every 5 seconds during a print so you can scrub through the whole job during review and pull in moments PrintGuard didn't pick automatically. An 8-hour print takes around 100 MB. Recordings are deleted automatically once you send or ignore the print, or after 7 days (you can change that to 3 or 14 days, or turn recordings off entirely). Total recording storage is capped at 2 GB, dropping the oldest first.
 
-A print closes when its linked printer reports idle or an error, or when you switch the monitor off (a paused print stays open in case you rescue and resume it). Monitors without a linked printer have no way of knowing when a print ends, so they roll over once every 24 hours.
+A print opens as soon as its monitor starts watching, even before the linked printer has answered, and losing contact with the printer doesn't close it. It closes when the printer reports idle or an error, or when you switch the monitor off (a paused print stays open in case you rescue and resume it). Monitors without a linked printer have no way of knowing when a print ends, so they roll over once every 24 hours.
 
 ## Reviewing a print
 

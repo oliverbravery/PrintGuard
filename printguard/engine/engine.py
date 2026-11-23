@@ -979,9 +979,10 @@ class Engine:
                 )
             await self.watchdog.on_score(monitor, frame, score)
             monitor = self._watching_through(monitor_id, camera)
-            if monitor is not None and self.settings["feedback"] == "ask" and self._print_known(monitor):
+            if monitor is not None and self.settings["feedback"] == "ask":
+                printer = self.printers.get(monitor["printer_id"])
                 try:
-                    if await self.reviews.sample(monitor, frame, score, ts, recording=self.settings["recording_days"] > 0):
+                    if await self.reviews.sample(monitor, frame, score, ts, recording=self.settings["recording_days"] > 0, answered=printer is None or printer.reported_status is not None):
                         self.save()
                 except Exception as exc:
                     self.report_failure(f"keeping a frame of '{monitor['name']}' for review", exc)
@@ -990,16 +991,6 @@ class Engine:
         """The monitor as it stands now, if it is still watching through this camera."""
         monitor = self.monitors.get(monitor_id)
         return monitor if monitor and monitor["camera_id"] == camera.id and monitor_watching(monitor, self.printers) else None
-
-    def _print_known(self, monitor: dict[str, Any]) -> bool:
-        """Whether a frame of a monitor can be put down to a print.
-
-        A printer that has not been read yet, as after its connection is
-        edited, is watched in case it is printing. A frame kept then would
-        begin a print that an idle printer's first answer ends at once.
-        """
-        printer = self.printers.get(monitor["printer_id"])
-        return printer is None or printer.reported_status is not None
 
     async def note_alert(self, monitor_id: str, alert: dict[str, Any], frame: Frame) -> None:
         """Records a fired alert in a monitor's history and keeps the frame that fired it.
@@ -1029,7 +1020,10 @@ class Engine:
 
     def settle_reviews(self) -> bool:
         """Ends the review of every print that is over, returning whether any did."""
-        return self.reviews.settle(self.monitors, self.printers, self.watchdog.responding, self.settings["feedback"] == "ask")
+        ended = self.reviews.settle(self.monitors, self.printers, self.watchdog.responding, self.settings["feedback"] == "ask")
+        if ended:
+            self._hold("delete the frames kept of what was no print", self.reviews.discard_not_prints())
+        return ended
 
     def _start_send(self, review: Review, req_id: Any = None) -> None:
         """Starts uploading a review, or has the upload already under way answer this request too."""

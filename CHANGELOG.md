@@ -24,6 +24,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - Monitor settings and end-of-print review now live in **Configure** and **Review** tabs on each monitor. Reviewing a print is simpler too: just flag the frames where something went wrong instead of answering a separate pass/fail question for the whole print.
 - Printer model is now set once on the printer itself instead of being asked on every review, and clicking **Ignore** on a review deletes its kept frames and recording to free up disk space.
 - The Docker image and desktop apps are roughly 45 MB larger to bundle the new models.
+- A print is kept and recorded for review from the moment its monitor starts watching, even when the linked printer can't be reached.
 
 ### Removed
 

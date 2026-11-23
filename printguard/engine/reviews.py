@@ -210,6 +210,8 @@ class ReviewLibrary:
         self._reviews: dict[str, Review] = {}
         self._recordings: dict[str, Recording] = {}
         self._unrecorded: set[str] = set()
+        self._unanswered: set[str] = set()
+        self._not_prints: list[Review] = []
         self._stops = 0
 
     def restore(self, records: list[dict[str, Any]]) -> None:
@@ -351,6 +353,16 @@ class ReviewLibrary:
         _raise_first(outcomes)
         return bool(unwanted)
 
+    async def discard_not_prints(self) -> None:
+        """Deletes the files of every watch that ``settle`` found was no print.
+
+        Raises:
+            OSError: If a file could not be deleted, once the rest were tried.
+        """
+        not_prints, self._not_prints = self._not_prints, []
+        outcomes = await asyncio.gather(*(self._discard(review) for review in not_prints), return_exceptions=True)
+        _raise_first(outcomes)
+
     async def _remove_recording(self, review_id: str) -> None:
         await asyncio.gather(self._platform.files.remove(recording_key(review_id)), self._platform.files.remove(index_key(review_id)))
 
@@ -399,12 +411,14 @@ class ReviewLibrary:
                 return await self._platform.files.read(frame_key(review.id, frame_id))
         return None
 
-    async def sample(self, monitor: dict[str, Any], frame: Frame, score: float, ts: float, recording: bool) -> bool:
+    async def sample(self, monitor: dict[str, Any], frame: Frame, score: float, ts: float, recording: bool, answered: bool) -> bool:
         """Considers one scored frame for a monitor's running print.
 
-        A frame is kept as spaced when the print's current gap has passed since
-        the last one, and otherwise as a near miss when it scored under the
-        threshold but above the near misses already held.
+        Every frame the monitor watches counts, so a print is kept from the
+        moment its monitor starts watching. A frame is kept as spaced when the
+        print's current gap has passed since the last one, and otherwise as a
+        near miss when it scored under the threshold but above the near misses
+        already held.
 
         Args:
             monitor: The monitor record the score belongs to.
@@ -412,13 +426,21 @@ class ReviewLibrary:
             score: Defect score in [0, 1].
             ts: Wall-clock time of the score.
             recording: Whether prints are recorded for scrubbing in their review.
+            answered: Whether the monitor has no printer, or its printer has
+                answered since it was linked or its connection was edited.
 
         Returns:
             Whether the kept frames changed.
         """
         score = round(score, 4)
         stops = self._stops
-        review = self._running(monitor["id"]) or await self._begin(monitor["id"], ts)
+        review = self._running(monitor["id"])
+        if review is None:
+            review = await self._begin(monitor["id"], ts)
+            if not answered:
+                self._unanswered.add(review.id)
+        elif answered:
+            self._unanswered.discard(review.id)
         if recording:
             await self._record(review, frame, score, ts)
         spaced = review.of_kind("spaced")
@@ -457,6 +479,11 @@ class ReviewLibrary:
         print is sent before the frame that fired it is kept. A print with no
         frames kept has nothing to review, so it never waits for one.
 
+        A monitor watches a printer it has not heard from yet, as after its
+        connection is edited. When that printer's first answer is that it is
+        idle or has failed and nothing alerted, what was watched was no print,
+        so it is dropped and ``discard_not_prints`` deletes its files.
+
         Args:
             monitors: Every monitor record by id.
             printers: The printer registry.
@@ -475,7 +502,12 @@ class ReviewLibrary:
             if monitor and monitor.get("enabled") and not (printer and printer.reported_status in ENDED_STATUSES) and not day_long:
                 continue
             review.ended = now
-            review.status = "ready" if wanted and review.frames else "dismissed"
+            if review.id in self._unanswered and printer and printer.reported_status in ENDED_STATUSES and not review.of_kind("alert"):
+                self._reviews.pop(review.id)
+                self._not_prints.append(review)
+            else:
+                review.status = "ready" if wanted and review.frames else "dismissed"
+            self._unanswered.discard(review.id)
             ended = True
         return ended
 
