@@ -3252,6 +3252,10 @@ test("the page fits the screen, with the fleet and each list scrolling on their 
   await expect(lastMonitor).toBeInViewport();
   expect((await hero.boundingBox())!.y).toBe(heroTop);
   await expect(page.getByRole("heading", { name: /^Fleet/ })).toBeInViewport();
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await hero.getByRole("tab", { name: "Configure" }).click();
+  await expect(hero.getByRole("button", { name: "Delete monitor" })).not.toBeInViewport();
+  expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight)).toBe(true);
 
   await routeTo(page, "/prints");
   const title = page.getByRole("heading", { name: "Prints", level: 1 });

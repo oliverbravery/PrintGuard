@@ -196,7 +196,7 @@ export function MonitorHero({ monitor }: { monitor: Monitor }) {
       </div>
       <div className="flex min-w-0 flex-col">
         <Tabs prefix={prefix} label="Monitor panes" tabs={tabs} value={pane} onChange={setPane} cells />
-        <div className="flex-1 lg:min-h-0 lg:scroll-pb-14 lg:overflow-y-auto">
+        <div className="relative flex-1 lg:min-h-0 lg:scroll-pb-14 lg:overflow-y-auto">
           {PANES.map(({ id }) => (
             <TabPanel
               key={id}

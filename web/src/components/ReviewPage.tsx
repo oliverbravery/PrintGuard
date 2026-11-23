@@ -191,7 +191,7 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
         </p>
       )}
       {loaded && kept.length === 0 && <p className="px-4 py-6 text-sm text-text-2">No frames picked. Add some from the recording.</p>}
-      <ul className="grid min-h-0 flex-1 grid-cols-2 content-start overflow-y-auto xl:grid-cols-3">
+      <ul className="relative grid min-h-0 flex-1 grid-cols-2 content-start overflow-y-auto xl:grid-cols-3">
         {kept.map((frame, index) => (
           <FrameCard
             key={frame.id}
@@ -267,7 +267,7 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
             />
           </div>
           <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
-            <TabPanel prefix="review" id="scrubber" className={`min-h-0 min-w-0 overflow-y-auto md:border-r md:border-rule ${column === "scrubber" ? "" : "max-md:hidden"}`}>
+            <TabPanel prefix="review" id="scrubber" className={`relative min-h-0 min-w-0 overflow-y-auto md:border-r md:border-rule ${column === "scrubber" ? "" : "max-md:hidden"}`}>
               {workbench}
             </TabPanel>
             <TabPanel prefix="review" id="picked" className={`flex min-h-0 min-w-0 flex-col ${column === "picked" ? "" : "max-md:hidden"}`}>

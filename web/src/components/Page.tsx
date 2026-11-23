@@ -71,8 +71,8 @@ export function Page({
 export function Split({ list, detail, detailShown }: { list: ReactNode; detail: ReactNode; detailShown: boolean }) {
   return (
     <div className="page-fill grid md:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
-      <div className={`min-w-0 border-rule md:border-r overflow-y-auto ${detailShown ? "max-md:hidden" : ""}`}>{list}</div>
-      <div className={`min-w-0 overflow-y-auto ${detailShown ? "" : "max-md:hidden"}`}>{detail}</div>
+      <div className={`relative min-w-0 border-rule md:border-r overflow-y-auto ${detailShown ? "max-md:hidden" : ""}`}>{list}</div>
+      <div className={`relative min-w-0 overflow-y-auto ${detailShown ? "" : "max-md:hidden"}`}>{detail}</div>
     </div>
   );
 }

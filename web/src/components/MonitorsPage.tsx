@@ -39,7 +39,7 @@ function HeroOverFleet({ hero, fleet }: { hero: ReactNode; fleet: ReactNode }) {
       resizeTargetMinimumSize={{ fine: 12, coarse: 24 }}
     >
       <Panel id="hero" defaultSize="62%" minSize={HERO_MIN}>
-        <div className="h-full overflow-y-auto max-lg:pb-2">{hero}</div>
+        <div className="relative h-full overflow-y-auto max-lg:pb-2">{hero}</div>
       </Panel>
       <Separator className="splitter" aria-label="Selected monitor height" />
       <Panel
@@ -50,7 +50,7 @@ function HeroOverFleet({ hero, fleet }: { hero: ReactNode; fleet: ReactNode }) {
         collapsedSize={FLEET_HEADER}
         onResize={() => setFolded(fleetPanel.current?.isCollapsed() ?? false)}
       >
-        <div className={`h-full scroll-pt-20 ${folded ? "overflow-hidden" : "overflow-y-auto"}`}>
+        <div className={`relative h-full scroll-pt-20 ${folded ? "overflow-hidden" : "overflow-y-auto"}`}>
           <FleetFold value={fold}>{fleet}</FleetFold>
         </div>
       </Panel>
