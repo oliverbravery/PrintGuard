@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useFocusKept } from "../a11y";
 import { useStore } from "../store";
 import { useSubmit } from "../submit";
@@ -7,12 +8,21 @@ import { ConfirmButton } from "./ConfirmButton";
 import { CopyButton } from "./CopyButton";
 
 export function ApiTab() {
-  const { engine, send, isPending, createdToken, clearCreatedToken } = useStore();
+  const { savedTokens, send, pending, creating, createdToken, clearCreatedToken } = useStore(
+    useShallow((s) => ({
+      savedTokens: s.engine?.tokens,
+      send: s.send,
+      pending: s.pending,
+      creating: s.isPending("token.create"),
+      createdToken: s.createdToken,
+      clearCreatedToken: s.clearCreatedToken,
+    })),
+  );
+  const tokens = savedTokens ?? [];
   const [tokenName, setTokenName] = useState("");
   const [tokenScope, setTokenScope] = useState<ApiToken["scope"]>("read");
   const createToken = useSubmit(() => setTokenName(""));
   const tokenArea = useFocusKept<HTMLDivElement>();
-  const tokens = engine?.tokens ?? [];
   return (
     <div ref={tokenArea} className="space-y-4">
       <div>
@@ -54,7 +64,7 @@ export function ApiTab() {
                 </div>
                 <span className="mono block truncate text-xs text-text-2">{t.hint}</span>
               </div>
-              <ConfirmButton disabled={isPending("token.remove", t.id)} onConfirm={() => send({ cmd: "token.remove", id: t.id })}>
+              <ConfirmButton disabled={`token.remove:${t.id}` in pending} onConfirm={() => send({ cmd: "token.remove", id: t.id })}>
                 Revoke
               </ConfirmButton>
             </div>
@@ -66,7 +76,7 @@ export function ApiTab() {
         className="space-y-2"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!tokenName.trim() || isPending("token.create")) return;
+          if (!tokenName.trim() || creating) return;
           createToken.submit({ cmd: "token.create", name: tokenName.trim(), scope: tokenScope });
         }}
       >
@@ -83,8 +93,8 @@ export function ApiTab() {
             <option value="control">control</option>
             <option value="manage">manage</option>
           </select>
-          <button type="submit" className="btn btn-primary whitespace-nowrap" disabled={!tokenName.trim() || isPending("token.create")}>
-            {isPending("token.create") ? "…" : "Generate"}
+          <button type="submit" className="btn btn-primary whitespace-nowrap" disabled={!tokenName.trim() || creating}>
+            {creating ? "…" : "Generate"}
           </button>
         </div>
         {createToken.error && (

@@ -16,7 +16,14 @@ import httpx
 import pytest
 
 from printguard.server import app as app_module
-from printguard.server.app import ASSET_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, WebStaticFiles, create_app, host_trusted
+from printguard.server.app import (
+    ASSET_CACHE_CONTROL,
+    DASHBOARD_CSP,
+    REVALIDATE_CACHE_CONTROL,
+    WebStaticFiles,
+    create_app,
+    host_trusted,
+)
 from printguard.server import events as events_module
 from printguard.server.events import ConflatedEventQueue, parse_json
 
@@ -67,7 +74,10 @@ async def test_the_dashboard_and_its_files_are_framed_only_by_the_hub_and_the_or
         for path in ("/", "/assets/index-abc123.js", "/plugin-sandbox.html"):
             response = await client.get(path)
             assert response.headers.get("x-frame-options") == legacy_header, path
-            assert response.headers["content-security-policy"] == policy, path
+            assert response.headers["x-content-type-options"] == "nosniff", path
+            assert response.headers["referrer-policy"] == "no-referrer", path
+            expected = f"{DASHBOARD_CSP}; {policy}" if path == "/" else policy
+            assert response.headers["content-security-policy"] == expected, path
 
 
 async def test_the_hub_serves_no_interactive_api_pages_and_no_root_schema(monkeypatch) -> None:
@@ -1328,7 +1338,7 @@ async def test_an_origin_entry_with_a_wildcard_is_ignored_and_frames_nothing(mon
         assert (await client.get("/api/health", headers={"host": "hub.wild.example"})).status_code == 403
         policy = (await client.get("/")).headers["content-security-policy"]
 
-    assert policy == "frame-ancestors 'self' https://ok.example.com"
+    assert policy == f"{DASHBOARD_CSP}; frame-ancestors 'self' https://ok.example.com"
     assert any("https://*.wild.example is ignored because a wildcard" in line for line in told)
 
 

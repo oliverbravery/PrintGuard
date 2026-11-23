@@ -1,6 +1,7 @@
 import { Flag } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
+import { useShallow } from "zustand/react/shallow";
 import { clock, day, framesLabel, FRAMES_PER_DAY, isDailyLimit, LIMIT_REASON, megabytes, printedAt, printsToReview, reviewable, sending, waitingMessage } from "../review";
 import { useLazySnapshot } from "../snapshot";
 import { useStore } from "../store";
@@ -80,7 +81,7 @@ function FrameCard({
 }
 
 function Progress({ review, onDone }: { review: ReviewSummary; onDone: () => void }) {
-  const { send, isPending } = useStore();
+  const { send, retrying } = useStore(useShallow((s) => ({ send: s.send, retrying: s.isPending("review.retry", review.id) })));
   if (review.status === "sent")
     return (
       <div className="space-y-4 px-4 py-4">
@@ -111,7 +112,7 @@ function Progress({ review, onDone }: { review: ReviewSummary; onDone: () => voi
         <button className="btn" onClick={() => send({ cmd: "review.dismiss", id: review.id })}>
           Cancel sending
         </button>
-        <button className="btn btn-primary" disabled={isPending("review.retry", review.id)} onClick={() => send({ cmd: "review.retry", id: review.id })}>
+        <button className="btn btn-primary" disabled={retrying} onClick={() => send({ cmd: "review.retry", id: review.id })}>
           Try now
         </button>
       </div>
@@ -123,7 +124,17 @@ type Column = "picked" | "scrubber";
 
 function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSummary }) {
   const navigate = useNavigate();
-  const { engine, send, isPending, fetchReview, reviewData, reconnecting } = useStore();
+  const { switchedOff, send, submitting, deleting, fetchReview, detail, reconnecting } = useStore(
+    useShallow((s) => ({
+      switchedOff: s.engine?.settings.feedback === "off",
+      send: s.send,
+      submitting: s.isPending("review.send", review.id),
+      deleting: s.isPending("review.delete", review.id),
+      fetchReview: s.fetchReview,
+      detail: s.reviewData[review.id],
+      reconnecting: s.reconnecting,
+    })),
+  );
   const [flagged, setFlagged] = useState<Set<string>>(new Set());
   const [removed, setRemoved] = useState<Set<string>>(new Set());
   const [ignoring, setIgnoring] = useState(false);
@@ -134,10 +145,8 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
     if (!reconnecting) fetchReview(review.id);
   }, [reconnecting, review.id, review.frames]);
 
-  const detail = reviewData[review.id];
   const loaded = detail?.frames;
   const frames = loaded ?? [];
-  const switchedOff = engine?.settings.feedback === "off";
   const kept = frames.filter((frame) => !removed.has(frame.id));
   const over = kept.length - FRAMES_PER_DAY;
   const showsFailure = (frame: ReviewFrame) => (frame.kind === "added" && frame.label === "failure") !== flagged.has(frame.id);
@@ -154,8 +163,7 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
 
   const picked = (
     <section aria-label="Frames to send" className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-11 flex-wrap items-center gap-3 border-b border-rule bg-ink-1 px-4 py-1.5">
-        <span className="label flex-1 text-text-1">Frames to send</span>
+      <ListHead title="Frames to send">
         {loaded && (
           <span className={`mono text-sm font-semibold ${over > 0 ? "text-warn" : ""}`}>
             {kept.length} of {FRAMES_PER_DAY}
@@ -166,7 +174,7 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
             Clear all
           </button>
         )}
-      </div>
+      </ListHead>
       {loaded && (
         <div aria-hidden className="h-1 bg-line-0">
           <div className={`h-full ${over > 0 ? "bg-warn" : "bg-accent"}`} style={{ width: `${Math.min(100, (kept.length / FRAMES_PER_DAY) * 100)}%` }} />
@@ -202,9 +210,7 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
 
   const workbench = (
     <section aria-label="Whole print recording" className="flex min-w-0 flex-col">
-      <div className="flex min-h-11 items-center border-b border-rule bg-ink-1 px-4 py-1.5">
-        <span className="label text-text-1">Whole print</span>
-      </div>
+      <ListHead title="Whole print" />
       {scrubber ? (
         <RecordingScrubber review={detail} full={over >= 0} onAdd={(index, label) => send({ cmd: "review.add", id: review.id, index, label })} />
       ) : (
@@ -277,7 +283,7 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
             ) : (
               <span />
             )}
-            <button className="cell-action cell-action-primary" disabled={switchedOff || kept.length === 0 || over > 0 || isPending("review.send", review.id)} onClick={submit}>
+            <button className="cell-action cell-action-primary" disabled={switchedOff || kept.length === 0 || over > 0 || submitting} onClick={submit}>
               Send {framesLabel(loaded ? kept.length : review.frames)}
             </button>
           </div>
@@ -296,7 +302,7 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
               </button>
               <button
                 className="btn btn-danger"
-                disabled={isPending("review.delete", review.id)}
+                disabled={deleting}
                 onClick={() => {
                   if (send({ cmd: "review.delete", id: review.id }) !== null) {
                     setIgnoring(false);

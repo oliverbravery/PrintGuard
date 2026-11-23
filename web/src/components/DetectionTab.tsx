@@ -1,9 +1,16 @@
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import { ModelPicker } from "./ModelPicker";
 import { SaveStatus } from "./SaveStatus";
 
 export function DetectionTab() {
-  const { engine, updateSettings } = useStore();
+  const { runtime, stats, updateSettings } = useStore(
+    useShallow((s) => ({
+      runtime: s.engine?.settings.inference_runtime ?? "auto",
+      stats: s.engine?.stats,
+      updateSettings: s.updateSettings,
+    })),
+  );
   return (
     <div className="space-y-3">
       <span className="label block">Model</span>
@@ -14,7 +21,7 @@ export function DetectionTab() {
       <select
         id="inference-runtime"
         className="field w-full"
-        value={engine?.settings.inference_runtime ?? "auto"}
+        value={runtime}
         onChange={(event) => updateSettings({ inference_runtime: event.target.value }, "detection")}
       >
         <option value="auto">Automatic</option>
@@ -27,9 +34,9 @@ export function DetectionTab() {
       </span>
       <dl className="grid grid-cols-3 border border-line-0">
         {[
-          ["Active compute", engine?.stats.inference_device ?? "initialising"],
-          ["Capacity", engine ? `${engine.stats.capacity_fps.toFixed(1)} fps` : "-"],
-          ["Latency", engine ? `${engine.stats.infer_ms.toFixed(0)} ms` : "-"],
+          ["Active compute", stats?.inference_device ?? "initialising"],
+          ["Capacity", stats ? `${stats.capacity_fps.toFixed(1)} fps` : "-"],
+          ["Latency", stats ? `${stats.infer_ms.toFixed(0)} ms` : "-"],
         ].map(([label, value], index) => (
           <div key={label} className={`min-w-0 px-3 py-2 ${index ? "border-l border-line-0" : ""}`}>
             <dt className="label">{label}</dt>

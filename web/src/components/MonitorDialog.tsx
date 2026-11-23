@@ -1,32 +1,34 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router";
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
+import { useCreated } from "../submit";
 import { Dialog } from "./Dialog";
 
 export function MonitorDialog() {
-  const { engine, send, openDialog, isPending } = useStore();
+  const { engine, send, openDialog, saving } = useStore(
+    useShallow((s) => ({
+      engine: s.engine,
+      send: s.send,
+      openDialog: s.openDialog,
+      saving: s.isPending("monitor.add"),
+    })),
+  );
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [cameraId, setCameraId] = useState("");
   const [printerId, setPrinterId] = useState("");
   const cameras = engine?.cameras ?? [];
   const printers = engine?.printers ?? [];
-  const monitors = engine?.monitors.length ?? 0;
-  const monitorsWhenSent = useRef<number | null>(null);
+  const monitors = engine?.monitors ?? [];
   const boundCameraId = cameras.some((c) => c.id === cameraId) ? cameraId : "";
   const boundPrinterId = printers.some((p) => p.id === printerId) ? printerId : "";
-  const saving = isPending("monitor.add");
   const close = () => openDialog(null);
 
-  useEffect(() => {
-    if (saving || monitorsWhenSent.current === null) return;
-    const added = engine?.monitors.at(-1);
-    if (monitors > monitorsWhenSent.current && added) {
-      close();
-      navigate(`/monitors/${added.id}`);
-    }
-    monitorsWhenSent.current = null;
-  }, [saving]);
+  useCreated("monitor.add", monitors, (added) => {
+    close();
+    navigate(`/monitors/${added.id}`);
+  });
 
   return (
     <Dialog title="Add monitor" onClose={close}>
@@ -35,10 +37,7 @@ export function MonitorDialog() {
         onSubmit={(event) => {
           event.preventDefault();
           if (!name.trim() || !boundCameraId || saving) return;
-          monitorsWhenSent.current = monitors;
-          if (send({ cmd: "monitor.add", monitor: { name: name.trim(), camera_id: boundCameraId, printer_id: boundPrinterId } }) === null) {
-            monitorsWhenSent.current = null;
-          }
+          send({ cmd: "monitor.add", monitor: { name: name.trim(), camera_id: boundCameraId, printer_id: boundPrinterId } });
         }}
       >
         <input className="field" aria-label="Monitor name" placeholder="Monitor name" value={name} onChange={(e) => setName(e.target.value)} />

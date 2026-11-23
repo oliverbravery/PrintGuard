@@ -1,4 +1,5 @@
 import { Link } from "react-router";
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import type { Monitor } from "../types";
 import { ConfirmButton } from "./ConfirmButton";
@@ -17,9 +18,15 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export function MonitorSettings({ monitor }: { monitor: Monitor }) {
-  const { engine, send, isPending, updateMonitor } = useStore();
+  const { engine, send, removing, updateMonitor } = useStore(
+    useShallow((s) => ({
+      engine: s.engine,
+      send: s.send,
+      removing: s.isPending("monitor.remove", monitor.id),
+      updateMonitor: s.updateMonitor,
+    })),
+  );
   const settingsPanels = usePluginSurface("settings", monitor.id);
-  const removing = isPending("monitor.remove", monitor.id);
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
   return (

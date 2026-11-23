@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { elapsed, recordedFrameKey } from "../review";
 import { useStore } from "../store";
 import type { Review, ReviewFrame } from "../types";
@@ -13,17 +14,22 @@ function markStyle(frame: ReviewFrame): string {
 }
 
 export function RecordingScrubber({ review, full, onAdd }: { review: Review; full: boolean; onAdd: (index: number, label: "good" | "failure") => void }) {
-  const { snapshotCache, fetchRecordedFrame, reconnecting, isPending } = useStore();
   const timeline = review.timeline;
   const last = timeline.length - 1;
   const [index, setIndex] = useState(last);
   const [shown, setShown] = useState<string>();
+  const { url, fetchRecordedFrame, reconnecting, adding } = useStore(
+    useShallow((s) => ({
+      url: s.snapshotCache[recordedFrameKey(review.id, index)],
+      fetchRecordedFrame: s.fetchRecordedFrame,
+      reconnecting: s.reconnecting,
+      adding: s.isPending("review.add", review.id),
+    })),
+  );
   const start = timeline[0][0];
   const span = Math.max(1, timeline[last][0] - start);
   const [ts, score] = timeline[index];
-  const url = snapshotCache[recordedFrameKey(review.id, index)];
   const added = review.frames.some((frame) => frame.kind === "added" && frame.ts === ts);
-  const adding = isPending("review.add", review.id);
   const describe = (at: number) => `${elapsed(timeline[at][0] - start)} in · ${(timeline[at][1] * 100).toFixed(0)}%`;
 
   useEffect(() => {

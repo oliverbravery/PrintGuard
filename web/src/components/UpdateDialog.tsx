@@ -1,5 +1,6 @@
-import { renderMarkdown } from "../markdown";
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
+import { renderMarkdown } from "../markdown";
 import { useStore } from "../store";
 import { webUrl } from "../urls";
 import { CopyButton } from "./CopyButton";
@@ -9,9 +10,17 @@ import { NewTab } from "./NewTab";
 const PULL_COMMAND = "docker compose pull && docker compose up -d";
 
 export function UpdateDialog() {
-  const { engine, releases, reconnecting, send, isPending, openDialog } = useStore();
+  const { engine, releases, reconnecting, send, checking, openDialog } = useStore(
+    useShallow((s) => ({
+      engine: s.engine,
+      releases: s.releases,
+      reconnecting: s.reconnecting,
+      send: s.send,
+      checking: s.isPending("update.check"),
+      openDialog: s.openDialog,
+    })),
+  );
   const update = engine?.update ?? null;
-  const checking = isPending("update.check");
   const current = engine?.version || update?.current;
   const available = update?.available ?? false;
   const [selected, setSelected] = useState<string | null>(null);

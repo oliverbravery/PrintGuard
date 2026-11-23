@@ -1,20 +1,21 @@
 import { Bug, Camera, CircleHelp, Layers, type LucideIcon, Printer, ScanEye, Settings } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Link, Outlet, useLocation } from "react-router";
 import { useStore } from "../store";
 import { applyTheme, GLASS, nextScheme } from "../theme";
 import { useTopModal } from "./Dialog";
 import { GLASS_TUNER, GlassTuner } from "./GlassTuner";
-import { CameraDialog } from "./CamerasPage";
-import { GuideDialog } from "./GuideDialog";
-import { IntroDialog } from "./IntroDialog";
 import { MonitorDialog } from "./MonitorDialog";
-import { PrinterDialog } from "./PrintersPage";
-import { ReportDialog } from "./ReportDialog";
-import { UpdateDialog } from "./UpdateDialog";
-import { UploadSheet } from "./UploadSheet";
 import { Wordmark } from "./Wordmark";
+
+const CameraDialog = lazy(() => import("./CamerasPage").then((m) => ({ default: m.CameraDialog })));
+const PrinterDialog = lazy(() => import("./PrintersPage").then((m) => ({ default: m.PrinterDialog })));
+const GuideDialog = lazy(() => import("./GuideDialog").then((m) => ({ default: m.GuideDialog })));
+const IntroDialog = lazy(() => import("./IntroDialog").then((m) => ({ default: m.IntroDialog })));
+const ReportDialog = lazy(() => import("./ReportDialog").then((m) => ({ default: m.ReportDialog })));
+const UpdateDialog = lazy(() => import("./UpdateDialog").then((m) => ({ default: m.UpdateDialog })));
+const UploadSheet = lazy(() => import("./UploadSheet").then((m) => ({ default: m.UploadSheet })));
 
 interface Destination {
   to: string;
@@ -247,14 +248,16 @@ export function Shell() {
         <Outlet />
       </main>
       <Dock />
-      {dialog === "monitor" && <MonitorDialog />}
-      {dialog === "camera" && <CameraDialog />}
-      {dialog === "printer" && <PrinterDialog />}
-      {dialog === "update" && <UpdateDialog />}
-      {dialog === "guide" && <GuideDialog />}
-      {dialog === "intro" && <IntroDialog />}
-      {dialog === "report" && <ReportDialog />}
-      {staged.length > 0 && <UploadSheet />}
+      <Suspense fallback={null}>
+        {dialog === "monitor" && <MonitorDialog />}
+        {dialog === "camera" && <CameraDialog />}
+        {dialog === "printer" && <PrinterDialog />}
+        {dialog === "update" && <UpdateDialog />}
+        {dialog === "guide" && <GuideDialog />}
+        {dialog === "intro" && <IntroDialog />}
+        {dialog === "report" && <ReportDialog />}
+        {staged.length > 0 && <UploadSheet />}
+      </Suspense>
       <Toasts />
     </div>
   );

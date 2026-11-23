@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useFocusKept } from "../a11y";
 import { recentLogs } from "../log";
 import { useStore } from "../store";
@@ -29,14 +30,21 @@ function readAttachment(file: File): Promise<Attachment> {
 }
 
 export function ReportDialog() {
-  const { send, isPending, openDialog, reportResult, toast } = useStore();
+  const { send, sending, bundling, openDialog, reportResult, toast } = useStore(
+    useShallow((s) => ({
+      send: s.send,
+      sending: s.isPending("report.send"),
+      bundling: s.isPending("report.bundle"),
+      openDialog: s.openDialog,
+      reportResult: s.reportResult,
+      toast: s.toast,
+    })),
+  );
   const [message, setMessage] = useState("");
   const [email, setEmail] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const filePicker = useRef<HTMLInputElement>(null);
   const attached = useFocusKept<HTMLDivElement>();
-  const sending = isPending("report.send");
-  const bundling = isPending("report.bundle");
   const close = () => openDialog(null);
   const downloadBundle = () => send({ cmd: "report.bundle", logs: recentLogs() });
 

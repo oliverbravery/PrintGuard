@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useParams } from "react-router";
+import { useShallow } from "zustand/react/shallow";
 import { alertOutcome, GROUP_S, groupBuckets, HISTORY_BUCKET_MS, PERIODS, type Period } from "../history";
 import { clock } from "../review";
 import { useLazySnapshot } from "../snapshot";
 import { useStore } from "../store";
 import type { Snapshot } from "../types";
-import { Page } from "./Page";
+import { ListHead, Page } from "./Page";
 import { ReviewList } from "./ReviewList";
 import { RiskPeriodChart } from "./RiskChart";
 import { riskColor, RiskMeter } from "./RiskMeter";
@@ -65,18 +66,17 @@ function SnapshotThumb({ monitorId, snap, threshold, now, onOpen }: { monitorId:
   );
 }
 
-function SectionHead({ title, children }: { title: string; children?: React.ReactNode }) {
-  return (
-    <div className="flex min-h-11 items-center gap-2 border-b border-rule bg-ink-1 px-4 py-1.5">
-      <h2 className="label flex-1 text-text-1">{title}</h2>
-      {children}
-    </div>
-  );
-}
-
 export function HistoryPage() {
   const { monitorId } = useParams();
-  const { engine, historyData, history: scores, reconnecting, fetchHistory } = useStore();
+  const { engine, history, scores, reconnecting, fetchHistory } = useStore(
+    useShallow((s) => ({
+      engine: s.engine,
+      history: monitorId ? s.historyData[monitorId] : undefined,
+      scores: monitorId ? s.history[monitorId] : undefined,
+      reconnecting: s.reconnecting,
+      fetchHistory: s.fetchHistory,
+    })),
+  );
   const monitor = engine?.monitors.find((m) => m.id === monitorId);
   const camera = engine?.cameras.find((c) => c.id === monitor?.camera_id);
   const reviews = (engine?.reviews ?? []).filter((review) => review.monitor_id === monitorId);
@@ -84,7 +84,6 @@ export function HistoryPage() {
   const [period, setPeriod] = useState<Period>("1h");
   const [sortByScore, setSortByScore] = useState(false);
   const [enlarged, setEnlarged] = useState<Snapshot | null>(null);
-  const history = monitorId ? historyData[monitorId] : undefined;
 
   useEffect(() => {
     if (reconnecting || !monitor) return;
@@ -105,7 +104,7 @@ export function HistoryPage() {
     withinOneDay ? clock(ts) : new Date(ts * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   const stats = history?.stats ?? {};
   const pct = (v: number | undefined) => `${((v ?? 0) * 100).toFixed(0)}%`;
-  const live = camera?.online && monitor.watching ? (scores[monitor.id]?.at(-1)?.score ?? stats.current ?? 0) : null;
+  const live = camera?.online && monitor.watching ? (scores?.at(-1)?.score ?? stats.current ?? 0) : null;
 
   return (
     <Page title={`${monitor.name} history`} back={{ to: `/monitors/${monitor.id}`, label: "Monitors" }} subview>
@@ -125,13 +124,13 @@ export function HistoryPage() {
       </div>
 
       <section className="border-b border-rule">
-        <SectionHead title="Risk per period">
+        <ListHead title="Risk per period">
           {PERIODS.map((p) => (
             <button key={p} className="btn-inline" aria-pressed={period === p} onClick={() => setPeriod(p)}>
               {p}
             </button>
           ))}
-        </SectionHead>
+        </ListHead>
         <div className="px-4 py-4">
           {grouped.length === 0 ? (
             <p className="mono py-8 text-center text-xs text-text-2">{history ? "awaiting results" : "loading history"}</p>
@@ -143,17 +142,17 @@ export function HistoryPage() {
 
       <div className="grid lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
         <section className="border-b border-rule lg:border-r">
-          <SectionHead title="Prints" />
+          <ListHead title="Prints" />
           <ReviewList monitorId={monitor.id} />
         </section>
         <section className="border-b border-rule">
-          <SectionHead title="Risky moments">
+          <ListHead title="Risky moments">
             {snaps.length > 0 && (
               <button className="btn-inline" onClick={() => setSortByScore((v) => !v)}>
                 {sortByScore ? "by time" : "by risk"}
               </button>
             )}
-          </SectionHead>
+          </ListHead>
           {snaps.length === 0 ? (
             <p className="px-4 py-4 text-sm text-text-2">
               {history ? "No alerts have fired yet. A snapshot is captured each time a defect alert triggers." : "loading history"}

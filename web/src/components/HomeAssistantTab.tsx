@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import { useSubmit } from "../submit";
 import type { MqttConfig } from "../types";
@@ -7,7 +8,7 @@ import { SecretInput } from "./SecretInput";
 import { Toggle } from "./Toggle";
 
 export function HomeAssistantTab() {
-  const { engine, isPending } = useStore();
+  const { engine, saving } = useStore(useShallow((s) => ({ engine: s.engine, saving: s.isPending("settings.update") })));
   const [mqtt, setMqtt] = useState<MqttConfig>(engine?.settings.mqtt ?? {});
   const saveBroker = useSubmit(() => setMqtt(engine?.settings.mqtt ?? {}));
   const setMqttField = (key: keyof MqttConfig, value: MqttConfig[keyof MqttConfig]) => setMqtt({ ...mqtt, [key]: value });
@@ -97,10 +98,10 @@ export function HomeAssistantTab() {
       )}
       <button
         className="btn btn-primary"
-        disabled={isPending("settings.update") || brokerProblem !== null}
+        disabled={saving || brokerProblem !== null}
         onClick={() => saveBroker.submit({ cmd: "settings.update", patch: { mqtt: mqtt.enabled ? mqtt : { ...(engine?.settings.mqtt ?? {}), enabled: false } } })}
       >
-        {isPending("settings.update") ? "Saving…" : "Save broker settings"}
+        {saving ? "Saving…" : "Save broker settings"}
       </button>
       {brokerProblem && <span className="block text-sm text-text-2">{brokerProblem}</span>}
       {saveBroker.error && (

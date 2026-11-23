@@ -1,9 +1,18 @@
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import { SaveStatus } from "./SaveStatus";
 import { Toggle } from "./Toggle";
 
 export function UpdatesTab() {
-  const { engine, send, isPending, openDialog, updateSettings } = useStore();
+  const { engine, send, checking, openDialog, updateSettings } = useStore(
+    useShallow((s) => ({
+      engine: s.engine,
+      send: s.send,
+      checking: s.isPending("update.check"),
+      openDialog: s.openDialog,
+      updateSettings: s.updateSettings,
+    })),
+  );
   const updateCheck = engine?.settings.update_check ?? true;
   return (
     <div className="space-y-3">
@@ -19,8 +28,8 @@ export function UpdatesTab() {
         Checks GitHub releases once a day straight from your hub, with no telemetry.
       </span>
       <div className="flex flex-wrap items-center gap-2">
-        <button className="btn" disabled={isPending("update.check")} onClick={() => send({ cmd: "update.check" })}>
-          {isPending("update.check") ? "Checking…" : "Check now"}
+        <button className="btn" disabled={checking} onClick={() => send({ cmd: "update.check" })}>
+          {checking ? "Checking…" : "Check now"}
         </button>
         <button className={`btn ${engine?.update?.available ? "btn-primary" : ""}`} onClick={() => openDialog("update")}>
           {engine?.update?.available ? `Update to v${engine.update.latest}` : "Release notes"}

@@ -42,6 +42,7 @@ export async function dashboard(page: Page, state: Record<string, unknown> = {},
     },
     { engine: engine(), ...state },
   );
+  if (state.phase !== "booting") await page.locator("main").waitFor({ state: "attached" });
 }
 
 export async function hub(page: Page, onCommand: (command: any, socket: WebSocketRoute) => void = () => {}, state = engine(), route = "/") {

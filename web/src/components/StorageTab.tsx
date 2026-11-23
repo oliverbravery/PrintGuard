@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { day, megabytes } from "../review";
 import { useStore } from "../store";
 import { ConfirmButton, useConfirm } from "./ConfirmButton";
@@ -8,7 +9,9 @@ import { Toggle } from "./Toggle";
 const RECORDING_DAYS = [3, 7, 14];
 
 export function StorageTab() {
-  const { engine, send, updateSettings } = useStore();
+  const { engine, send, updateSettings } = useStore(
+    useShallow((s) => ({ engine: s.engine, send: s.send, updateSettings: s.updateSettings })),
+  );
   const reviews = engine?.reviews ?? [];
   const reviewing = engine?.settings.feedback !== "off";
   const recordingDays = engine?.settings.recording_days ?? 7;

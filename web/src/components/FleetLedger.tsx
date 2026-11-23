@@ -2,6 +2,7 @@ import { ChevronDown, ChevronUp, Pencil } from "lucide-react";
 import { createContext, useContext } from "react";
 import { useParentPanel } from "react-resizable-panels";
 import { Link } from "react-router";
+import { useShallow } from "zustand/react/shallow";
 import { section, toggleHidden, type Tile } from "../layout";
 import { awaitingReview, framesLabel } from "../review";
 import { useStore } from "../store";
@@ -27,13 +28,17 @@ export function Cell({ children, className = "" }: { children: React.ReactNode; 
 }
 
 function Row({ monitor, selected, handle, visible, group }: { monitor: Monitor; selected: boolean; handle?: SortableHandle; visible: string[]; group: string[] }) {
-  const { engine, history } = useStore();
-  const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
-  const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
+  const { camera, printer, awaiting, latestScore } = useStore(
+    useShallow((s) => ({
+      camera: s.engine?.cameras.find((c) => c.id === monitor.camera_id),
+      printer: s.engine?.printers.find((p) => p.id === monitor.printer_id),
+      awaiting: awaitingReview(s.engine?.reviews ?? [], monitor.id),
+      latestScore: s.history[monitor.id]?.at(-1)?.score ?? 0,
+    })),
+  );
   const device = printer?.device_state;
-  const awaiting = awaitingReview(engine?.reviews ?? [], monitor.id);
   const tools = usePluginSurface("monitor", monitor.id);
-  const score = camera?.online && monitor.watching ? (history[monitor.id]?.at(-1)?.score ?? 0) : null;
+  const score = camera?.online && monitor.watching ? latestScore : null;
   const state = monitorState(monitor, Boolean(camera?.online));
   const covered = useCovered();
   return (
@@ -153,9 +158,17 @@ function HiddenTray({ hidden }: { hidden: Tile[] }) {
 }
 
 export function FleetLedger({ monitors, selectedId, visible, hidden }: { monitors: Monitor[]; selectedId: string | null; visible: string[]; hidden: Tile[] }) {
-  const { engine, customising, setCustomising, resetLayout, openDialog } = useStore();
+  const { layout, customising, setCustomising, resetLayout, openDialog } = useStore(
+    useShallow((s) => ({
+      layout: s.engine?.settings.layout,
+      customising: s.customising,
+      setCustomising: s.setCustomising,
+      resetLayout: s.resetLayout,
+      openDialog: s.openDialog,
+    })),
+  );
   const fold = useContext(FoldContext);
-  const pinned = section(engine?.settings.layout).pinned;
+  const pinned = section(layout).pinned;
   const group = monitors.map((m) => m.id);
   const reorder = useReorder(visible);
   const toggleLayout = () => {

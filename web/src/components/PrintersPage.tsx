@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
-import { useSubmit } from "../submit";
+import { useCreated, useSubmit } from "../submit";
 import type { AdapterConfig, AdapterMeta, Printer } from "../types";
 import { ConfirmButton } from "./ConfirmButton";
 import { Dialog } from "./Dialog";
@@ -17,7 +18,9 @@ function providerLabel(integrations: AdapterMeta[], id: string): string {
 }
 
 function PrinterTest({ id, provider, config }: { id: string; provider: string; config: AdapterConfig }) {
-  const { printerTest, testing, testPrinter } = useStore();
+  const { printerTest, testing, testPrinter } = useStore(
+    useShallow((s) => ({ printerTest: s.printerTest, testing: s.testing, testPrinter: s.testPrinter })),
+  );
   const target = JSON.stringify([id, provider, config]);
   return (
     <TestRow
@@ -49,11 +52,18 @@ function PrinterModelField({ value, onChange }: { value: string; onChange: (mode
 }
 
 function PrinterEditor({ printer }: { printer: Printer }) {
-  const { engine, send, isPending } = useStore();
+  const { savedIntegrations, send, removing, saving } = useStore(
+    useShallow((s) => ({
+      savedIntegrations: s.engine?.integrations,
+      send: s.send,
+      removing: s.isPending("printer.remove", printer.id),
+      saving: s.isPending("printer.update", printer.id),
+    })),
+  );
+  const integrations = savedIntegrations ?? [];
   const [name, setName] = useState(printer.name);
   const [model, setModel] = useState(printer.model ?? "");
   const [config, setConfig] = useState<AdapterConfig>(printer.config ?? {});
-  const integrations = engine?.integrations ?? [];
   const meta = integrations.find((i) => i.id === printer.provider);
   const save = useSubmit(() => setConfig(printer.config ?? {}));
 
@@ -67,11 +77,8 @@ function PrinterEditor({ printer }: { printer: Printer }) {
   return (
     <>
       <DetailHead title={printer.name}>
-        <ConfirmButton
-          disabled={isPending("printer.remove", printer.id)}
-          onConfirm={() => send({ cmd: "printer.remove", id: printer.id })}
-        >
-          {isPending("printer.remove", printer.id) ? "Removing…" : "Remove"}
+        <ConfirmButton disabled={removing} onConfirm={() => send({ cmd: "printer.remove", id: printer.id })}>
+          {removing ? "Removing…" : "Remove"}
         </ConfirmButton>
       </DetailHead>
       <div className="mono flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line-0 px-4 py-2 text-xs">
@@ -90,10 +97,10 @@ function PrinterEditor({ printer }: { printer: Printer }) {
           <PrinterTest id={printer.id} provider={printer.provider} config={config} />
           <button
             className="btn btn-primary"
-            disabled={!dirty || retype !== null || isPending("printer.update", printer.id)}
+            disabled={!dirty || retype !== null || saving}
             onClick={() => save.submit({ cmd: "printer.update", id: printer.id, patch: { name: name.trim(), model: model.trim(), config } })}
           >
-            {isPending("printer.update", printer.id) ? "Saving…" : "Save printer"}
+            {saving ? "Saving…" : "Save printer"}
           </button>
           {retype && <span className="block text-sm text-text-2">{retype}</span>}
           {save.error && (
@@ -108,27 +115,27 @@ function PrinterEditor({ printer }: { printer: Printer }) {
 }
 
 export function PrinterDialog() {
-  const { engine, send, isPending, openDialog } = useStore();
+  const { engine, send, busy, openDialog } = useStore(
+    useShallow((s) => ({
+      engine: s.engine,
+      send: s.send,
+      busy: s.isPending("printer.add"),
+      openDialog: s.openDialog,
+    })),
+  );
   const navigate = useNavigate();
   const integrations = engine?.integrations ?? [];
+  const printers = engine?.printers ?? [];
   const [provider, setProvider] = useState("");
   const [name, setName] = useState("");
   const [model, setModel] = useState("");
   const [config, setConfig] = useState<AdapterConfig>({});
   const meta = integrations.find((i) => i.id === provider);
-  const busy = isPending("printer.add");
-  const printers = engine?.printers.length ?? 0;
-  const printersWhenSent = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (busy || printersWhenSent.current === null) return;
-    const added = engine?.printers.at(-1);
-    if (printers > printersWhenSent.current && added) {
-      openDialog(null);
-      navigate(`/printers/${added.id}`);
-    }
-    printersWhenSent.current = null;
-  }, [busy]);
+  useCreated("printer.add", printers, (added) => {
+    openDialog(null);
+    navigate(`/printers/${added.id}`);
+  });
 
   const required = meta?.schema.required ?? [];
   const incomplete = required.some((key) => !String(config[key] ?? meta?.schema.properties[key]?.default ?? "").trim());
@@ -140,10 +147,7 @@ export function PrinterDialog() {
         onSubmit={(event) => {
           event.preventDefault();
           if (!meta || busy || incomplete) return;
-          printersWhenSent.current = printers;
-          if (send({ cmd: "printer.add", printer: { name: name.trim(), model: model.trim(), provider, config } }) === null) {
-            printersWhenSent.current = null;
-          }
+          send({ cmd: "printer.add", printer: { name: name.trim(), model: model.trim(), provider, config } });
         }}
       >
         <select

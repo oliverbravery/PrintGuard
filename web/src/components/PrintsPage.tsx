@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router";
+import { useShallow } from "zustand/react/shallow";
 import { ACCEPT, acceptedTags, ago, formatBytes, summary } from "../prints";
 import { useStore } from "../store";
 import { tooLargeToDraw, type ToolpathSource } from "../toolpath";
@@ -44,8 +45,13 @@ async function storedGcode(print: PrintFile): Promise<ToolpathSource | null> {
 }
 
 function PrintDetail({ print }: { print: PrintFile }) {
-  const { send, isPending, updatePrint } = useStore();
-  const removing = isPending("print.remove", print.id);
+  const { send, removing, updatePrint } = useStore(
+    useShallow((s) => ({
+      send: s.send,
+      removing: s.isPending("print.remove", print.id),
+      updatePrint: s.updatePrint,
+    })),
+  );
   const toggleTag = (id: string) => {
     const engine = useStore.getState().engine!;
     const tags = acceptedTags(engine, (engine.prints.find((p) => p.id === print.id) ?? print).printer_ids, print.ext);
@@ -142,7 +148,7 @@ function DropZone() {
 
 export function PrintsPage() {
   const { printId } = useParams();
-  const { engine, uploads } = useStore();
+  const { engine, uploads } = useStore(useShallow((s) => ({ engine: s.engine, uploads: s.uploads })));
   const [chosenPrinter, setFilter] = useState("");
   const printers = engine?.printers ?? [];
   const filter = printers.some((p) => p.id === chosenPrinter) ? chosenPrinter : "";

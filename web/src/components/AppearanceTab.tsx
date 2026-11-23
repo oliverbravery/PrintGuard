@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import { applyTheme, beginPreview, endPreview, GLASS_DEFAULT, PALETTES } from "../theme";
 import type { CustomTheme, ThemeBase, ThemeTokenKey } from "../types";
@@ -23,10 +24,10 @@ function leavePreview() {
 }
 
 export function AppearanceTab() {
-  const { engine, updateSettings } = useStore();
-  const theme = engine?.settings.theme ?? "system";
-  const themes = engine?.settings.themes ?? [];
-  const glass = { ...GLASS_DEFAULT, ...engine?.settings.glass };
+  const { settings, updateSettings } = useStore(useShallow((s) => ({ settings: s.engine?.settings, updateSettings: s.updateSettings })));
+  const theme = settings?.theme ?? "system";
+  const themes = settings?.themes ?? [];
+  const glass = { ...GLASS_DEFAULT, ...settings?.glass };
   const [editing, setEditing] = useState<CustomTheme | null>(null);
 
   const upsertTheme = (list: CustomTheme[], t: CustomTheme) =>

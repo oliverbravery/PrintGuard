@@ -57,19 +57,41 @@ WEB_SCHEMES = ("http", "https")
 SOCKET_SCHEMES = {"ws": "http", "wss": "https"}
 
 
-def dashboard_frame_headers(framing_origins: set[str]) -> dict[str, str]:
-    """The headers that say who may frame the dashboard.
+DASHBOARD_BOOT_SCRIPT_HASH = "sha256-9v2BNecE/VYFGP00fgfDt/cH/LWbIF3Wq0HeRGMUo7w="
+DASHBOARD_CSP = (
+    f"default-src 'self'; script-src 'self' '{DASHBOARD_BOOT_SCRIPT_HASH}'; "
+    "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://raw.githubusercontent.com; "
+    "media-src 'self' blob: data:; font-src 'self' data:; "
+    "connect-src 'self' ws: wss: https://raw.githubusercontent.com; "
+    "worker-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'"
+)
+
+
+def dashboard_frame_headers(framing_origins: set[str], *, shell: bool = False) -> dict[str, str]:
+    """The security and framing headers served with the dashboard and its static files.
 
     Args:
         framing_origins: The origins listed in ``PRINTGUARD_ORIGINS``, normalised.
+        shell: Whether the response is the dashboard HTML shell, which also gets
+            the full dashboard Content-Security-Policy. Plugin sandbox documents
+            carry their own stricter meta policies and must not inherit the shell's
+            ``script-src``.
 
     Returns:
-        The hub's own pages and those origins may frame it. With none listed
-        the legacy header goes along with the policy. With some it is left off,
-        since it has no way to name more than the hub's own origin.
+        Headers limiting framing to the hub's own pages and any listed origins,
+        blocking MIME sniffing and referrer leakage, and attaching the dashboard
+        CSP on the shell document.
     """
-    policy = " ".join(["frame-ancestors 'self'", *sorted(framing_origins)])
-    return {"Content-Security-Policy": policy} if framing_origins else {"X-Frame-Options": "SAMEORIGIN", "Content-Security-Policy": policy}
+    frame_ancestors = " ".join(["frame-ancestors 'self'", *sorted(framing_origins)])
+    policy = f"{DASHBOARD_CSP}; {frame_ancestors}" if shell else frame_ancestors
+    headers = {
+        "Content-Security-Policy": policy,
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+    }
+    if not framing_origins:
+        headers["X-Frame-Options"] = "SAMEORIGIN"
+    return headers
 
 
 class WebStaticFiles(StaticFiles):
@@ -78,10 +100,11 @@ class WebStaticFiles(StaticFiles):
     def __init__(self, *args: Any, framing_origins: set[str] = frozenset(), **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._frame_headers = dashboard_frame_headers(framing_origins)
+        self._shell_headers = dashboard_frame_headers(framing_origins, shell=True)
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         response = await super().get_response(path, scope)
-        response.headers.update(self._frame_headers)
+        response.headers.update(self._shell_headers if path in ("", ".", "index.html") else self._frame_headers)
         response.headers["Cache-Control"] = ASSET_CACHE_CONTROL if path.startswith("assets/") else REVALIDATE_CACHE_CONTROL
         return response
 

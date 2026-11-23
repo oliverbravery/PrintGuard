@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router";
+import { useShallow } from "zustand/react/shallow";
 import { sourceLabel } from "../cameras";
 import { alertOutcome } from "../history";
 import { useStore } from "../store";
@@ -38,11 +39,16 @@ function Block({ children, className = "" }: { children: React.ReactNode; classN
 }
 
 function ControlPane({ monitor }: { monitor: Monitor }) {
-  const { engine, history } = useStore();
-  const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
-  const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
+  const { camera, printer, historyPoints } = useStore(
+    useShallow((s) => ({
+      camera: s.engine?.cameras.find((c) => c.id === monitor.camera_id),
+      printer: s.engine?.printers.find((p) => p.id === monitor.printer_id),
+      historyPoints: s.history[monitor.id],
+    })),
+  );
+  const points = historyPoints ?? [];
   const device = printer?.device_state;
-  const score = camera?.online && monitor.watching ? (history[monitor.id]?.at(-1)?.score ?? 0) : null;
+  const score = camera?.online && monitor.watching ? (points.at(-1)?.score ?? 0) : null;
   const state = monitorState(monitor, Boolean(camera?.online));
   return (
     <>
@@ -65,7 +71,7 @@ function ControlPane({ monitor }: { monitor: Monitor }) {
         </div>
         <RiskMeter score={score} threshold={monitor.threshold} size="hero" />
         <div className="mt-2">
-          <Sparkline points={history[monitor.id] ?? []} threshold={monitor.threshold} />
+          <Sparkline points={points} threshold={monitor.threshold} />
         </div>
         {monitor.alert && (
           <p className="mono mt-2 text-xs text-bad">

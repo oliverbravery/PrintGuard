@@ -1,19 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
+import { useShallow } from "zustand/react/shallow";
+import { cameraStatus, sourceLabel } from "../cameras";
 import { listVideoInputs } from "../media";
 import { useStore } from "../store";
+import { published, publishStream } from "../stream";
+import { useCreated } from "../submit";
 import type { Camera, CameraSource } from "../types";
-import { publishStream, published } from "../stream";
-import { cameraStatus, sourceLabel } from "../cameras";
 import { ConfirmButton } from "./ConfirmButton";
 import { CropEditor, frameAspect, turnedCrop, type FrameSize } from "./CropEditor";
+import { Dialog } from "./Dialog";
 import { useCovered } from "./Feed";
 import { NameField } from "./NameField";
-import { SaveStatus } from "./SaveStatus";
-import { Slider } from "./Slider";
-import { Dialog } from "./Dialog";
 import { AddCell, DetailHead, Page, Split } from "./Page";
+import { SaveStatus } from "./SaveStatus";
 import { Segmented } from "./Segmented";
+import { Slider } from "./Slider";
 import { Status } from "./Status";
 import { TabPanel, Tabs } from "./Tabs";
 
@@ -23,20 +25,15 @@ function slug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "camera";
 }
 
-function useRegistered(onRegistered: () => void) {
-  const { engine, isPending } = useStore();
-  const registering = isPending("camera.add");
-  const cameras = engine?.cameras.length ?? 0;
-  const camerasWhenSent = useRef(cameras);
-  useEffect(() => {
-    if (registering) camerasWhenSent.current = cameras;
-    else if (cameras > camerasWhenSent.current) onRegistered();
-  }, [registering]);
-}
-
 function CameraEditor({ camera }: { camera: Camera }) {
-  const { engine, send, isPending, updateCamera } = useStore();
-  const owner = camera.printer_id ? engine?.printers.find((p) => p.id === camera.printer_id) : null;
+  const { owner, send, removing, updateCamera } = useStore(
+    useShallow((s) => ({
+      owner: camera.printer_id ? (s.engine?.printers.find((p) => p.id === camera.printer_id) ?? null) : null,
+      send: s.send,
+      removing: s.isPending("camera.remove", camera.id),
+      updateCamera: s.updateCamera,
+    })),
+  );
   const managed = Boolean(owner) || Boolean(camera.declared);
   const removalHint = owner
     ? "Added automatically by its printer integration. Remove the printer if you want to remove this camera."
@@ -55,11 +52,8 @@ function CameraEditor({ camera }: { camera: Camera }) {
       <DetailHead title={camera.name}>
         <SaveStatus scope={`camera:${camera.id}`} />
         {!managed && (
-          <ConfirmButton
-            disabled={isPending("camera.remove", camera.id)}
-            onConfirm={() => send({ cmd: "camera.remove", id: camera.id })}
-          >
-            {isPending("camera.remove", camera.id) ? "Removing…" : "Remove"}
+          <ConfirmButton disabled={removing} onConfirm={() => send({ cmd: "camera.remove", id: camera.id })}>
+            {removing ? "Removing…" : "Remove"}
           </ConfirmButton>
         )}
       </DetailHead>
@@ -132,14 +126,23 @@ function CameraLink({ camera, selected }: { camera: Camera; selected: boolean })
 }
 
 function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSource) => void; hint?: string }) {
-  const { discovered, discovering, discover, isPending, reconnecting } = useStore();
-  const busy = isPending("camera.add");
+  const { savedCameras, discovered, discovering, discover, busy, reconnecting } = useStore(
+    useShallow((s) => ({
+      savedCameras: s.engine?.cameras,
+      discovered: s.discovered,
+      discovering: s.discovering,
+      discover: s.discover,
+      busy: s.isPending("camera.add"),
+      reconnecting: s.reconnecting,
+    })),
+  );
+  const cameras = savedCameras ?? [];
   const [name, setName] = useState("");
   const [deviceId, setDeviceId] = useState("");
   useEffect(() => {
     if (!reconnecting) discover();
   }, [reconnecting]);
-  useRegistered(() => {
+  useCreated("camera.add", cameras, () => {
     setName("");
     setDeviceId("");
     discover();
@@ -188,7 +191,14 @@ function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSou
 type AddTab = "url" | "machine" | "browser";
 
 function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: CameraSource) => void }) {
-  const { send, toast, isPending, addPublishedCamera } = useStore();
+  const { send, toast, registering, addPublishedCamera } = useStore(
+    useShallow((s) => ({
+      send: s.send,
+      toast: s.toast,
+      registering: s.isPending("camera.add"),
+      addPublishedCamera: s.addPublishedCamera,
+    })),
+  );
   const desktopApp = "pywebview" in window;
   const [tab, setTab] = useState<AddTab>("url");
   const [name, setName] = useState("");
@@ -214,7 +224,7 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
   }, [tab]);
 
   const publish = async () => {
-    if (!deviceId || busy || isPending("camera.add")) return;
+    if (!deviceId || busy || registering) return;
     setBusy(true);
     try {
       const path = `dev-${slug(name || "camera")}-${Date.now().toString(36)}`;
@@ -254,7 +264,7 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
           className="space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!url.trim() || isPending("camera.add")) return;
+            if (!url.trim() || registering) return;
             send({ cmd: "camera.add", name: name || "Stream", source: { kind: "url", url: url.trim() } });
           }}
         >
@@ -270,8 +280,8 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
             value={url}
             onChange={(e) => setUrl(e.target.value)}
           />
-          <button className="btn btn-primary" type="submit" disabled={!url.trim() || isPending("camera.add")}>
-            {isPending("camera.add") ? "Registering…" : "Register stream"}
+          <button className="btn btn-primary" type="submit" disabled={!url.trim() || registering}>
+            {registering ? "Registering…" : "Register stream"}
           </button>
         </form>
       )}
@@ -308,8 +318,8 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
             ))}
           </select>
           <input className="field" aria-label="Name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <button className="btn btn-primary" type="submit" disabled={!deviceId || busy || isPending("camera.add")}>
-            {busy ? "Publishing…" : isPending("camera.add") ? "Registering…" : "Publish & register"}
+          <button className="btn btn-primary" type="submit" disabled={!deviceId || busy || registering}>
+            {busy ? "Publishing…" : registering ? "Registering…" : "Publish & register"}
           </button>
         </form>
       )}
@@ -318,15 +328,17 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
 }
 
 export function CameraDialog() {
-  const { engine, send, openDialog } = useStore();
+  const { savedCameras, send, openDialog } = useStore(
+    useShallow((s) => ({ savedCameras: s.engine?.cameras, send: s.send, openDialog: s.openDialog })),
+  );
+  const cameras = savedCameras ?? [];
   const navigate = useNavigate();
-  const cameras = engine?.cameras ?? [];
   const [registeredDevice, setRegisteredDevice] = useState<string | null>(null);
   const close = () => openDialog(null);
-  useRegistered(() => {
-    const added = (registeredDevice ? cameras.find((camera) => camera.source.device_id === registeredDevice) : undefined) ?? cameras.at(-1);
+  useCreated("camera.add", cameras, (created) => {
+    const added = (registeredDevice ? cameras.find((camera) => camera.source.device_id === registeredDevice) : undefined) ?? created;
     close();
-    if (added) navigate(`/cameras/${added.id}`);
+    navigate(`/cameras/${added.id}`);
   });
   return (
     <Dialog title="Register a camera" onClose={close}>
@@ -344,7 +356,14 @@ type Group = "cameras" | "printers";
 
 export function CamerasPage() {
   const { cameraId } = useParams();
-  const { engine, send, isPending, openDialog } = useStore();
+  const { engine, send, refreshing, openDialog } = useStore(
+    useShallow((s) => ({
+      engine: s.engine,
+      send: s.send,
+      refreshing: s.isPending("printer.cameras.refresh"),
+      openDialog: s.openDialog,
+    })),
+  );
   const cameras = engine?.cameras ?? [];
   const chosen = cameras.find((camera) => camera.id === cameraId);
   const [group, setGroup] = useState<Group>(chosen?.printer_id ? "printers" : "cameras");
@@ -357,7 +376,6 @@ export function CamerasPage() {
   const shown = group === "cameras" ? own : fromPrinters;
   const selected = chosen ?? own[0] ?? fromPrinters[0];
   const hasPrinters = (engine?.printers ?? []).length > 0;
-  const refreshing = isPending("printer.cameras.refresh");
   const list = (
     <>
       <div className="flex *:first:min-w-0 *:first:flex-1">

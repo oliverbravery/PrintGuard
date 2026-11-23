@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { acceptedTags, extOf, formatBytes, inspectPrint, isText, toolpathOf, type Inspection, type Temperatures } from "../prints";
 import { useStore, type StagedPrint } from "../store";
 import { useConfirm } from "./ConfirmButton";
@@ -58,7 +59,7 @@ function StagedPrintForm({
   onToggleTag: (id: string) => void;
   onDone: () => void;
 }) {
-  const { engine, uploadPrint } = useStore();
+  const { engine, uploadPrint } = useStore(useShallow((s) => ({ engine: s.engine, uploadPrint: s.uploadPrint })));
   const { file } = staged;
   const ext = extOf(file.name);
   const [toolpath] = useState(() => toolpathOf(file));
@@ -165,7 +166,7 @@ function StagedPrintForm({
 }
 
 export function UploadSheet() {
-  const { staged, unstage } = useStore();
+  const { staged, unstage } = useStore(useShallow((s) => ({ staged: s.staged, unstage: s.unstage })));
   const [tags, setTags] = useState<string[]>([]);
   const [current] = staged;
   const closing = useConfirm(() => staged.forEach((p) => unstage(p.id)));

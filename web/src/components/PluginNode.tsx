@@ -1,5 +1,6 @@
 import { type LucideIcon, Pause, Play, RefreshCw, SkipBack, SkipForward, Square } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { floatCamera, floatSupported } from "../float";
 import type { BUTTON_ICONS } from "../plugins";
 import { useStore } from "../store";
@@ -59,15 +60,21 @@ export function PluginNodeView({ plugin, node, panel = false }: { plugin: Plugin
 }
 
 export function usePluginSurface(surface: "monitor" | "settings", monitorId: string): { plugin: PluginRecord; node: Node }[] {
-  const { engine, pluginViews } = useStore();
-  return (engine?.plugins ?? [])
+  const { plugins, pluginViews } = useStore(useShallow((s) => ({ plugins: s.engine?.plugins, pluginViews: s.pluginViews })));
+  return (plugins ?? [])
     .filter((plugin) => plugin.enabled && plugin.manifest.surfaces.includes(surface))
     .map((plugin) => ({ plugin, node: pluginViews[plugin.id]?.[`${surface}:${monitorId}`] }))
     .filter((drawn): drawn is { plugin: PluginRecord; node: Node } => drawn.node != null);
 }
 
 function NodeView({ node, pluginId, mayViewCameras, act }: { node: Node; pluginId: string; mayViewCameras: boolean; act: Act }) {
-  const { engine, pluginAssets, toast } = useStore();
+  const { cameras, assets, toast } = useStore(
+    useShallow((s) => ({
+      cameras: node.type === "camera" ? s.engine?.cameras : undefined,
+      assets: node.type === "image" ? s.pluginAssets[pluginId] : undefined,
+      toast: s.toast,
+    })),
+  );
 
   if (node.type === "row" || node.type === "col") {
     return (
@@ -89,7 +96,7 @@ function NodeView({ node, pluginId, mayViewCameras, act }: { node: Node; pluginI
 
   if (node.type === "camera") {
     if (!mayViewCameras) return <span className="text-xs text-text-2">Camera feeds not permitted</span>;
-    const camera = engine?.cameras.find((c) => c.id === node.camera_id);
+    const camera = cameras?.find((c) => c.id === node.camera_id);
     return (
       <div className="min-w-[12rem] flex-1 border border-line-0">
         <Feed camera={camera} />
@@ -98,7 +105,6 @@ function NodeView({ node, pluginId, mayViewCameras, act }: { node: Node; pluginI
   }
 
   if (node.type === "image") {
-    const assets = pluginAssets[pluginId];
     const url = node.asset && assets && Object.hasOwn(assets, node.asset) ? assets[node.asset] : undefined;
     return url ? <img src={url} alt={node.label ?? ""} className="max-h-40 max-w-full border border-line-0" /> : null;
   }

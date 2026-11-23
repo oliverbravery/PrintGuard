@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { savedChannels, useStore } from "../store";
 import { useSubmit } from "../submit";
 import type { AdapterConfig, AdapterMeta } from "../types";
@@ -8,7 +9,16 @@ import { TestRow } from "./TestRow";
 import { Toggle } from "./Toggle";
 
 export function AlertsTab() {
-  const { engine, isPending, notifyTest, testingNotifier, testNotifier, updateSettings } = useStore();
+  const { engine, saving, notifyTest, testingNotifier, testNotifier, updateSettings } = useStore(
+    useShallow((s) => ({
+      engine: s.engine,
+      saving: s.isPending("settings.update"),
+      notifyTest: s.notifyTest,
+      testingNotifier: s.testingNotifier,
+      testNotifier: s.testNotifier,
+      updateSettings: s.updateSettings,
+    })),
+  );
   const [notifiers, setNotifiers] = useState(() => savedChannels(engine));
   const parkedChannels = useRef<Record<string, AdapterConfig>>({});
   const saveChannels = useSubmit(() => {
@@ -85,10 +95,10 @@ export function AlertsTab() {
       </span>
       <button
         className="btn btn-primary"
-        disabled={isPending("settings.update") || channels.some(channelRetype)}
+        disabled={saving || channels.some(channelRetype)}
         onClick={() => saveChannels.submit({ cmd: "settings.update", patch: { notifiers } })}
       >
-        {isPending("settings.update") ? "Saving…" : "Save channels"}
+        {saving ? "Saving…" : "Save channels"}
       </button>
       {saveChannels.error && (
         <span role="alert" className="chip chip-message chip-bad">

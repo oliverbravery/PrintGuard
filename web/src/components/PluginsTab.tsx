@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
+import { useShallow } from "zustand/react/shallow";
 import { fromBase64, renderMarkdown } from "../markdown";
 import { pluginFile, repositoryFiles, runsHere } from "../plugins";
 import { useStore } from "../store";
@@ -79,13 +80,13 @@ function Runs({ platforms, needs }: { platforms: string[] | undefined; needs?: s
 
 function InstallButton({ entry, installed }: { entry: CatalogueEntry; installed: boolean }) {
   const installPlugin = useStore((s) => s.installPlugin);
-  const isPending = useStore((s) => s.isPending);
+  const installing = useStore((s) => s.isPending("plugin.install"));
   const host = useStore((s) => s.engine?.host ?? "");
   const here = runsHere(entry.platforms, host);
   return (
     <button
       className="btn btn-primary shrink-0"
-      disabled={installed || !here || entry.supported === false || isPending("plugin.install")}
+      disabled={installed || !here || entry.supported === false || installing}
       onClick={() => installPlugin({ kind: "github", repo: entry.repo, path: entry.path ?? "", ref: entry.ref })}
     >
       {installed ? "Installed" : "Install"}
@@ -474,7 +475,17 @@ function StoreDetail({ entry, installed }: { entry: CatalogueEntry; installed: b
 }
 
 export function PluginsTab() {
-  const { engine, catalogue, reconnecting, fetchCatalogue, installPlugin, isPending, toast } = useStore();
+  const { engine, catalogue, reconnecting, fetchCatalogue, installPlugin, installing, toast } = useStore(
+    useShallow((s) => ({
+      engine: s.engine,
+      catalogue: s.catalogue,
+      reconnecting: s.reconnecting,
+      fetchCatalogue: s.fetchCatalogue,
+      installPlugin: s.installPlugin,
+      installing: s.isPending("plugin.install"),
+      toast: s.toast,
+    })),
+  );
   const [repo, setRepo] = useState("");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<string | null>(null);
@@ -598,13 +609,13 @@ export function PluginsTab() {
         className="flex gap-2"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!repo.trim() || isPending("plugin.install")) return;
+          if (!repo.trim() || installing) return;
           installFromRepo();
         }}
       >
         <input className="field flex-1" placeholder={REPO_HINT} aria-label="GitHub repository" value={repo} onChange={(event) => setRepo(event.target.value)} />
-        <button type="submit" className="btn whitespace-nowrap" disabled={!repo.trim() || isPending("plugin.install")}>
-          {isPending("plugin.install") ? "…" : "Install"}
+        <button type="submit" className="btn whitespace-nowrap" disabled={!repo.trim() || installing}>
+          {installing ? "…" : "Install"}
         </button>
       </form>
       <div className="flex items-center gap-2">

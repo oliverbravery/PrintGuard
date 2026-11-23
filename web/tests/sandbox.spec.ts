@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -1023,4 +1024,23 @@ test("the linter handles malformed OAuth URLs and Object property names without 
     return lint(manifest, { "plugin.js": 'const s = "{{secret.constructor}}"; plugin.render((ctx) => ({ type: "text", value: s }));' }, [], {});
   });
   expect(findings).toContainEqual({ kind: "undeclared", what: "{{secret.constructor}}" });
+});
+
+test("sandbox documents share the same global lockdown and matching CSP hashes, and app.py matches index.html", () => {
+  const hashOf = (html: string) => {
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)![1];
+    return `sha256-${createHash("sha256").update(script).digest("base64")}`;
+  };
+  const sandbox = readFileSync(new URL("../public/plugin-sandbox.html", import.meta.url), "utf8");
+  const panel = readFileSync(new URL("../public/plugin-panel.html", import.meta.url), "utf8");
+  const index = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const appPy = readFileSync(new URL("../../printguard/server/app.py", import.meta.url), "utf8");
+
+  const closedIn = (html: string) => JSON.parse(html.match(/const closed = (\[[^\]]+\]);/)![1]);
+  expect(closedIn(panel)).toEqual(closedIn(sandbox));
+  expect(sandbox).toContain("delete Navigator.prototype.sendBeacon;");
+  expect(panel).toContain("delete Navigator.prototype.sendBeacon;");
+  expect(sandbox).toContain(`'${hashOf(sandbox)}'`);
+  expect(panel).toContain(`'${hashOf(panel)}'`);
+  expect(appPy).toContain(`DASHBOARD_BOOT_SCRIPT_HASH = "${hashOf(index)}"`);
 });
