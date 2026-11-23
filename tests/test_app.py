@@ -920,7 +920,7 @@ async def test_a_recording_sent_faster_than_it_plays_closes_the_publish_socket(m
 
     stalled = threading.Event()
     monkeypatch.setattr(publish, "MAX_QUEUED_BYTES", 4)
-    monkeypatch.setattr(app_module, "remux", lambda source, url: stalled.wait(2))
+    monkeypatch.setattr(app_module, "remux", lambda source, url: stalled.wait(1))
     app = create_app()
     app.state.engine = SimpleNamespace(platform=SimpleNamespace(plugin_runtime=None))
     try:
