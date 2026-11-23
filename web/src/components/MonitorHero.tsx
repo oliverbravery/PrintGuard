@@ -6,6 +6,7 @@ import { alertOutcome } from "../history";
 import { useStore } from "../store";
 import type { Monitor } from "../types";
 import { Feed, useCovered } from "./Feed";
+import { DetailHead } from "./Page";
 import { MonitorSettings } from "./MonitorSettings";
 import { PluginNodeView, usePluginSurface } from "./PluginNode";
 import { activeJob, HeaterReadouts, jobText, PreheatPane, PrintActions, ProgressBar } from "./PrinterControls";
@@ -84,8 +85,7 @@ function ControlPane({ monitor }: { monitor: Monitor }) {
           <Status tone={state.tone}>{state.text}</Status>
           <DeviceStatus state={device} />
         </span>
-        <h2 className="mt-1 truncate text-xl font-bold tracking-[-0.02em]">{monitor.name}</h2>
-        <p className="mono truncate text-xs text-text-1">
+        <p className="mono mt-1 truncate text-xs text-text-1">
           {activeJob(device) ? jobText(device) : printer ? `${printer.name}, ${printer.device_state?.status ?? "no status yet"}` : "No printer, alerts only"}
         </p>
       </Block>
@@ -147,9 +147,6 @@ function TunePane({ monitor }: { monitor: Monitor }) {
           onChange={(v) => updateMonitor(monitor.id, { cooldown_s: v })}
         />
       </Block>
-      <div className="px-4 py-2">
-        <SaveStatus scope={`monitor:${monitor.id}`} />
-      </div>
     </>
   );
 }
@@ -175,8 +172,11 @@ export function MonitorHero({ monitor }: { monitor: Monitor }) {
   const tabs = PANES.map((tab) => (tab.id === "review" && waiting ? { ...tab, badge: `${waiting} to review` } : tab));
   const prefix = "hero";
   return (
-    <section aria-label={`${monitor.name}, selected monitor`} className="@container h-full">
-      <div className="grid @3xl:h-full @3xl:grid-cols-[minmax(0,1.32fr)_minmax(23rem,1fr)] @3xl:grid-rows-[minmax(0,1fr)]">
+    <section aria-label={`${monitor.name}, selected monitor`} className="@container flex h-full flex-col">
+      <DetailHead title={monitor.name} remove={{ kind: "monitor", id: monitor.id }}>
+        <SaveStatus scope={`monitor:${monitor.id}`} />
+      </DetailHead>
+      <div className="grid @3xl:min-h-0 @3xl:flex-1 @3xl:grid-cols-[minmax(0,1.32fr)_minmax(23rem,1fr)] @3xl:grid-rows-[minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col border-rule @max-3xl:border-b @3xl:min-h-0 @3xl:overflow-y-auto @3xl:border-r">
           <Feed
             camera={camera}

@@ -149,17 +149,16 @@ test("a hub that goes silent without closing is dropped and reached again", asyn
 
 test("a command pressed while the hub is away says so and leaves its button free", async ({ page }) => {
   const { sockets } = await hub(page, undefined, engine(), "/monitors/m1");
-  await page.getByRole("tab", { name: "Configure" }).click();
   await page.routeWebSocket(/\/api\/ws$/, (socket) => void socket.close());
   await sockets[0].close();
   await expect(page.getByRole("status").getByText("reconnecting")).toBeVisible();
   const main = page.getByRole("main");
-  await main.getByRole("button", { name: "Delete monitor" }).click();
+  await main.getByRole("button", { name: "Remove", exact: true }).click();
   await pastDoublePress(page);
   await main.getByRole("button", { name: "Confirm" }).click();
 
   await expect(page.getByRole("status").filter({ hasText: "wasn't sent" })).toBeVisible();
-  await expect(main.getByRole("button", { name: "Delete monitor" })).toBeEnabled();
+  await expect(main.getByRole("button", { name: "Remove", exact: true })).toBeEnabled();
   expect(await page.evaluate(() => (window as any).__pg.getState().pending)).toEqual({});
 });
 
@@ -176,9 +175,8 @@ test("deleting a monitor from its settings goes back to the monitors and brings 
     "/monitors/m1",
   );
   const main = page.getByRole("main");
-  await main.getByRole("tab", { name: "Configure" }).click();
   const feedRestarted = page.waitForRequest(/\/hls\/c2\//);
-  await main.getByRole("button", { name: "Delete monitor" }).click();
+  await main.getByRole("button", { name: "Remove", exact: true }).click();
   await pastDoublePress(page);
   await main.getByRole("button", { name: "Confirm" }).click();
 
@@ -3243,7 +3241,7 @@ test("the page fits the screen, with the fleet and each list scrolling on their 
   await expect(page.getByRole("heading", { name: /^Fleet/ })).toBeInViewport();
   await page.setViewportSize({ width: 1280, height: 600 });
   await hero.getByRole("tab", { name: "Configure" }).click();
-  await expect(hero.getByRole("button", { name: "Delete monitor" })).not.toBeInViewport();
+  await expect(hero.getByRole("link", { name: "Manage printers" })).not.toBeInViewport();
   expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight)).toBe(true);
 
   await routeTo(page, "/prints");

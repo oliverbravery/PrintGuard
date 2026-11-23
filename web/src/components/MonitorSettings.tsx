@@ -2,10 +2,8 @@ import { Link } from "react-router";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import type { Monitor } from "../types";
-import { ConfirmButton } from "./ConfirmButton";
 import { NameField } from "./NameField";
 import { PluginNodeView, usePluginSurface } from "./PluginNode";
-import { SaveStatus } from "./SaveStatus";
 import { Toggle } from "./Toggle";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -18,14 +16,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export function MonitorSettings({ monitor }: { monitor: Monitor }) {
-  const { engine, send, removing, updateMonitor } = useStore(
-    useShallow((s) => ({
-      engine: s.engine,
-      send: s.send,
-      removing: s.isPending("monitor.remove", monitor.id),
-      updateMonitor: s.updateMonitor,
-    })),
-  );
+  const { engine, updateMonitor } = useStore(useShallow((s) => ({ engine: s.engine, updateMonitor: s.updateMonitor })));
   const settingsPanels = usePluginSurface("settings", monitor.id);
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
@@ -79,15 +70,6 @@ export function MonitorSettings({ monitor }: { monitor: Monitor }) {
           <PluginNodeView plugin={plugin} node={node} />
         </Section>
       ))}
-      <Section title="Delete">
-        <p className="text-sm text-text-1">Deleting a monitor leaves its camera and printer untouched.</p>
-        <ConfirmButton disabled={removing} onConfirm={() => send({ cmd: "monitor.remove", id: monitor.id })}>
-          {removing ? "Deleting…" : "Delete monitor"}
-        </ConfirmButton>
-      </Section>
-      <div className="px-4 py-2">
-        <SaveStatus scope={`monitor:${monitor.id}`} />
-      </div>
     </>
   );
 }

@@ -4,7 +4,6 @@ import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import { useCreated, useSubmit } from "../submit";
 import type { AdapterConfig, AdapterMeta, Printer } from "../types";
-import { ConfirmButton } from "./ConfirmButton";
 import { Dialog } from "./Dialog";
 import { AddCell, DetailHead, ListHead, Page, Split } from "./Page";
 import { retypeReason, SchemaForm, savedSecretTitles } from "./SchemaForm";
@@ -52,11 +51,9 @@ function PrinterModelField({ value, onChange }: { value: string; onChange: (mode
 }
 
 function PrinterEditor({ printer }: { printer: Printer }) {
-  const { savedIntegrations, send, removing, saving } = useStore(
+  const { savedIntegrations, saving } = useStore(
     useShallow((s) => ({
       savedIntegrations: s.engine?.integrations,
-      send: s.send,
-      removing: s.isPending("printer.remove", printer.id),
       saving: s.isPending("printer.update", printer.id),
     })),
   );
@@ -76,11 +73,7 @@ function PrinterEditor({ printer }: { printer: Printer }) {
 
   return (
     <>
-      <DetailHead title={printer.name}>
-        <ConfirmButton disabled={removing} onConfirm={() => send({ cmd: "printer.remove", id: printer.id })}>
-          {removing ? "Removing…" : "Remove"}
-        </ConfirmButton>
-      </DetailHead>
+      <DetailHead title={printer.name} remove={{ kind: "printer", id: printer.id }} />
       <div className="mono flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line-0 px-4 py-2 text-xs">
         <Status tone={printer.online ? "ok" : "bad"}>{printer.online ? "online" : "offline"}</Status>
         <span className="text-text-1">{providerLabel(integrations, printer.provider)}</span>

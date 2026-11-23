@@ -7,7 +7,6 @@ import { useStore } from "../store";
 import { published, publishStream } from "../stream";
 import { useCreated } from "../submit";
 import type { Camera, CameraSource } from "../types";
-import { ConfirmButton } from "./ConfirmButton";
 import { CropEditor, frameAspect, turnedCrop, type FrameSize } from "./CropEditor";
 import { Dialog } from "./Dialog";
 import { useCovered } from "./Feed";
@@ -26,11 +25,9 @@ function slug(name: string): string {
 }
 
 function CameraEditor({ camera }: { camera: Camera }) {
-  const { owner, send, removing, updateCamera } = useStore(
+  const { owner, updateCamera } = useStore(
     useShallow((s) => ({
       owner: camera.printer_id ? (s.engine?.printers.find((p) => p.id === camera.printer_id) ?? null) : null,
-      send: s.send,
-      removing: s.isPending("camera.remove", camera.id),
       updateCamera: s.updateCamera,
     })),
   );
@@ -49,13 +46,8 @@ function CameraEditor({ camera }: { camera: Camera }) {
   };
   return (
     <>
-      <DetailHead title={camera.name}>
+      <DetailHead title={camera.name} remove={managed ? undefined : { kind: "camera", id: camera.id }}>
         <SaveStatus scope={`camera:${camera.id}`} />
-        {!managed && (
-          <ConfirmButton disabled={removing} onConfirm={() => send({ cmd: "camera.remove", id: camera.id })}>
-            {removing ? "Removing…" : "Remove"}
-          </ConfirmButton>
-        )}
       </DetailHead>
       <div className="grid xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <div className="min-w-0 border-b border-line-0 xl:border-r">

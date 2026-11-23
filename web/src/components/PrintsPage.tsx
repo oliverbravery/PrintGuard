@@ -5,7 +5,6 @@ import { ACCEPT, acceptedTags, ago, formatBytes, summary } from "../prints";
 import { useStore } from "../store";
 import { tooLargeToDraw, type ToolpathSource } from "../toolpath";
 import type { PrintFile } from "../types";
-import { ConfirmButton } from "./ConfirmButton";
 import { NameField } from "./NameField";
 import { DetailHead, ListHead, Page, Split } from "./Page";
 import { PrinterTags } from "./PrinterTags";
@@ -45,13 +44,7 @@ async function storedGcode(print: PrintFile): Promise<ToolpathSource | null> {
 }
 
 function PrintDetail({ print }: { print: PrintFile }) {
-  const { send, removing, updatePrint } = useStore(
-    useShallow((s) => ({
-      send: s.send,
-      removing: s.isPending("print.remove", print.id),
-      updatePrint: s.updatePrint,
-    })),
-  );
+  const updatePrint = useStore((s) => s.updatePrint);
   const toggleTag = (id: string) => {
     const engine = useStore.getState().engine!;
     const tags = acceptedTags(engine, (engine.prints.find((p) => p.id === print.id) ?? print).printer_ids, print.ext);
@@ -59,15 +52,9 @@ function PrintDetail({ print }: { print: PrintFile }) {
   };
   return (
     <>
-      <DetailHead title={print.name}>
+      <DetailHead title={print.name} remove={{ kind: "print", id: print.id }}>
         <span className="chip">.{print.ext}</span>
         <span className="chip">{formatBytes(print.size)}</span>
-        <ConfirmButton
-          disabled={removing}
-          onConfirm={() => send({ cmd: "print.remove", id: print.id })}
-        >
-          {removing ? "Removing…" : "Remove"}
-        </ConfirmButton>
       </DetailHead>
       <div className="grid xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <div className="min-w-0 border-b border-line-0 xl:border-r">

@@ -2,6 +2,7 @@ import { ChevronLeft } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import { type DialogKind, useStore } from "../store";
+import { ConfirmButton } from "./ConfirmButton";
 
 export type Target = { to: string; dialog?: never } | { dialog: Exclude<DialogKind, null>; to?: never };
 
@@ -69,13 +70,27 @@ export function Split({ list, detail, detailShown }: { list: ReactNode; detail: 
   );
 }
 
-export function DetailHead({ title, children }: { title: string; children?: ReactNode }) {
+type Removable = { kind: "camera" | "monitor" | "print" | "printer"; id: string };
+
+function RemoveButton({ kind, id }: Removable) {
+  const cmd = `${kind}.remove`;
+  const send = useStore((s) => s.send);
+  const removing = useStore((s) => s.isPending(cmd, id));
+  return (
+    <ConfirmButton disabled={removing} onConfirm={() => send({ cmd, id })}>
+      {removing ? "Removing…" : "Remove"}
+    </ConfirmButton>
+  );
+}
+
+export function DetailHead({ title, remove, children }: { title: string; remove?: Removable; children?: ReactNode }) {
   return (
     <div className="flex min-h-12 flex-wrap items-center gap-2 border-b border-rule px-4 py-2">
       <h2 data-heading tabIndex={-1} className="min-w-0 flex-1 truncate text-base font-bold">
         {title}
       </h2>
       {children}
+      {remove && <RemoveButton {...remove} />}
     </div>
   );
 }
