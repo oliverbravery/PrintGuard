@@ -5,10 +5,16 @@ const RECONNECT_DELAY_MS = 1500;
 const HUB_SILENCE_LIMIT_MS = 10_000;
 const BLOCKED_PAGE_SLACK_MS = 2_000;
 
+export function hubSocketUrl(path: string): string {
+  const url = new URL(path, document.baseURI);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.href;
+}
+
 export function connectHub(onEvent: (event: any) => void, onUp: () => void, onDown: (wasUp: boolean) => void): EngineLink {
   let socket: WebSocket;
   const open = () => {
-    const opening = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws`);
+    const opening = new WebSocket(hubSocketUrl("api/ws"));
     socket = opening;
     let connected = false;
     let silence: ReturnType<typeof setTimeout>;

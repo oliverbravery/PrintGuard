@@ -3405,4 +3405,18 @@ test("the introduction places print review between picking a model and ready to 
   await expect(dialog.getByRole("heading", { name: "Ready to start" })).toBeVisible();
 });
 
+test("a dashboard served under a path reaches its hub and camera feeds under that path", async ({ page }) => {
+  await page.route(/\/proxied\/(?!hls\/)/, async (route) => {
+    const url = new URL(route.request().url());
+    url.pathname = url.pathname.slice("/proxied".length);
+    await route.fulfill({ response: await route.fetch({ url: url.href }) });
+  });
+  await page.route(/\/proxied\/hls\//, (route) => route.fulfill({ status: 404, body: "" }));
+  await page.addInitScript(() => localStorage.setItem("pg.intro.seen", "1"));
+  await page.routeWebSocket(/\/proxied\/api\/ws$/, (socket) => socket.send(JSON.stringify({ event: "state", ...engine() })));
+  const feed = page.waitForRequest(/\/proxied\/hls\/c1\//);
+  await page.goto("/proxied/");
 
+  await expect(page.getByRole("heading", { name: "Prusa" })).toBeVisible();
+  await feed;
+});

@@ -156,6 +156,8 @@ Both `Host` and `X-Forwarded-Host` are checked, so it works out of the box behin
 
 PrintGuard also validates the `Origin` header on browser requests to WebSockets, uploads, camera streams, REST API and MCP, requiring it to match the request's own scheme/host/port or an entry in `PRINTGUARD_ORIGINS`. Behind a TLS-terminating proxy, make sure your proxy sends `X-Forwarded-Proto` (`http`, `https`, `ws` or `wss`; invalid values simply disable self-matching while still allowing listed origins). Non-browser clients (scripts, AI agents) send no `Origin` and are allowed on HTTP endpoints; WebSockets always require a valid `Origin` because only browsers open them. That stops another browser tab from piggybacking on your auth-proxy session cookie to control your printers.
 
+The dashboard also works under a path, such as `https://example.com/printguard/` (with the trailing slash) or a Home Assistant Ingress panel, as long as your proxy forwards WebSockets and passes the `Origin` header through. List the address you open the proxy at in `PRINTGUARD_ORIGINS` if the table above says it needs one. A plugin's sign-in is the exception. The provider sends you back to `/oauth/callback` at the root of that address, so sign a plugin in at the hub's own address and use it under the path afterwards.
+
 The dashboard also sends `X-Frame-Options: SAMEORIGIN` and `Content-Security-Policy: frame-ancestors 'self'` to block clickjacking. Any origin listed in `PRINTGUARD_ORIGINS` (like a Home Assistant instance embedding PrintGuard) is added to `frame-ancestors` (and `X-Frame-Options` is omitted in that case because it can't express multiple origins).
 
 ## Plugins

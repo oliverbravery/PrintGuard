@@ -2,6 +2,7 @@ import Hls from "hls.js";
 import { cameraApi } from "./media";
 import { readStored, writeStored } from "./storage";
 import type { Camera } from "./types";
+import { hubSocketUrl } from "./ws";
 
 const RECORDER_MIMES = [
   "video/mp4;codecs=avc1",
@@ -46,7 +47,7 @@ function holdPublisherLock(path: string): Promise<(() => void) | null> {
 }
 
 export function hlsUrl(path: string): string {
-  return `/hls/${encodeURIComponent(path)}/index.m3u8`;
+  return `hls/${encodeURIComponent(path)}/index.m3u8`;
 }
 
 export function playHls(video: HTMLVideoElement, url: string, onRefused?: () => void): () => void {
@@ -131,7 +132,7 @@ export async function publishStream(
   };
 
   const connect = () => {
-    const sock = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/publish/${encodeURIComponent(path)}`);
+    const sock = new WebSocket(hubSocketUrl(`api/publish/${encodeURIComponent(path)}`));
     socket = sock;
     sock.onopen = () => {
       const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 1_000_000 });

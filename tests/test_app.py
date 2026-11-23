@@ -453,6 +453,27 @@ async def test_hls_view_wakes_camera_before_proxying() -> None:
     platform.view_camera.assert_awaited_once_with("camera-one")
 
 
+async def test_hls_redirect_stays_relative_to_the_requested_path() -> None:
+    platform = SimpleNamespace(view_camera=AsyncMock(), plugin_runtime=None)
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=platform)
+    app.state.hls = httpx.AsyncClient(
+        base_url="http://mediamtx",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(302, headers={"location": "/camera-one/index.m3u8?cookieCheck=1"}, stream=AsyncContent(), request=request)
+        ),
+    )
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/hls/camera-one/index.m3u8")
+    finally:
+        await app.state.hls.aclose()
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "index.m3u8?cookieCheck=1"
+
+
 async def test_hls_answers_502_while_the_streaming_server_is_unreachable() -> None:
     def refuse(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused", request=request)
