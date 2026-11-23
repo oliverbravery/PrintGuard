@@ -97,7 +97,7 @@ A short walkthrough opens the first time you visit the dashboard, and a setup ch
 1. Add a camera on the **Cameras** page and crop it tightly around the print bed.
 2. Add your printer on the **Printers** page and run **Test connection**.
 3. Set up an alert channel under **Settings** -> **Alerts**.
-4. Click **+ Add** in the fleet header to create a monitor linking that camera and printer, choose whether a defect alerts, pauses or cancels, and switch on push notifications.
+4. Click **+ Add** at the top of the fleet list to create a monitor linking that camera and printer, choose whether a defect alerts, pauses or cancels, and switch on push notifications.
 
 ## Printers and cameras
 
@@ -113,7 +113,7 @@ Creality, Bambu Lab, Elegoo, Prusa and Ultimaker printers all talk to PrintGuard
 
 ## Tune every monitor
 
-Clicking a monitor brings its live feed, defect score and printer controls up to the top of the dashboard, with the rest of your fleet listed below. In the **Tune** tab you can set each monitor's own alert threshold, how many flagged frames in a row it takes before acting, its cooldown period, and whether it should just alert, pause or cancel.
+Your fleet sits in a list down the side, and clicking a monitor brings up its live feed, defect score and printer controls beside it. In the **Tune** tab you can set each monitor's own alert threshold, how many flagged frames in a row it takes before acting, its cooldown period, and whether it should just alert, pause or cancel.
 
 Every monitor also has a **History** page showing its risk score over the last hour, 6 hours, 24 hours or all saved data, alongside a snapshot of every alert that fired. That makes it easy to adjust your thresholds based on what your actual camera sees rather than guessing. When a print finishes, you can also review a handful of its frames and [send them to me](docs/feedback.md) to help train future versions of the model.
 
@@ -169,7 +169,7 @@ Pick between **System**, **Light**, **Dark** and **Glass**, or build your own co
 </tr>
 </table>
 
-Click **Layout** in the fleet bar to drag monitors into any order (or move them with the arrow buttons), pin important ones to the top and hide any you don't want to see. You can also drag the divider above the fleet to resize it, or collapse it completely. On a phone, the fleet fills the screen and tapping a monitor opens its full view.
+Click the pencil above the fleet list to drag monitors into any order (or move them with the arrow buttons), pin important ones to the top and hide any you don't want to see. On a phone, the fleet fills the screen and tapping a monitor opens its full view.
 
 ![Layout mode: reorder, pin and hide monitors](docs/assets/customise.png)
 

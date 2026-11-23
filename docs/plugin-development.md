@@ -154,8 +154,8 @@ READMEs render as strict Markdown: headings, paragraphs, lists, links, images, c
 
 | Surface | Where it renders |
 |---|---|
-| `panel` | Its own row under **Plugins**, below the fleet |
-| `monitor` | Alongside the selected monitor's feed and on its row in the fleet list |
+| `panel` | Its own row under **Plugins**, below the fleet list |
+| `monitor` | Alongside the selected monitor's feed |
 | `settings` | Inside every monitor's **Configure** tab under its own section heading |
 
 Anything scoped to an individual monitor belongs on `settings`.

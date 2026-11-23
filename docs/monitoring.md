@@ -84,7 +84,7 @@ By default, detection runs as fast as your hardware and camera allow. Lowering *
 
 ## Risk history
 
-The selected monitor shows its live risk bar above a sparkline of the last 240 readings (about 48 seconds at full speed, since the dashboard receives at most 5 updates per second). Click **History** next to it (or on any row in the fleet list) for the full history page.
+The selected monitor shows its live risk bar under the feed, above a sparkline of the last 240 readings (about 48 seconds at full speed, since the dashboard receives at most 5 updates per second). Click **History** next to it for the full history page.
 
 ![A monitor's history page: stat tiles, the risk chart with a gap where it wasn't watching, two prints kept and three risky moments](assets/history.png)
 
@@ -101,7 +101,7 @@ The chart itself is stored in memory as one-minute buckets covering the last 24 
 
 ## Reviewing a print
 
-PrintGuard saves a small set of frames locally from each print. Once a print finishes, you can open the monitor's **Review** tab (or click the review link in the fleet list) to flag any frames where something went wrong and send them to me to help train future detection models. Nothing is ever sent unless you click **Send**. See [Training frames](feedback.md) for everything about what's stored, what's sent and how to switch the review flow off.
+PrintGuard saves a small set of frames locally from each print. Once a print finishes, you can open the monitor's **Review** tab to flag any frames where something went wrong and send them to me to help train future detection models. Nothing is ever sent unless you click **Send**. See [Training frames](feedback.md) for everything about what's stored, what's sent and how to switch the review flow off.
 
 ![The review page with a failed print's frames labelled good, failure and real failure beside the recording](assets/review.png)
 

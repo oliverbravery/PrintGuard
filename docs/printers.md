@@ -164,7 +164,7 @@ Library files live under `prints/` inside your hub's data directory so they surv
 
 ## Temperatures and preheat
 
-Linked printers show live nozzle and bed temperatures in the fleet list and in the selected monitor's **Control** panel (alongside a progress bar and remaining time during a print). Open the **Preheat** tab to type custom targets (applied on Enter or blur) or tap one of the shared preheat presets. Click **Edit** to customise your presets, or **Heaters off** to cool everything down.
+Linked printers show their progress in the fleet list, and live nozzle and bed temperatures in the selected monitor's **Control** panel (alongside a progress bar and remaining time during a print). Open the **Preheat** tab to type custom targets (applied on Enter or blur) or tap one of the shared preheat presets. Click **Edit** to customise your presets, or **Heaters off** to cool everything down.
 
 | Service | Reads temperatures | Sets targets |
 |---|---|---|

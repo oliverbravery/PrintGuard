@@ -12,12 +12,12 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 ### Added
 
 - Two new detection models, **Standard** and **Light**, trained on over 9,000 real frames submitted by the community. Tested on 30 hubs none of the models had seen before, Standard catches 10 of 20 failed prints compared to 1 of 20 for the old dissertation model, with the same single false alarm out of 70 good prints. You can pick a model during first-run setup or switch any time under **Settings** -> **Detection**, which also charts them against Obico's open models.
-- Plugins now get their own rows under the fleet, and can render cards with an image, title and buttons in the dashboard's native style.
+- Plugins now get their own rows in the fleet list, and can render cards with an image, title and buttons in the dashboard's native style.
 - Plugins can declare a `min_printguard` version in their manifest so older hubs refuse to install ones they can't run (Spotify 1.1.0 now requires 3.0.0).
 
 ### Changed
 
-- Full dashboard redesign. Selecting a monitor puts its live feed, risk score and printer controls front and centre at the top, with the rest of your fleet listed below (which you can resize or collapse). Prints, Cameras, Printers and Settings each move onto their own full pages instead of cramped dialogs.
+- Full dashboard redesign. Your fleet sits in a side list like every other page, and selecting a monitor puts its live feed, risk score and printer controls front and centre beside it. Prints, Cameras, Printers and Settings each move onto their own full pages instead of cramped dialogs.
 - Standard is now the default model after updating. Because it's around 5x heavier on CPU than the old model, switch to **Light** (or **Legacy**) in Settings if your host's capacity readout drops below what your cameras need.
 - The inference runtime picker has moved from **Advanced** into **Settings** -> **Detection**.
 - Creality and Ultimaker integrations are no longer marked experimental.

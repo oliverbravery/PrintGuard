@@ -26,7 +26,7 @@ A plugin can add a row to the dashboard, run background logic on the hub, or bot
 
 ![The Spotify plugin's row under two monitors, with the cover art behind the dashboard](assets/plugins-live.png)
 
-Plugin rows show up under **Plugins** below your fleet list and participate in the same dashboard layout, so you can drag, pin and hide them just like monitors. Plugins can also add small buttons onto each monitor row or add their own section to a monitor's **Configure** tab.
+Plugin rows show up under **Plugins** below your fleet list and participate in the same dashboard layout, so you can drag, pin and hide them just like monitors. Plugins can also add small buttons next to the selected monitor's feed or add their own section to a monitor's **Configure** tab.
 
 ## The shipped plugins
 
@@ -37,7 +37,7 @@ Four official plugins live in the catalogue, with full source code in [`plugins/
 | [Picture in picture](../plugins/picture-in-picture) | Adds a button on every monitor to pop its live camera out into a floating window | `state:read`, `camera:view` |
 | [Alert sounds](../plugins/alert-sounds) | Plays a horn, bell or alarm sound when a defect triggers on monitors you choose | `state:read`, `sound` |
 | [Progress reports](../plugins/progress-reports) | Sends periodic print progress and defect summaries through your alert channels | `state:read`, `alert:send` |
-| [Spotify](../plugins/spotify) | Puts your currently playing album art behind the dashboard (in Glass theme) with track info and playback controls in a row under the fleet | `net`, `oauth`, `background` |
+| [Spotify](../plugins/spotify) | Puts your currently playing album art behind the dashboard (in Glass theme) with track info and playback controls in a row under the fleet list | `net`, `oauth`, `background` |
 
 ## Installing a plugin
 
