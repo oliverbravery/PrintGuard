@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { BENCHMARKS, FAMILIES, GOLD_TEST, type Benchmark, type ModelFamily, type ModelId } from "../models";
+import { NewTab } from "./NewTab";
 
 type Key = Benchmark["id"] | ModelFamily;
 
@@ -323,7 +324,15 @@ export function ModelChart({ selected }: { selected?: ModelId }) {
         Tested on {GOLD_TEST.frames.toLocaleString("en-GB")} curated frames from {GOLD_TEST.hubs} PrintGuard hubs none of the models had seen before,
         with latency measured on one CPU thread of an M1 Max. Caught and false alarms count whole prints ({GOLD_TEST.failedPrints} failed and{" "}
         {GOLD_TEST.goodPrints} good), alerting after 3 frames in a row at 0.75. Obico's scores aren't probabilities, so its thresholds were
-        matched on separate validation frames.
+        matched on separate validation frames.{" "}
+        <a
+          className="text-accent underline hover:opacity-80"
+          href="https://oliverbravery.uk/blog/rebuilding-printguards-brain"
+          target="_blank"
+          rel="noreferrer"
+        >
+          How the models were trained <NewTab />
+        </a>
       </p>
     </div>
   );

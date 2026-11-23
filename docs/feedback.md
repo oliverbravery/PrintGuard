@@ -6,7 +6,7 @@
 
 </div>
 
-PrintGuard keeps a handful of frames locally on your hub from each print. Once a print finishes, you can look through them, flag any frames where something went wrong and send them to me so I can keep improving the detection models across real printers, cameras and lighting. The 3.0 models were trained entirely on community frames like these. It's completely opt-in: nothing ever leaves your hub unless you review a print and click **Send**.
+PrintGuard keeps a handful of frames locally on your hub from each print. Once a print finishes, you can look through them, flag any frames where something went wrong and send them to me so I can keep improving the detection models across real printers, cameras and lighting. The 3.0 models were trained entirely on community frames like these (you can read how they were trained in [this blog post](https://oliverbravery.uk/blog/rebuilding-printguards-brain)). It's completely opt-in: nothing ever leaves your hub unless you review a print and click **Send**.
 
 - [What's kept on your hub](#whats-kept-on-your-hub)
 - [Reviewing a print](#reviewing-a-print)

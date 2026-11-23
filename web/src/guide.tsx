@@ -230,7 +230,15 @@ export const GUIDE: GuideSection[] = [
       <>
         PrintGuard ships with three models so you can trade accuracy against speed. Settings charts all three against
         Obico's open models on unseen printers, right next to your host's live speed readout, making it easy to pick the
-        right one for your hardware.
+        right one for your hardware.{" "}
+        <a
+          className={link}
+          href="https://oliverbravery.uk/blog/rebuilding-printguards-brain"
+          target="_blank"
+          rel="noreferrer"
+        >
+          How the new models were trained <NewTab />
+        </a>
       </>
     ),
     action: { label: "Choose a model", to: "/settings/detection" },

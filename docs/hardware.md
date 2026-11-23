@@ -67,7 +67,7 @@ PrintGuard 3.0 bundles three detection models. You pick one during the first-run
 | **Legacy** | ShuffleNetV2 prototype network (used before 3.0.0) | 4.8 MB | 5.3 ms | 1 of 20 | 1 of 70 |
 | Obico, Dec 2025 | Obico's YOLOv2 Spaghetti Detective (for comparison) | 193 MB | 360 ms | 3 of 20 | 0 of 70 |
 
-These numbers come from 1,534 curated frames across 30 PrintGuard hubs that none of the models had seen during training, using PrintGuard's default alert rule (0.75 for 3 frames in a row). Because Obico's outputs aren't calibrated probabilities, its threshold was tuned on a separate validation set to match precision. Latency was measured on a single M1 Max CPU thread using ONNX Runtime 1.32, so expect higher milliseconds on a Pi and lower numbers with a GPU or NPU.
+These numbers come from 1,534 curated frames across 30 PrintGuard hubs that none of the models had seen during training, using PrintGuard's default alert rule (0.75 for 3 frames in a row). Because Obico's outputs aren't calibrated probabilities, its threshold was tuned on a separate validation set to match precision. Latency was measured on a single M1 Max CPU thread using ONNX Runtime 1.32, so expect higher milliseconds on a Pi and lower numbers with a GPU or NPU. For the full breakdown of how Standard and Light were curated, trained, distilled and benchmarked, see [this blog post](https://oliverbravery.uk/blog/rebuilding-printguards-brain).
 
 ![Detection in Settings, with the three models charted against Obico's](assets/settings-detection.png)
 

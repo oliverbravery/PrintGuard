@@ -18,7 +18,7 @@ PrintGuard runs a lightweight vision model locally on whatever machine you put n
 
 There is no cloud account, no subscription and no paywall. Everything runs on your own hardware, so your camera frames never leave your network unless you send alert snapshots to your own notification channels or MQTT broker, or choose to [share frames after a print](docs/feedback.md) to help me train better models.
 
-The detection models are my own, trained in [Edge-FDM-Fault-Detection](https://github.com/oliverbravery/Edge-FDM-Fault-Detection). PrintGuard 3.0 ships with three options, and Settings charts them side by side against Obico's Spaghetti Detective (the only other open model). Tested on 1,534 curated frames from 30 PrintGuard hubs that none of the models had ever seen before:
+The detection models are my own. PrintGuard 3.0 ships with three options, and Settings charts them side by side against Obico's Spaghetti Detective (the only other open model). Tested on 1,534 curated frames from 30 PrintGuard hubs that none of the models had ever seen before:
 
 | | Standard | Light | Legacy | Spaghetti Detective |
 |---|---|---|---|---|
@@ -27,7 +27,7 @@ The detection models are my own, trained in [Edge-FDM-Fault-Detection](https://g
 | Size | 12.9 MB | 9.5 MB | 4.8 MB | 193 MB |
 | One CPU thread, M1 Max | 28.7 ms | 11.2 ms | 5.3 ms | 360 ms |
 
-**Standard** is the default and the best all-rounder. **Light** is there if you are running on a slower machine or watching several cameras at once, and **Legacy** keeps the original ShuffleNetV2 model from my [university dissertation](https://github.com/oliverbravery/Edge-FDM-Fault-Detection/blob/main/dissertation.pdf) available if you want it.
+**Standard** is the default and the best all-rounder, **Light** is there if you are running on a slower machine or watching several cameras at once, and **Legacy** keeps the original ShuffleNetV2 model from my [university dissertation](https://github.com/oliverbravery/Edge-FDM-Fault-Detection/blob/main/dissertation.pdf) ([Edge-FDM-Fault-Detection](https://github.com/oliverbravery/Edge-FDM-Fault-Detection)) available if you want it. Full details on how Standard and Light were trained and evaluated are in [this blog post](https://oliverbravery.uk/blog/rebuilding-printguards-brain).
 
 ![PrintGuard dashboard: three cameras at a glance, one print mid-failure and auto-paused](docs/assets/dashboard.png)
 

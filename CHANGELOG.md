@@ -11,7 +11,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Added
 
-- Two new detection models, **Standard** and **Light**, trained on over 9,000 real frames submitted by the community. Tested on 30 hubs none of the models had seen before, Standard catches 10 of 20 failed prints compared to 1 of 20 for the old dissertation model, with the same single false alarm out of 70 good prints. You can pick a model during first-run setup or switch any time under **Settings** -> **Detection**, which also charts them against Obico's open models.
+- Two new detection models, **Standard** and **Light**, trained on over 9,000 real frames submitted by the community. Tested on 30 hubs none of the models had seen before, Standard catches 10 of 20 failed prints compared to 1 of 20 for the old dissertation model, with the same single false alarm out of 70 good prints. You can pick a model during first-run setup or switch any time under **Settings** -> **Detection**, which also charts them against Obico's open models. Full details on how the new models were trained and benchmarked are in [this blog post](https://oliverbravery.uk/blog/rebuilding-printguards-brain).
 - Plugins now get their own rows in the fleet list, and can render cards with an image, title and buttons in the dashboard's native style.
 - Plugins can declare a `min_printguard` version in their manifest so older hubs refuse to install ones they can't run (Spotify 1.1.0 now requires 3.0.0).
 

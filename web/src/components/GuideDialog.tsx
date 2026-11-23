@@ -7,6 +7,7 @@ import { useGo } from "./Page";
 
 const REPO = "https://github.com/oliverbravery/PrintGuard";
 const MODEL = "https://github.com/oliverbravery/Edge-FDM-Fault-Detection";
+const TRAINING_POST = "https://oliverbravery.uk/blog/rebuilding-printguards-brain";
 
 export function GuideEntry({ section, lead, fill }: { section: GuideSection; lead?: boolean; fill?: boolean }) {
   const go = useGo();
@@ -65,6 +66,14 @@ export function GuideDialog() {
             rel="noreferrer"
           >
             The vision model <NewTab />
+          </a>
+          <a
+            className="mono text-xs text-text-2 transition-colors hover:text-accent"
+            href={TRAINING_POST}
+            target="_blank"
+            rel="noreferrer"
+          >
+            How the 3.0 models were trained <NewTab />
           </a>
         </footer>
       </div>
