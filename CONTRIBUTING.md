@@ -36,7 +36,7 @@ cd web && npm run test:sandbox       # browser plugin sandbox, dashboard, a11y a
 cd feedback-worker && npm ci && npm run typecheck && npm test   # training inbox Cloudflare Worker
 ```
 
-CI's **tests** check runs all four of these (running `uv run pytest` on both Python 3.12 and the Docker image's Python 3.14). pytest spreads the tests across every core with pytest-xdist, so add `-n0` to run them one at a time when you're debugging. Note that `test:sandbox` needs `npx playwright install chromium webkit` once.
+CI's **tests** check runs all four of these as parallel jobs (running `uv run pytest` on both Python 3.12 and the Docker image's Python 3.14), with Playwright split into four shards per browser, so a test under `web/tests/` can't depend on another one running before it. pytest spreads the tests across every core with pytest-xdist, so add `-n0` to run them one at a time when you're debugging. Note that `test:sandbox` needs `npx playwright install chromium webkit` once.
 
 Here is where different tests live:
 

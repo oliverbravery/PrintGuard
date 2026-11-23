@@ -27,6 +27,15 @@ There is no Python lint step. The **tests** check in CI runs `uv run pytest`, on
 again on the image's 3.14, `npm run typecheck` and `npm run test:sandbox` in
 `web/`, and the feedback Worker's `typecheck` and tests.
 
+To keep CI fast, those run as parallel jobs, and `tests` is only a gate that passes once they all
+have, so branch protection never changes. Playwright is sharded four ways per browser with
+`fullyParallel`, inside the `mcr.microsoft.com/playwright` image matched to the lockfile's
+version, so every test in `web/tests/` must stand alone and never rely on another running first.
+Shards split by test count, so the slow `a11y.spec.ts` tests fill shard 1. To check a shard as
+CI runs it use `npx playwright test --project=sandbox-webkit --shard=1/4`, and to rebalance change
+the `shard` list in `.github/workflows/ci.yml`. Add a new suite as its own job that the `tests`
+gate `needs`, not as a step on an existing one.
+
 ## Architecture
 
 Read [docs/architecture.md](docs/architecture.md) for the full picture and diagrams. The
