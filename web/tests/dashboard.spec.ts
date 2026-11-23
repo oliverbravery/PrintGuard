@@ -750,7 +750,7 @@ test("a monitor name or heater target typed and left by going elsewhere is still
   await expect(page).toHaveURL(/#\/prints$/);
 
   const commands = () => page.evaluate(() => (window as any).__sent.map((c: any) => [c.cmd, c.patch ?? c.nozzle]));
-  expect(await commands()).toEqual(expect.arrayContaining([["monitor.update", { name: "Bench" }], ["printer.heat", 215]]));
+  await expect.poll(commands).toEqual(expect.arrayContaining([["monitor.update", { name: "Bench" }], ["printer.heat", 215]]));
   expect(await commands()).toHaveLength(2);
 });
 
