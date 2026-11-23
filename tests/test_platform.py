@@ -137,8 +137,9 @@ async def test_the_bundled_servers_user_name_is_not_scrubbed_from_a_log_line_nam
 async def test_runtimes_agree_on_the_score(model: str) -> None:
     """Both runtimes carry the same model, so they must score a frame alike.
 
-    Execution providers pick kernels for the hardware they land on, so the scores
-    are held to a tolerance far below any threshold a monitor can be set to.
+    Execution providers pick kernels and precision for the hardware they land on,
+    and OpenVINO runs bf16 on a CPU that has it, so the scores are held to half
+    the 0.01 step a monitor's threshold moves in.
     """
     image = np.random.default_rng(0).integers(0, 256, (480, 640, 3), dtype=np.uint8)
     scores = []
@@ -147,7 +148,7 @@ async def test_runtimes_agree_on_the_score(model: str) -> None:
         scores.append((await inference.infer(image))["defect_score"])
         inference.close()
 
-    assert scores[0] == pytest.approx(scores[1], abs=1e-4)
+    assert scores[0] == pytest.approx(scores[1], abs=5e-3)
 
 
 def _ep_device(
