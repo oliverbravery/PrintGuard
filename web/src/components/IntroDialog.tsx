@@ -19,7 +19,8 @@ export function IntroDialog() {
           {INTRO.map((entry, i) => (
             <div
               key={entry.id}
-              className={`col-start-1 row-start-1 min-h-0 overflow-y-auto overscroll-contain ${i === page ? "page-swap" : ""}`}
+              tabIndex={i === page ? 0 : undefined}
+              className={`col-start-1 row-start-1 min-h-0 overflow-y-auto overscroll-contain focus-visible:outline-offset-[-2px] ${i === page ? "page-swap" : ""}`}
               style={{ visibility: i === page ? undefined : "hidden" }}
               aria-hidden={i !== page}
               inert={i !== page}

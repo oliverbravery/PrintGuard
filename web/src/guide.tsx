@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { ModelPicker } from "./components/ModelPicker";
 import { NewTab } from "./components/NewTab";
 import type { Target } from "./components/Page";
+import { ReviewOptIn } from "./components/ReviewOptIn";
 import type { SHOT_SIZES } from "./guideShots";
 
 const REPO = "https://github.com/oliverbravery/PrintGuard";
@@ -101,6 +102,20 @@ export const INTRO: GuideSection[] = [
       </>
     ),
     visual: <ModelPicker />,
+  },
+  {
+    id: "review",
+    led: "led-on",
+    title: "Review finished prints",
+    body: (
+      <>
+        The Standard and Light models were trained on over 9,000 frames sent in by PrintGuard users. I couldn't have
+        built them without that data. After each print, PrintGuard keeps a handful of frames locally in the monitor's
+        Review tab so you can label and send them for future models. Nothing leaves your hub unless you press Send, and
+        uploads are anonymous with a random hub ID and no monitor names, camera URLs or credentials.
+      </>
+    ),
+    visual: <ReviewOptIn />,
   },
   {
     id: "start",

@@ -66,6 +66,14 @@ for (const theme of ["dark", "light"] as const) {
           await expect(page.getByRole("dialog")).toBeVisible();
           const { violations } = await new AxeBuilder({ page }).withTags(WCAG_22_AA).include("dialog").analyze();
           expect(violations.map(({ id, nodes }) => `${id}: ${nodes.map((node) => node.target.join(" ")).join(", ")}`)).toEqual([]);
+          if (dialog === "intro") {
+            const next = page.getByRole("button", { name: "Next", exact: true });
+            while (await next.isVisible()) {
+              await next.click();
+              const step = await new AxeBuilder({ page }).withTags(WCAG_22_AA).include("dialog").analyze();
+              expect(step.violations.map(({ id, nodes }) => `${id}: ${nodes.map((node) => node.target.join(" ")).join(", ")}`)).toEqual([]);
+            }
+          }
         });
       }
     });

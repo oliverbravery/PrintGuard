@@ -3378,3 +3378,31 @@ test("non-web URLs in release notes, plugin OAuth registration, and schema links
   await expect(page.getByRole("link", { name: "Register an app" })).toHaveCount(0);
 });
 
+test("the introduction places print review between picking a model and ready to start, and lets the user opt out or back in", async ({ page }) => {
+  await dashboard(page, { dialog: "intro" });
+  const dialog = page.getByRole("dialog", { name: "How PrintGuard works" });
+  const next = dialog.getByRole("button", { name: "Next", exact: true });
+
+  while (!(await dialog.getByRole("heading", { name: "Pick a detection model" }).isVisible())) {
+    await next.click();
+  }
+  await next.click();
+
+  await expect(dialog.getByRole("heading", { name: "Review finished prints" })).toBeVisible();
+  expect(await dialog.innerText()).not.toMatch(/[—→←↗]/);
+  const toggle = dialog.getByRole("switch", { name: "Ask me to review frames after a print" });
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect.poll(() => lastSent(page, "settings.update")).toMatchObject({ patch: { feedback: "off" } });
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await expect.poll(() => lastSent(page, "settings.update")).toMatchObject({ patch: { feedback: "ask" } });
+
+  await next.click();
+  await expect(dialog.getByRole("heading", { name: "Ready to start" })).toBeVisible();
+});
+
+

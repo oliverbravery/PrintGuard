@@ -91,7 +91,7 @@ One caveat: if I ever rotate the signing key the inbox uses for hub IDs, your hu
 
 ## Storage settings
 
-If you don't want to participate, switch off **Ask me to review frames after a print** under **Settings** -> **Storage**. PrintGuard will then only keep alert snapshots for risk history and won't prompt you to review prints. That same tab shows every saved recording with its size and expiry date, lets you delete individual recordings or wipe them all, and lets you set how long recordings are kept.
+If you don't want to participate, switch off **Ask me to review frames after a print** during the first-run walkthrough or any time under **Settings** -> **Storage**. PrintGuard will then only keep alert snapshots for risk history and won't prompt you to review prints. That same tab shows every saved recording with its size and expiry date, lets you delete individual recordings or wipe them all, and lets you set how long recordings are kept.
 
 ![Storage in Settings, with the review switch, how long recordings are kept and the recording of each print](assets/settings-storage.png)
 
