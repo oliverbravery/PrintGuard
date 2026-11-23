@@ -1397,6 +1397,7 @@ video {
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
@@ -1459,6 +1460,10 @@ video {
 
 .shot {
   margin-top: 0.75rem;
+}
+
+.shot:not(.shot-fill) {
+  width: min(100%, var(--shot-width), calc(var(--shot-ratio) * 22rem));
 }
 
 .shot-fill {

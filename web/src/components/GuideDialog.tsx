@@ -1,4 +1,5 @@
-import { GUIDE, SHOT_SIZES, type GuideSection } from "../guide";
+import { GUIDE, type GuideSection } from "../guide";
+import { SHOT_SIZES } from "../guideShots";
 import { useStore } from "../store";
 import { Dialog } from "./Dialog";
 import { NewTab } from "./NewTab";
@@ -21,7 +22,7 @@ export function GuideEntry({ section, lead, fill }: { section: GuideSection; lea
       </div>
       <p className={`shrink-0 leading-relaxed text-text-1 ${lead ? "text-sm" : "text-sm"}`}>{section.body}</p>
       {section.shot && (
-        <figure className={`shot ${fill ? "shot-fill" : ""}`}>
+        <figure className={`shot ${fill ? "shot-fill" : ""}`} style={{ "--shot-width": `${shotWidth! / 2}px`, "--shot-ratio": shotWidth! / shotHeight! } as React.CSSProperties}>
           <img className="shot-dark" src={`guide/${section.shot}-dark.jpg`} alt="" loading="lazy" width={shotWidth} height={shotHeight} />
           <img className="shot-light" src={`guide/${section.shot}-light.jpg`} alt="" loading="lazy" width={shotWidth} height={shotHeight} />
         </figure>

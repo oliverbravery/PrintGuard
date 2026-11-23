@@ -49,7 +49,7 @@ const VIEWPORTS = [
 for (const theme of ["dark", "light"] as const) {
   for (const viewport of VIEWPORTS) {
     test.describe(`${theme} on a ${viewport.name}`, () => {
-      test.use({ viewport, colorScheme: theme });
+      test.use({ viewport, colorScheme: theme, contextOptions: { reducedMotion: "reduce" } });
 
       for (const route of ROUTES) {
         test(`${route} meets WCAG 2.2 AA`, async ({ page }) => {

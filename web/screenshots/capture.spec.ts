@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { test, type Browser, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import { deflateSync } from "node:zlib";
+import { SHOT_SIZES } from "../src/guideShots";
 import type { Camera, DeviceState, EngineState, Monitor, PrintFile, Printer, ScorePoint } from "../src/types";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -188,7 +189,7 @@ const INSTALLED = {
 }
 
 interface Crop extends Omit<Scene, "name" | "theme"> {
-  id: string;
+  id: keyof typeof SHOT_SIZES;
   target: (page: Page) => Locator;
   pad?: number;
   tallest?: number;
@@ -406,7 +407,7 @@ const CROPS: Crop[] = [
     target: (page) => page.getByRole("heading", { name: "Get PrintGuard watching" }).locator("xpath=../.."),
   },
   {
-    id: "cameras", ...DESK, route: "/cameras", pad: 0,
+    id: "cameras", ...DESK, route: "/cameras", pad: 0, tallest: 210,
     target: (page) => page.getByRole("tablist", { name: "Camera groups" }).locator("xpath=../.."),
   },
   {
@@ -415,7 +416,7 @@ const CROPS: Crop[] = [
     target: (page) => page.getByRole("tabpanel", { name: "Tune" }),
   },
   {
-    id: "printers", ...DESK, height: 1000, route: "/printers/p1", pad: 0,
+    id: "printers", ...DESK, height: 1000, route: "/printers/p1", pad: 0, tallest: 440,
     target: (page) => page.locator("main"),
   },
   {
@@ -604,7 +605,7 @@ async function captureCrop(browser: Browser, crop: Crop, theme: "dark" | "light"
   await crop.target(page).scrollIntoViewIfNeeded();
   const box = (await crop.target(page).boundingBox())!;
   const pad = crop.pad ?? 10;
-  await page.screenshot({
+  const shot = await page.screenshot({
     path: guideShot(`${crop.id}-${theme}.jpg`),
     quality: 90,
     clip: {
@@ -614,7 +615,15 @@ async function captureCrop(browser: Browser, crop: Crop, theme: "dark" | "light"
       height: Math.min(crop.height - Math.max(0, box.y - pad), crop.tallest ?? box.height + pad * 2),
     },
   });
+  expect(jpegSize(shot), `SHOT_SIZES.${crop.id} in src/guideShots.ts`).toEqual(SHOT_SIZES[crop.id]);
   await close();
+}
+
+function jpegSize(jpeg: Buffer): number[] {
+  for (let at = 2; at < jpeg.length; at += 2 + jpeg.readUInt16BE(at + 2)) {
+    if (jpeg[at + 1] >= 0xc0 && jpeg[at + 1] <= 0xc2) return [jpeg.readUInt16BE(at + 7), jpeg.readUInt16BE(at + 5)];
+  }
+  throw new Error("no JPEG frame header");
 }
 
 async function runPlugins(page: import("@playwright/test").Page, ids: string[]): Promise<void> {

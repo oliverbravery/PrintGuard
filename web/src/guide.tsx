@@ -3,23 +3,11 @@ import type { ReactNode } from "react";
 import { ModelPicker } from "./components/ModelPicker";
 import { NewTab } from "./components/NewTab";
 import type { Target } from "./components/Page";
+import type { SHOT_SIZES } from "./guideShots";
 
 const REPO = "https://github.com/oliverbravery/PrintGuard";
 const docs = (page: string) => `${REPO}/blob/main/docs/${page}`;
 const link = "text-accent underline hover:opacity-80";
-
-export const SHOT_SIZES = {
-  alert: [2720, 1040],
-  alerts: [1316, 1796],
-  cameras: [2000, 1448],
-  checklist: [1320, 1084],
-  customise: [2000, 714],
-  plugins: [1316, 1432],
-  printers: [2000, 1904],
-  prints: [2000, 1904],
-  standby: [2000, 160],
-  tuning: [2000, 838],
-} as const;
 
 export interface GuideSection {
   id: string;
