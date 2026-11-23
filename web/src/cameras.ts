@@ -10,5 +10,5 @@ export function sourceLabel(source: CameraSource): string {
 export function cameraStatus(camera: Camera): string {
   if (camera.online) return "online";
   if (camera.standby) return "standby";
-  return camera.reason ? `offline: ${camera.reason}` : "offline";
+  return "offline";
 }

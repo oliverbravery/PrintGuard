@@ -70,6 +70,7 @@ function CameraEditor({ camera }: { camera: Camera }) {
             {camera.source.path && published.has(camera.source.path) && <span className="chip chip-accent">publishing</span>}
             {owner && <span className="chip">via {owner.name}</span>}
             {camera.declared && <span className="chip">passed in</span>}
+            {camera.reason && <span className="w-full text-bad">{camera.reason}</span>}
           </div>
           {removalHint && <p className="border-t border-line-0 px-4 py-2 text-sm text-text-2">{removalHint}</p>}
         </div>
@@ -116,7 +117,7 @@ function CameraLink({ camera, selected }: { camera: Camera; selected: boolean })
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-semibold">{camera.name}</span>
         <span className="mono block truncate text-xs text-text-2">{sourceLabel(camera.source)}</span>
-        {camera.reason && <span className="block text-xs text-bad">{camera.reason}</span>}
+        {camera.reason && <span title={camera.reason} className="block truncate text-xs text-bad">{camera.reason}</span>}
       </span>
       <Status tone={camera.online ? "ok" : camera.standby ? "idle" : "bad"}>
         <span className="max-md:sr-only">{camera.online ? `${camera.achieved_fps.toFixed(1)} fps` : cameraStatus(camera)}</span>
