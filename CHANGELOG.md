@@ -7,6 +7,12 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.1] - 2026-11-23
+
+### Changed
+
+- The bundled MediaMTX is updated to 1.21.4, which fixes the video headers it writes for some H.265 cameras.
+
 ## [3.0.0] - 2026-11-23
 
 ### Added
