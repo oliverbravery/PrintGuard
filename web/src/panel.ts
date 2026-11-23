@@ -31,6 +31,7 @@ export class PluginPanelHost {
   readonly id: string;
   private frame: HTMLIFrameElement;
   private port: MessagePort;
+  private stopBoot: () => void;
   private dead = false;
   private store: Record<string, unknown>;
 
@@ -47,6 +48,7 @@ export class PluginPanelHost {
     const sandbox = sandboxFrame(PANEL_SANDBOX_URL, `${record.manifest.name} panel`, this.receive, (reason) => this.fail(reason));
     this.frame = sandbox.frame;
     this.port = sandbox.port;
+    this.stopBoot = sandbox.stop;
     this.frame.className = "block h-24 w-full border-0 bg-transparent transition-[height] duration-150";
     container.appendChild(this.frame);
     this.port.postMessage({ t: "init", html, assets, state, theme: themeTokens(), store: record.config, secrets: record.secrets_set, sound: record.granted.includes("sound") });
@@ -74,6 +76,10 @@ export class PluginPanelHost {
     this.port.postMessage({ t: "event", event });
   }
 
+  act(name: string, arg: unknown): void {
+    this.port.postMessage({ t: "action", name, arg });
+  }
+
   private fail(reason: string): void {
     if (this.dead) return;
     log("warn", `plugin ${this.id} (panel.html) stopped: ${reason}`);
@@ -83,6 +89,7 @@ export class PluginPanelHost {
 
   close(): void {
     this.dead = true;
+    this.stopBoot();
     this.port.close();
     this.frame.remove();
   }

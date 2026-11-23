@@ -8,7 +8,6 @@ dist
 tests
 web/node_modules
 web/dist
-web/dist-site
 web/test-results
 **/__pycache__
 **/*.tsbuildinfo

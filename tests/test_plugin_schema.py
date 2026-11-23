@@ -24,7 +24,7 @@ def test_the_committed_schema_matches_the_tables() -> None:
 
 
 def test_the_schema_names_every_field_a_manifest_carries() -> None:
-    manifest = plugins.sanitise_manifest({"id": "demo-plugin", "version": "1.0.0"})
+    manifest = plugins.sanitise_manifest({"id": "demo-plugin", "version": "1.0.0", "min_printguard": "3.0.0"})
 
     assert set(generator.schema()["properties"]) == {"$schema", *manifest}
 

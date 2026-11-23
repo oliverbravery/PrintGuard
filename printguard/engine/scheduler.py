@@ -51,7 +51,7 @@ async def infer_squares(platform: Platform, frames: list[np.ndarray]) -> dict[st
         The classify() result of the square with the highest defect score.
     """
     results = [await platform.infer(frame) for frame in frames]
-    return max(results, key=vision.defect_score)
+    return max(results, key=lambda result: result["defect_score"])
 
 
 def _interval(camera: Camera) -> float:

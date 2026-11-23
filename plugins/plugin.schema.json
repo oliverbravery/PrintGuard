@@ -21,12 +21,17 @@
     "name": {
       "type": "string",
       "maxLength": 80,
-      "description": "Shown on the panel and in Settings. Defaults to the id."
+      "description": "Shown on its row on the dashboard and in Settings. Defaults to the id."
     },
     "version": {
       "type": "string",
       "pattern": "^[\\w.+-]{1,32}$",
       "description": "Your own version, shown beside the name."
+    },
+    "min_printguard": {
+      "type": "string",
+      "pattern": "^\\d{1,4}\\.\\d{1,4}\\.\\d{1,4}$",
+      "description": "The oldest PrintGuard version it runs on, such as 3.0.0. An older hub refuses to install it."
     },
     "description": {
       "type": "string",
@@ -265,11 +270,11 @@
         "anyOf": [
           {
             "const": "panel",
-            "description": "A panel of its own on the dashboard."
+            "description": "A row of its own under the monitors on the dashboard."
           },
           {
             "const": "monitor",
-            "description": "Drawn on every monitor tile, once per monitor."
+            "description": "Drawn beside the selected monitor's feed and on its row in the fleet, once per monitor."
           },
           {
             "const": "settings",
@@ -376,7 +381,7 @@
           },
           {
             "const": "result",
-            "description": "Carries monitor_id, camera_id, score, prediction, margin, ms, ts."
+            "description": "Carries monitor_id, camera_id, score, prediction, ms, ts."
           },
           {
             "const": "alert",

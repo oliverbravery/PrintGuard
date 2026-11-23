@@ -2,12 +2,8 @@ import type { EngineState, Layout, LayoutSection, Monitor, PluginRecord } from "
 
 const EMPTY: LayoutSection = { order: [], pinned: [], hidden: [] };
 
-export function section(layout: Layout | undefined, key: keyof Layout): LayoutSection {
-  return { ...EMPTY, ...(layout?.[key] ?? {}) };
-}
-
-export function currentLayout(layout: Layout | undefined): Layout {
-  return { monitors: section(layout, "monitors"), cameras: section(layout, "cameras") };
+export function section(layout: Layout | undefined): LayoutSection {
+  return { ...EMPTY, ...(layout?.monitors ?? {}) };
 }
 
 export interface Tile {
@@ -45,10 +41,6 @@ function toggle(list: string[], id: string): string[] {
   return list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
 }
 
-export function withOrder(sec: LayoutSection, ids: string[]): LayoutSection {
-  return { ...sec, order: ids };
-}
-
 export function sharesPinning(pinned: string[], a: string, b: string): boolean {
   return pinned.includes(a) === pinned.includes(b);
 }
@@ -59,4 +51,19 @@ export function togglePinned(sec: LayoutSection, id: string): LayoutSection {
 
 export function toggleHidden(sec: LayoutSection, id: string): LayoutSection {
   return { ...sec, hidden: toggle(sec.hidden, id) };
+}
+
+export function reorderGroup(sec: LayoutSection, visible: string[], group: string[]): LayoutSection {
+  const members = new Set(group);
+  const queue = [...group];
+  return { ...sec, order: visible.map((id) => (members.has(id) ? queue.shift()! : id)) };
+}
+
+export function moveWithinGroup(group: string[], pinned: string[], id: string, by: -1 | 1): string[] | null {
+  const from = group.indexOf(id);
+  const to = from + by;
+  if (from === -1 || to < 0 || to >= group.length || !sharesPinning(pinned, id, group[to])) return null;
+  const next = [...group];
+  [next[from], next[to]] = [next[to], next[from]];
+  return next;
 }

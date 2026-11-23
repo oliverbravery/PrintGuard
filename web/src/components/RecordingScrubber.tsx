@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { elapsed, recordedFrameKey } from "../review";
 import { useStore } from "../store";
 import type { Review, ReviewFrame } from "../types";
@@ -7,23 +8,28 @@ import { Slider } from "./Slider";
 
 const SETTLE_MS = 80;
 
-function markColour(frame: ReviewFrame): string {
-  if (frame.kind === "alert") return "bg-bad";
-  return frame.kind === "added" ? "bg-accent" : "bg-text-2";
+function markStyle(frame: ReviewFrame): string {
+  if (frame.kind === "alert") return "h-2 w-1.5 bg-bad";
+  return frame.kind === "added" ? "top-0.5 size-1.5 bg-accent" : "h-2 w-px bg-text-2";
 }
 
 export function RecordingScrubber({ review, full, onAdd }: { review: Review; full: boolean; onAdd: (index: number, label: "good" | "failure") => void }) {
-  const { snapshotCache, fetchRecordedFrame, reconnecting, isPending } = useStore();
   const timeline = review.timeline;
   const last = timeline.length - 1;
   const [index, setIndex] = useState(last);
   const [shown, setShown] = useState<string>();
+  const { url, fetchRecordedFrame, reconnecting, adding } = useStore(
+    useShallow((s) => ({
+      url: s.snapshotCache[recordedFrameKey(review.id, index)],
+      fetchRecordedFrame: s.fetchRecordedFrame,
+      reconnecting: s.reconnecting,
+      adding: s.isPending("review.add", review.id),
+    })),
+  );
   const start = timeline[0][0];
   const span = Math.max(1, timeline[last][0] - start);
   const [ts, score] = timeline[index];
-  const url = snapshotCache[recordedFrameKey(review.id, index)];
   const added = review.frames.some((frame) => frame.kind === "added" && frame.ts === ts);
-  const adding = isPending("review.add", review.id);
   const describe = (at: number) => `${elapsed(timeline[at][0] - start)} in · ${(timeline[at][1] * 100).toFixed(0)}%`;
 
   useEffect(() => {
@@ -39,8 +45,8 @@ export function RecordingScrubber({ review, full, onAdd }: { review: Review; ful
   const step = (by: number) => setIndex((at) => Math.min(last, Math.max(0, at + by)));
 
   return (
-    <section className="space-y-2" aria-label="Whole print">
-      <div className="panel relative aspect-video overflow-hidden bg-ink-0">
+    <div className="space-y-3 px-4 py-4">
+      <div className="relative aspect-video overflow-hidden border border-line-0 bg-ink-1">
         {shown && <img src={shown} alt={`The print ${elapsed(ts - start)} in, scored ${(score * 100).toFixed(0)}%`} className="h-full w-full object-contain" />}
         {!url && (
           <span role="status" className="label absolute right-2 bottom-2">
@@ -59,8 +65,8 @@ export function RecordingScrubber({ review, full, onAdd }: { review: Review; ful
         marks={review.frames.map((frame) => (
           <span
             key={frame.id}
-            className={`absolute top-0 h-2 w-[3px] -translate-x-1/2 rounded-sm ${markColour(frame)}`}
-            style={{ left: `${((frame.ts - start) / span) * 100}%` }}
+            className={`absolute top-0 -translate-x-1/2 ${markStyle(frame)}`}
+            style={{ left: `${Math.min(100, Math.max(0, ((frame.ts - start) / span) * 100))}%` }}
           />
         ))}
       />
@@ -80,6 +86,6 @@ export function RecordingScrubber({ review, full, onAdd }: { review: Review; ful
           </button>
         </div>
       </div>
-    </section>
+    </div>
   );
 }

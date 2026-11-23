@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -396,7 +397,7 @@ const spotifyRequests = (page: import("@playwright/test").Page) =>
 
 const spotifyPanel = async (page: import("@playwright/test").Page, secretsSet: string[]) => {
   await dashboardWithPlugin(page, SPOTIFY_PANEL, ["net", "oauth", "background"], ["panel"], {}, "panel.html", secretsSet);
-  return page.frameLocator("iframe[title='Picture in picture panel']");
+  return page.getByRole("region", { name: "Plugins" });
 };
 
 test("the Spotify panel asks Spotify nothing until it is signed in, and stops when it is disconnected", async ({ page }) => {
@@ -455,7 +456,7 @@ test("the consent dialog names where a plugin signs in and where it gets its tok
         })),
       },
     });
-    win.__pg.getState().openSettings("plugins");
+    location.hash = "#/settings/plugins";
     win.__pgEvent({ event: "catalogue", plugins: [] });
   });
   await page.getByRole("button", { name: "Installed" }).click();
@@ -468,7 +469,7 @@ test("the consent dialog names where a plugin signs in and where it gets its tok
 
 test("a plugin zip over 12 MB is refused before it is sent", async ({ page }) => {
   await dashboardWithPlugin(page, PIP);
-  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
+  await page.evaluate(() => (location.hash = "#/settings/plugins"));
   await page.locator("input[type=file]").setInputFiles({ name: "big.zip", mimeType: "application/zip", buffer: Buffer.alloc(12 * 1024 * 1024 + 1) });
 
   await expect(page.getByText("big.zip is over 12 MB, the most a plugin can be")).toBeVisible();
@@ -521,7 +522,44 @@ test("an installed plugin draws its panel with a real camera feed", async ({ pag
   const panel = page.locator("section", { hasText: "Picture in picture" });
   await expect(panel.getByRole("button", { name: "Workshop" })).toBeVisible();
   await expect(panel.locator("video")).toBeAttached();
-  await expect(panel.getByText("verified")).toBeVisible();
+  await expect(panel.getByText("third party")).toHaveCount(0);
+});
+
+test("an item draws as a row with its picture, title and actions, and a press reaches plugin.js", async ({ page }) => {
+  const code = `
+plugin.action((name, arg, ctx) => { ctx.store.pressed = name; });
+plugin.render((ctx) => ({
+  type: "item",
+  image: "https://elsewhere.example/cover.png",
+  title: ctx.store.pressed ? "Pressed " + ctx.store.pressed : "Nothing pressed",
+  description: "From plugin.js",
+  actions: [{ type: "button", icon: "play", label: "Play", action: "play" }, { type: "button", label: "Stop", action: "stop", disabled: true }],
+}));`;
+  await dashboardWithPlugin(page, code);
+  const row = page.getByRole("region", { name: "Plugins" }).getByRole("listitem");
+  await expect(row.getByText("Nothing pressed")).toBeVisible();
+  await expect(row.getByText("From plugin.js")).toBeVisible();
+  await expect(row.locator("img")).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "Stop" })).toBeDisabled();
+
+  await row.getByRole("button", { name: "Play" }).click();
+  await expect(row.getByText("Pressed play")).toBeVisible();
+});
+
+test("a panel.html hands its row to the dashboard with pg.view and hears presses as action events", async ({ page }) => {
+  const html = `<p>drawn by the panel</p>
+<script>
+  const draw = (title) => pg.view({ type: "item", title, actions: [{ type: "button", label: "Ping", action: "ping", arg: 7 }] });
+  pg.on("action", (event) => draw("Heard " + event.name + " " + event.arg));
+  draw("From the panel");
+</script>`;
+  await dashboardWithPlugin(page, html, ["state:read"], ["panel"], {}, "panel.html");
+  const row = page.getByRole("region", { name: "Plugins" }).getByRole("listitem");
+  await expect(row.getByText("From the panel")).toBeVisible();
+  await expect(page.locator("iframe[title='Picture in picture panel']")).toBeHidden();
+
+  await row.getByRole("button", { name: "Ping" }).click();
+  await expect(row.getByText("Heard ping 7")).toBeVisible();
 });
 
 test("a camera node is refused when the feed permission is not granted", async ({ page }) => {
@@ -575,12 +613,13 @@ async function stubFloat(page: import("@playwright/test").Page) {
   });
 }
 
-test("a monitor surface draws on each monitor and nothing on the dashboard", async ({ page }) => {
+test("a monitor surface draws on the selected monitor and nothing on the dashboard", async ({ page }) => {
   await stubFloat(page);
   await dashboardWithPlugin(page, MONITOR_PIP, PLUGIN.granted, ["monitor"]);
 
   await expect(page.locator("section", { hasText: "Picture in picture" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Float Bench" }).click();
+  await expect(page.getByRole("button", { name: "Float Bench" })).toHaveCount(1);
+  await page.getByRole("region", { name: /selected monitor$/ }).getByRole("button", { name: "Float Bench" }).click();
 
   await expect.poll(() => page.evaluate(() => (window as any).__floated)).toBe(1);
 });
@@ -588,9 +627,11 @@ test("a monitor surface draws on each monitor and nothing on the dashboard", asy
 test("a camera drawn twice still floats after one of the two goes away", async ({ page }) => {
   await stubFloat(page);
   await dashboardWithPlugin(page, MONITOR_PIP, PLUGIN.granted, ["monitor"]);
-
-  await page.getByRole("button", { name: "Open Bench monitor details" }).click();
-  await page.getByRole("button", { name: "Close monitor details" }).click();
+  await page.evaluate(() => (location.hash = "#/monitors/m1"));
+  await page.getByRole("button", { name: "Layout", exact: true }).click();
+  await page.getByRole("button", { name: "Hide Bench" }).click();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Float Bench" })).toHaveCount(1);
   await page.getByRole("button", { name: "Float Bench" }).click();
 
   await expect.poll(() => page.evaluate(() => (window as any).__floated)).toBe(1);
@@ -678,7 +719,7 @@ test("the sounds plugin stays quiet until a monitor is switched on and a fresh a
   await dashboardWithPlugin(page, SOUNDS, ["state:read", "sound"], ["settings"]);
 
   await expect(page.locator("section", { hasText: "Picture in picture" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Open Bench monitor details" }).click();
+  await page.getByRole("tab", { name: "Configure" }).click();
   await page.getByLabel("Sound an alert").click();
   await expect(page.getByLabel("Alert sound")).toBeVisible();
   expect(await page.evaluate(() => (window as any).__tones)).toBe(0);
@@ -784,31 +825,19 @@ test("a plugin that writes its store on every render is not drawn again by the h
   expect(await storeWrites(page)).toHaveLength(2);
 });
 
-test("a plugin panel rearranges with the monitors", async ({ page }) => {
+test("a plugin panel can be hidden, shown again and pinned in layout mode", async ({ page }) => {
   await dashboardWithPlugin(page, PIP);
-  await page.evaluate(() => (window as any).__pg.setState({ customising: true }));
+  await page.getByRole("button", { name: "Layout" }).click();
 
-  const panel = page.locator("section", { hasText: "Picture in picture" });
-  await panel.getByRole("button", { name: "Hide Picture in picture" }).click();
-  await expect(page.locator("section", { hasText: "Picture in picture" })).toHaveCount(0);
+  const heading = page.getByRole("heading", { name: "Picture in picture" });
+  await page.getByRole("button", { name: "Hide Picture in picture" }).click();
+  await expect(heading).toHaveCount(0);
   await page.getByRole("button", { name: "Picture in picture · show" }).click();
+  await expect(heading).toBeVisible();
 
-  const grid = page.locator("main .grid").first();
-  const tiles = () => grid.locator("> *").evaluateAll((all) => all.map((tile) => tile.textContent?.slice(0, 8)));
-  const before = await tiles();
-  const handle = page.getByRole("button", { name: "Drag Picture in picture to reorder" });
-  const from = (await handle.boundingBox())!;
-  const target = (await grid.locator("> *").first().boundingBox())!;
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
-  await page.mouse.down();
-  for (let step = 1; step <= 12; step++) {
-    await page.mouse.move(from.x - ((from.x - target.x - 40) * step) / 12, from.y + from.height / 2, { steps: 2 });
-  }
-  await page.mouse.up();
-
-  await expect.poll(tiles).not.toEqual(before);
+  await page.getByRole("button", { name: "Pin Picture in picture" }).click();
   const saved = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.patch?.layout).pop());
-  await expect.poll(async () => (await saved())?.patch.layout.monitors.order).toContain("pip");
+  await expect.poll(async () => (await saved())?.patch.layout.monitors.pinned).toContain("pip");
 });
 
 
@@ -816,7 +845,7 @@ test("glass takes the text colour its tone can carry", async ({ page }) => {
   await dashboardWithPlugin(page, PIP);
   const textShown = () =>
     page.evaluate(() => {
-      const tile = document.querySelector("main .panel") as HTMLElement;
+      const tile = document.querySelector("main") as HTMLElement;
       const probe = document.createElement("div");
       probe.style.color = getComputedStyle(tile).getPropertyValue("--color-text-1");
       tile.appendChild(probe);
@@ -841,7 +870,7 @@ test("glass takes the text colour its tone can carry", async ({ page }) => {
 test("an event never wipes the per-monitor views the plugin drew", async ({ page }) => {
   await stubFloat(page);
   await dashboardWithPlugin(page, `${MONITOR_PIP}\nplugin.on('result', () => {});`, PLUGIN.granted, ["monitor"]);
-  const float = page.getByRole("button", { name: "Float Bench" });
+  const float = page.getByRole("button", { name: "Float Bench" }).first();
 
   await expect(float).toBeVisible();
   for (let round = 0; round < 5; round += 1) {
@@ -932,4 +961,86 @@ test("a plugin's own page styles, scripts and posts back to the hub, and reaches
   await page.goto(`${baseURL}/plugins/demo/page`);
   await page.evaluate(() => (document.getElementById("own") as HTMLFormElement).submit());
   await expect(page).toHaveTitle("signed in as user=me");
+});
+
+test("plugin assets, item images and sounds named after Object properties are ignored", async ({ page }) => {
+  await page.addInitScript(() => {
+    const win = window as any;
+    win.__played = [];
+    win.Audio = class {
+      constructor(public src: string) {}
+      play() {
+        win.__played.push(this.src);
+        return Promise.resolve();
+      }
+    };
+  });
+  const code = `
+plugin.render((ctx) => {
+  ctx.sound("toString");
+  return {
+    type: "item",
+    image: "toString",
+    title: "Safe item",
+    actions: [{ type: "image", asset: "constructor", label: "Bogus" }],
+  };
+});`;
+  await dashboardWithPlugin(page, code, ["state:read", "sound"], ["panel"]);
+  const row = page.getByRole("region", { name: "Plugins" }).getByRole("listitem");
+  await expect(row.getByText("Safe item")).toBeVisible();
+  await expect(row.locator("img")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__played)).toEqual([]);
+});
+
+test("a panel.html has no sendBeacon, no referrer and shows its failure if it stops", async ({ page }) => {
+  const html = `<script>
+    pg.on("ready", () => {
+      pg.notify("beacon:" + typeof navigator.sendBeacon + " ref:" + document.referrer);
+    });
+    pg.on("state", () => {
+      throw new Error("panel crashed");
+    });
+  </script>`;
+  await dashboardWithPlugin(page, html, ["state:read", "notify"], ["panel"], {}, "panel.html");
+  await expect(page.getByText("beacon:undefined ref:")).toBeVisible();
+  await page.evaluate(() => {
+    const engine = (window as any).__pg.getState().engine;
+    (window as any).__pgEvent({ event: "state", ...engine });
+  });
+  await expect(page.getByRole("region", { name: "Plugins" }).getByText("panel crashed")).toBeVisible();
+});
+
+test("the linter handles malformed OAuth URLs and Object property names without crashing", async ({ page }) => {
+  await page.goto("/");
+  const findings = await page.evaluate(async () => {
+    const { lint } = await import("/src/lint.ts" as string);
+    const manifest = {
+      id: "demo", name: "Demo", version: "1.0.0", description: "", author: "", homepage: "",
+      permissions: ["oauth"], reasons: {}, surfaces: ["panel"], platforms: [], assets: [], urls: [],
+      secrets: {}, provides: {}, consumes: [],
+      oauth: { label: "Thing", authorize_url: "https://256.256.256.256/a", token_url: "not-a-url", register_url: "", scopes: [] },
+      events: ["toString"], tick_s: 0,
+    };
+    return lint(manifest, { "plugin.js": 'const s = "{{secret.constructor}}"; plugin.render((ctx) => ({ type: "text", value: s }));' }, [], {});
+  });
+  expect(findings).toContainEqual({ kind: "undeclared", what: "{{secret.constructor}}" });
+});
+
+test("sandbox documents share the same global lockdown and matching CSP hashes, and app.py matches index.html", () => {
+  const hashOf = (html: string) => {
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)![1];
+    return `sha256-${createHash("sha256").update(script).digest("base64")}`;
+  };
+  const sandbox = readFileSync(new URL("../public/plugin-sandbox.html", import.meta.url), "utf8");
+  const panel = readFileSync(new URL("../public/plugin-panel.html", import.meta.url), "utf8");
+  const index = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const appPy = readFileSync(new URL("../../printguard/server/app.py", import.meta.url), "utf8");
+
+  const closedIn = (html: string) => JSON.parse(html.match(/const closed = (\[[^\]]+\]);/)![1]);
+  expect(closedIn(panel)).toEqual(closedIn(sandbox));
+  expect(sandbox).toContain("delete Navigator.prototype.sendBeacon;");
+  expect(panel).toContain("delete Navigator.prototype.sendBeacon;");
+  expect(sandbox).toContain(`'${hashOf(sandbox)}'`);
+  expect(panel).toContain(`'${hashOf(panel)}'`);
+  expect(appPy).toContain(`DASHBOARD_BOOT_SCRIPT_HASH = "${hashOf(index)}"`);
 });

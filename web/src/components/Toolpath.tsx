@@ -82,7 +82,7 @@ export function Toolpath({
         <canvas ref={canvasRef} role="img" className="h-full w-full touch-none" aria-label={`Toolpath of ${label}`} />
         {status !== "ready" && (
           <div className="absolute inset-0 grid place-items-center">
-            <span className={`mono text-[0.68rem] uppercase tracking-[0.2em] text-text-2 ${status === "loading" ? "boot-cursor" : ""}`}>
+            <span className={`mono text-xs uppercase tracking-[0.2em] text-text-2 ${status === "loading" ? "boot-cursor" : ""}`}>
               {UNDRAWN[status]}
             </span>
           </div>

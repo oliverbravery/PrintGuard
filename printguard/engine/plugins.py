@@ -20,6 +20,8 @@ import zipfile
 from typing import Any
 from urllib.parse import urlsplit
 
+from packaging.version import Version
+
 from . import oauth, urls
 from .adapters import HttpFn
 from .bounds import clamp
@@ -72,6 +74,7 @@ _PATH_PATTERN = re.compile(r"^[\w./-]*$")
 MAX_ASSET_NAME_CHARS = 40
 _ASSET_PATTERN = re.compile(rf"^[a-z0-9][a-z0-9._-]{{0,{MAX_ASSET_NAME_CHARS - 1}}}$")
 VERSION_PATTERN = re.compile(r"^[\w.+-]{1,32}$")
+MIN_PRINTGUARD_PATTERN = re.compile(r"^\d{1,4}\.\d{1,4}\.\d{1,4}$")
 MEDIA_PATTERN = re.compile(r"^[a-z0-9][\w-]*(?:/[\w-]+)*\.(?:png|jpe?g|webp|gif|svg)$")
 MAX_MEDIA = 8
 README_FILE = "README.md"
@@ -265,7 +268,7 @@ EVENTS: dict[str, list[str]] = {
     "message": ["from", "channel", "body"],
     "history": ["monitor_id", "now", "buckets", "alerts", "stats"],
     "socket": ["tag", "state", "text"],
-    "result": ["monitor_id", "camera_id", "score", "prediction", "margin", "ms", "ts"],
+    "result": ["monitor_id", "camera_id", "score", "prediction", "ms", "ts"],
     "alert": ["monitor_id", "score", "action", "ts"],
     "warning": ["monitor_id", "message", "recovered"],
     "device": ["printer_id", "status", "progress", "job", "remaining_s", "nozzle", "bed"],
@@ -685,6 +688,9 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     version = str(raw.get("version", "")).strip()
     if not VERSION_PATTERN.match(version):
         raise ValueError("plugin version is missing or unusable")
+    min_printguard = str(raw.get("min_printguard", "")).strip()
+    if min_printguard and not MIN_PRINTGUARD_PATTERN.match(min_printguard):
+        raise ValueError("min_printguard is a PrintGuard version, such as 3.0.0")
     permissions = [p for p in PERMISSIONS if p in raw.get("permissions", [])]
     reasons = {p: str(raw.get("reasons", {}).get(p, "")).strip()[:200] for p in permissions}
     unexplained = [p for p, why in reasons.items() if not why]
@@ -730,6 +736,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         "id": plugin_id,
         "name": str(raw.get("name", "")).strip()[:MAX_NAME_CHARS] or plugin_id,
         "version": version,
+        **({"min_printguard": min_printguard} if min_printguard else {}),
         "description": str(raw.get("description", "")).strip()[:400],
         "author": str(raw.get("author", "")).strip()[:80],
         "homepage": urls.link(raw.get("homepage")),
@@ -748,6 +755,19 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         "events": events,
         "tick_s": tick_s if tick_s >= MIN_TICK_S else 0.0,
     }
+
+
+def supports(min_printguard: str, version: str) -> bool:
+    """Whether the PrintGuard running is new enough for a plugin.
+
+    Args:
+        min_printguard: The oldest version the plugin runs on, or empty for any.
+        version: The version running.
+
+    Returns:
+        False only when the plugin names a newer version than the one running.
+    """
+    return not min_printguard or Version(version) >= Version(min_printguard)
 
 
 def restored_manifest(raw: Any) -> dict[str, Any]:

@@ -137,7 +137,7 @@ def build_mcp(
         """Classifies a supplied print image for defects - no registered camera needed.
 
         Pass a base64-encoded JPEG or PNG frame (one shared in the conversation or
-        downloaded) and get back {prediction, distances, margin, defect_score}: the
+        downloaded) and get back {prediction, defect_score}: the
         same per-frame verdict the scheduler produces for a camera PrintGuard pulls
         itself. Use it to judge a still the model never captured directly.
         """

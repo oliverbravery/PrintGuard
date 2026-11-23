@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { acceptedTags, extOf, formatBytes, inspectPrint, isText, toolpathOf, type Inspection, type Temperatures } from "../prints";
 import { useStore, type StagedPrint } from "../store";
 import { useConfirm } from "./ConfirmButton";
@@ -30,7 +31,8 @@ function TemperatureField({
     <label className="flex items-center gap-2">
       <span className="label w-12">{heater}</span>
       <input
-        className="field !w-20 text-right"
+        className="field text-right"
+        style={{ width: "5rem", flex: "none" }}
         type="number"
         inputMode="numeric"
         min={1}
@@ -41,7 +43,7 @@ function TemperatureField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
-      <span className="mono text-[0.7rem] text-text-2">°C</span>
+      <span className="mono text-xs text-text-2">°C</span>
     </label>
   );
 }
@@ -57,7 +59,7 @@ function StagedPrintForm({
   onToggleTag: (id: string) => void;
   onDone: () => void;
 }) {
-  const { engine, uploadPrint } = useStore();
+  const { engine, uploadPrint } = useStore(useShallow((s) => ({ engine: s.engine, uploadPrint: s.uploadPrint })));
   const { file } = staged;
   const ext = extOf(file.name);
   const [toolpath] = useState(() => toolpathOf(file));
@@ -134,18 +136,18 @@ function StagedPrintForm({
             ))}
           </div>
           {invalidHeaters.length > 0 && (
-            <p className="mono mt-1.5 text-[0.66rem] text-bad">
+            <p className="mono mt-1.5 text-xs text-bad">
               Upload needs {invalidHeaters.map((heater) => `${heater} between 1 and ${HEATER_MAX[heater]} °C`).join(" and ")}
             </p>
           )}
-          {ext === "bgcode" && <p className="mono mt-1.5 text-[0.66rem] text-text-2">binary gcode prints at the temperatures it was sliced with</p>}
+          {ext === "bgcode" && <p className="mono mt-1.5 text-xs text-text-2">binary gcode prints at the temperatures it was sliced with</p>}
         </div>
         <div>
           <span className="label mb-1 block">Tag for</span>
           <PrinterTags selected={printerIds} ext={ext} onToggle={onToggleTag} />
         </div>
         {error && (
-          <p role="alert" className="mono text-[0.7rem] text-bad">
+          <p role="alert" className="mono text-xs text-bad">
             {error}
           </p>
         )}
@@ -164,7 +166,7 @@ function StagedPrintForm({
 }
 
 export function UploadSheet() {
-  const { staged, unstage } = useStore();
+  const { staged, unstage } = useStore(useShallow((s) => ({ staged: s.staged, unstage: s.unstage })));
   const [tags, setTags] = useState<string[]>([]);
   const [current] = staged;
   const closing = useConfirm(() => staged.forEach((p) => unstage(p.id)));

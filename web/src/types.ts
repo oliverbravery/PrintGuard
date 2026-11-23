@@ -1,3 +1,5 @@
+import type { ModelId } from "./models";
+
 export interface Crop {
   x: number;
   y: number;
@@ -15,9 +17,8 @@ export interface CameraSource {
 }
 
 export interface InferenceResult {
-  prediction: string;
-  distances: Record<string, number>;
-  margin: number;
+  prediction: "success" | "failure";
+  defect_score: number;
 }
 
 export interface Camera {
@@ -67,6 +68,7 @@ export interface Printer {
   id: string;
   name: string;
   provider: string;
+  model: string;
   config: Record<string, string>;
   secrets_set?: string[];
   device_state?: DeviceState | null;
@@ -271,7 +273,6 @@ export interface LayoutSection {
 
 export interface Layout {
   monitors: LayoutSection;
-  cameras: LayoutSection;
 }
 
 export interface Permission {
@@ -333,6 +334,8 @@ export interface CatalogueEntry {
   path?: string;
   ref: string;
   version?: string;
+  min_printguard?: string;
+  supported?: boolean;
   permissions?: string[];
   surfaces?: string[];
   platforms?: string[];
@@ -355,6 +358,12 @@ export interface PluginNode {
   arg?: unknown;
   options?: { value: string; label: string }[];
   children?: PluginNode[];
+  title?: string;
+  description?: string;
+  image?: string;
+  icon?: string;
+  disabled?: boolean;
+  actions?: PluginNode[];
 }
 
 export interface PluginTone {
@@ -366,6 +375,7 @@ export interface PluginTone {
 
 export interface PluginEffect {
   image?: string;
+  tree?: unknown;
   action?: string;
   kind: string;
   cmd?: Record<string, unknown>;
@@ -418,6 +428,7 @@ export interface EngineState {
     themes: CustomTheme[];
     glass: Glass;
     layout?: Layout;
+    model: ModelId;
     inference_runtime: "auto" | "litert" | "onnx";
     catalogue_url: string;
     fault_grace_s: number;

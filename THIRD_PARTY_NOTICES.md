@@ -175,6 +175,15 @@ SOFTWARE.
 - Project: https://github.com/google-ai-edge/LiteRT
 - Licence: Apache-2.0, reproduced under Wasmtime below
 
+## Detection model weights
+
+The Light and Standard detection models in `models/` are fine-tuned for print failures from
+ImageNet-1k weights that Ross Wightman trained and published with
+[timm](https://github.com/huggingface/pytorch-image-models), under Apache-2.0, whose text is under
+Wasmtime below: [`convnext_atto.d2_in1k`](https://huggingface.co/timm/convnext_atto.d2_in1k) for
+Standard and [`mobilenetv4_conv_small.e3600_r256_in1k`](https://huggingface.co/timm/mobilenetv4_conv_small.e3600_r256_in1k)
+for Light.
+
 ## Wasmtime
 
 - Project: https://github.com/bytecodealliance/wasmtime
@@ -669,19 +678,18 @@ OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
 ```
 
-## Saira, Saira Condensed and Chivo Mono
+## Instrument Sans and IBM Plex Mono
 
-The dashboard's typefaces, shipped as the Latin and Latin Extended WOFF2 files from the
-[Fontsource](https://fontsource.org) 5.3.0 packages in `web/src/fonts/`, so the dashboard
-loads them from the hub.
+The dashboard's typefaces, bundled from the [Fontsource](https://fontsource.org) 5.3.0
+packages `@fontsource-variable/instrument-sans` and `@fontsource/ibm-plex-mono`, so the
+dashboard loads them from the hub.
 
-- Projects: https://github.com/Omnibus-Type/Saira and https://github.com/Omnibus-Type/Chivo
+- Projects: https://github.com/Instrument/instrument-sans and https://github.com/IBM/plex
 - Licence: OFL-1.1
 
 ```
-Saira: Copyright 2020 The Saira Project Authors (https://github.com/Omnibus-Type/Saira)
-Saira Condensed: Copyright 2016 The Saira Project Authors (omnibus.type@gmail.com), with reserved font name "Saira".
-Chivo Mono: Copyright 2018 The Chivo Project Authors (https://github.com/Omnibus-Type/Chivo)
+Instrument Sans: Copyright 2022 The Instrument Sans Project Authors (https://github.com/Instrument/instrument-sans)
+IBM Plex Mono: Copyright 2017 IBM Corp. All rights reserved.
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

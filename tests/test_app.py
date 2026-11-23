@@ -16,7 +16,14 @@ import httpx
 import pytest
 
 from printguard.server import app as app_module
-from printguard.server.app import ASSET_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, WebStaticFiles, create_app, host_trusted
+from printguard.server.app import (
+    ASSET_CACHE_CONTROL,
+    DASHBOARD_CSP,
+    REVALIDATE_CACHE_CONTROL,
+    WebStaticFiles,
+    create_app,
+    host_trusted,
+)
 from printguard.server import events as events_module
 from printguard.server.events import ConflatedEventQueue, parse_json
 
@@ -67,7 +74,10 @@ async def test_the_dashboard_and_its_files_are_framed_only_by_the_hub_and_the_or
         for path in ("/", "/assets/index-abc123.js", "/plugin-sandbox.html"):
             response = await client.get(path)
             assert response.headers.get("x-frame-options") == legacy_header, path
-            assert response.headers["content-security-policy"] == policy, path
+            assert response.headers["x-content-type-options"] == "nosniff", path
+            assert response.headers["referrer-policy"] == "no-referrer", path
+            expected = f"{DASHBOARD_CSP}; {policy}" if path == "/" else policy
+            assert response.headers["content-security-policy"] == expected, path
 
 
 async def test_the_hub_serves_no_interactive_api_pages_and_no_root_schema(monkeypatch) -> None:
@@ -441,6 +451,27 @@ async def test_hls_view_wakes_camera_before_proxying() -> None:
 
     assert response.content == b"#EXTM3U"
     platform.view_camera.assert_awaited_once_with("camera-one")
+
+
+async def test_hls_redirect_stays_relative_to_the_requested_path() -> None:
+    platform = SimpleNamespace(view_camera=AsyncMock(), plugin_runtime=None)
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=platform)
+    app.state.hls = httpx.AsyncClient(
+        base_url="http://mediamtx",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(302, headers={"location": "/camera-one/index.m3u8?cookieCheck=1"}, stream=AsyncContent(), request=request)
+        ),
+    )
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/hls/camera-one/index.m3u8")
+    finally:
+        await app.state.hls.aclose()
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "index.m3u8?cookieCheck=1"
 
 
 async def test_hls_answers_502_while_the_streaming_server_is_unreachable() -> None:
@@ -910,7 +941,7 @@ async def test_a_recording_sent_faster_than_it_plays_closes_the_publish_socket(m
 
     stalled = threading.Event()
     monkeypatch.setattr(publish, "MAX_QUEUED_BYTES", 4)
-    monkeypatch.setattr(app_module, "remux", lambda source, url: stalled.wait(2))
+    monkeypatch.setattr(app_module, "remux", lambda source, url: stalled.wait(1))
     app = create_app()
     app.state.engine = SimpleNamespace(platform=SimpleNamespace(plugin_runtime=None))
     try:
@@ -1328,7 +1359,7 @@ async def test_an_origin_entry_with_a_wildcard_is_ignored_and_frames_nothing(mon
         assert (await client.get("/api/health", headers={"host": "hub.wild.example"})).status_code == 403
         policy = (await client.get("/")).headers["content-security-policy"]
 
-    assert policy == "frame-ancestors 'self' https://ok.example.com"
+    assert policy == f"{DASHBOARD_CSP}; frame-ancestors 'self' https://ok.example.com"
     assert any("https://*.wild.example is ignored because a wildcard" in line for line in told)
 
 

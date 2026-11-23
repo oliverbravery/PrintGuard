@@ -1,0 +1,35 @@
+{
+  "name": "Standard",
+  "architecture": "ConvNeXt-Atto (convnext_atto.d2_in1k), distilled weight soup",
+  "source": "https://github.com/oliverbravery/Edge-FDM-Fault-Detection",
+  "run_id": "S1b_convnext_atto_kd_soup_d1d3",
+  "calibration": {
+    "temperature": 1.074974
+  },
+  "output": "probability",
+  "input": {
+    "layout": "NCHW",
+    "shape": [
+      1,
+      3,
+      224,
+      224
+    ],
+    "dtype": "float32"
+  },
+  "preprocessing": {
+    "resize_shortest_edge_px": 256,
+    "center_crop_px": 224,
+    "color": "rgb",
+    "normalise_mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "normalise_std": [
+      0.229,
+      0.224,
+      0.225
+    ]
+  }
+}

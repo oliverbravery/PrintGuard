@@ -192,7 +192,7 @@ def test_an_oddly_spelt_public_address_is_not_local(host: str) -> None:
     assert not urls.is_local_address(host)
 
 
-@pytest.mark.parametrize("host", ["localhost.", "127.0.0.1.", "127.1.", "printer.lan.", "octopi.local.", "router.home.arpa."])
+@pytest.mark.parametrize("host", ["localhost.", "LOCALHOST", "127.0.0.1.", "127.1.", "printer.lan.", "PRINTER.LAN.", "octopi.local.", "router.home.arpa."])
 def test_a_dot_ending_a_host_does_not_make_it_public(host: str) -> None:
     """A fully qualified name is the same place, and a sign-in at one installed without the local network permission."""
     assert urls.is_local_address(host)
@@ -218,7 +218,7 @@ def edges() -> list[str]:
     networks = [network for family in constants for network in (*family._private_networks, *family._private_networks_exceptions)]
     networks.append(ipaddress._IPv4Constants._public_network)
     networks.extend((*urls.EMBEDDING_IPV4, *urls.UNROUTED))
-    hosts = ["2130706433", "127.1", "0x7f.0.0.1", "134744072", "1.1.1.1.1", "localhost", "octopi.local", "example.com", "local"]
+    hosts = ["2130706433", "127.1", "0x7f.0.0.1", "134744072", "1.1.1.1.1", "localhost", "LOCALHOST", "octopi.local", "OCTOPI.LOCAL.", "example.com", "local"]
     for network in networks:
         first, last = int(network.network_address), int(network.broadcast_address)
         for number in {max(first - 1, 0), first, last, min(last + 1, 2**network.max_prefixlen - 1)}:

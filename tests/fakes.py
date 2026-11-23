@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import numpy as np
 import websockets
 
+from printguard.engine import vision
 from printguard.engine.platform import Frame, Notice, Redirects
 
 
@@ -141,6 +142,19 @@ NOTIFIER_REPLIES: dict[str, tuple[int, Any]] = {
 """What each alert service answers a delivery with, by what the address the tests reach it on holds."""
 
 
+def model_assets(prototypes: dict[str, np.ndarray] | None = None, grey: bool = True) -> vision.Assets:
+    """Assets for a 224 pixel model, scored against ``prototypes`` or reading its own probability."""
+    return vision.Assets(
+        name="Test",
+        size=224,
+        resize_shortest=256,
+        grey=grey,
+        mean=np.array([0.485, 0.456, 0.406], dtype=np.float32),
+        std=np.array([0.229, 0.224, 0.225], dtype=np.float32),
+        prototypes=prototypes,
+    )
+
+
 class FakePlatform:
     """In-memory platform with deterministic latency and HTTP."""
 
@@ -172,11 +186,13 @@ class FakePlatform:
         self.devices: list[dict[str, Any]] = []
         self.state: dict[str, Any] = {}
         self.inference_runtime = "auto"
+        self.model = "standard"
         self.files = FakeFileStore()
         self.notices: list[Notice] = []
 
     async def configure(self, settings: dict[str, Any]) -> None:
-        """Records the selected inference runtime."""
+        """Records the selected model and inference runtime."""
+        self.model = settings["model"]
         self.inference_runtime = settings["inference_runtime"]
 
     def take_notices(self) -> list[Notice]:
@@ -188,8 +204,7 @@ class FakePlatform:
         if self.inference_blocked:
             await asyncio.Event().wait()
         await asyncio.sleep(self.infer_s)
-        distances = {"success": 9.0, "failure": 1.0} if self.failing else {"success": 1.0, "failure": 9.0}
-        return {"prediction": "failure" if self.failing else "success", "distances": distances, "margin": 8.0}
+        return {"prediction": "failure", "defect_score": 1.0} if self.failing else {"prediction": "success", "defect_score": 0.0}
 
     async def discover_cameras(self) -> list[dict[str, Any]]:
         return list(self.devices)

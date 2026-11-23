@@ -1,16 +1,31 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type SyntheticEvent } from "react";
 import { registerFeed } from "../float";
 import { renderVideoFrame, useVideoStream } from "../image";
+import { useStore } from "../store";
 import type { Camera } from "../types";
+
+export function useCovered(): boolean {
+  return useStore((s) => s.dialog !== null || s.staged.length > 0);
+}
 
 export function Feed({
   camera,
   active = true,
+  compact = false,
+  className = "",
+  aspect,
+  uncropped = false,
+  onFrameSize,
   banner,
   children,
 }: {
   camera: Camera | undefined;
   active?: boolean;
+  compact?: boolean;
+  className?: string;
+  aspect?: number;
+  uncropped?: boolean;
+  onFrameSize?: (size: { w: number; h: number }) => void;
   banner?: ReactNode;
   children?: ReactNode;
 }) {
@@ -20,7 +35,7 @@ export function Feed({
   const brightness = camera?.brightness ?? 1;
   const contrast = camera?.contrast ?? 1;
   const sharpness = camera?.sharpness ?? 0;
-  const crop = camera?.crop ?? null;
+  const crop = uncropped ? null : (camera?.crop ?? null);
   const rotation = camera?.rotation ?? 0;
   const useCanvas = sharpness > 0 || crop !== null || brightness !== 1 || contrast !== 1 || rotation !== 0;
 
@@ -54,8 +69,16 @@ export function Feed({
     return () => cancelAnimationFrame(frame);
   }, [camera?.id, useCanvas, brightness, contrast, sharpness, crop, rotation]);
 
+  const reportSize = ({ currentTarget: video }: SyntheticEvent<HTMLVideoElement>) => {
+    if (video.videoWidth) onFrameSize?.({ w: video.videoWidth, h: video.videoHeight });
+  };
+
   return (
-    <div className="feed relative aspect-video bg-ink-0 overflow-hidden">
+    <div
+      data-camera={camera?.id}
+      className={`feed relative overflow-hidden bg-ink-1 ${aspect ? "" : "aspect-video"} ${compact ? "border border-line-0" : ""} ${className}`}
+      style={aspect ? { aspectRatio: aspect } : undefined}
+    >
       <video
         ref={videoRef}
         autoPlay
@@ -66,6 +89,8 @@ export function Feed({
         onPause={() => setPlaying(false)}
         onEmptied={() => setPlaying(false)}
         onError={() => setPlaying(false)}
+        onLoadedMetadata={reportSize}
+        onResize={reportSize}
         className={useCanvas ? "absolute inset-0 w-full h-full object-contain invisible" : "absolute inset-0 w-full h-full object-contain"}
       />
       {useCanvas && <canvas ref={canvasRef} className="absolute inset-0 m-auto" />}
@@ -74,14 +99,14 @@ export function Feed({
         <div className="relative grid justify-items-center">
           {banner}
           <div className={banner ? "absolute top-full mt-2 w-max" : ""}>
-            {idle && !tapToPlay && (
-              <span className="mono relative z-[2] text-[0.65rem] tracking-[0.2em] text-text-2 uppercase">
+            {idle && !tapToPlay && !compact && (
+              <span className="mono relative z-[2] text-xs tracking-[0.12em] text-text-2 uppercase">
                 {!camera ? "no camera bound" : !active ? "feed paused" : camera.standby || camera.online ? "starting stream" : "no signal"}
               </span>
             )}
             {tapToPlay && (
-              <button className="btn pointer-events-auto relative z-[3]" onClick={() => void videoRef.current?.play()}>
-                Tap to play
+              <button className={`${compact ? "btn-inline" : "btn"} pointer-events-auto relative z-[3]`} onClick={() => void videoRef.current?.play().catch(() => undefined)}>
+                {compact ? "Play" : "Tap to play"}
               </button>
             )}
           </div>

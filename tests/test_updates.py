@@ -125,6 +125,17 @@ async def test_no_asset_means_no_download() -> None:
     assert update["download"] is None
 
 
+async def test_non_web_release_links_are_refused() -> None:
+    malicious = _release("v2.3.0")
+    malicious["html_url"] = "javascript:alert(1)"
+    malicious["assets"] = [{"name": "PrintGuard-macos-arm64.dmg", "browser_download_url": "javascript:alert(2)"}]
+    engine, platform = _engine(version="2.1.0", releases=[malicious])
+    platform.update_asset = "PrintGuard-macos-arm64.dmg"
+    update = await _check(engine)
+    assert update["download"] is None
+    assert engine.releases[0]["url"] == "https://github.com/o/r/releases/tag/v2.3.0"
+
+
 async def test_version_and_default_setting_in_state() -> None:
     engine, _ = _engine(version="2.1.0")
     state = engine.state_event()

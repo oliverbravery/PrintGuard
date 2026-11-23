@@ -1,6 +1,6 @@
 [project]
 name = "printguard"
-version = "2.6.7"
+version = "3.0.0"
 description = "Real-time 3D print failure detection"
 
 license = "GPL-2.0-only"
@@ -65,11 +65,13 @@ dev = [
     "pyinstaller>=6.11",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-n auto"
 
 [[tool.uv.index]]
 name = "nvidia"

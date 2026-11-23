@@ -7,6 +7,33 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-11-23
+
+### Added
+
+- Two new detection models, **Standard** and **Light**, trained on over 9,000 real frames submitted by the community. Tested on 30 hubs none of the models had seen before, Standard catches 10 of 20 failed prints compared to 1 of 20 for the old dissertation model, with the same single false alarm out of 70 good prints. You can pick a model during first-run setup or switch any time under **Settings** -> **Detection**, which also charts them against Obico's open models. Full details on how the new models were trained and benchmarked are in [this blog post](https://oliverbravery.uk/blog/rebuilding-printguards-brain).
+- Plugins now get their own rows in the fleet list, and can render cards with an image, title and buttons in the dashboard's native style.
+- Plugins can declare a `min_printguard` version in their manifest so older hubs refuse to install ones they can't run (Spotify 1.1.0 now requires 3.0.0).
+
+### Changed
+
+- Full dashboard redesign. Your fleet sits in a side list like every other page, and selecting a monitor puts its live feed, risk score and printer controls front and centre beside it. Prints, Cameras, Printers and Settings each move onto their own full pages instead of cramped dialogs.
+- Standard is now the default model after updating. Because it's around 5x heavier on CPU than the old model, switch to **Light** (or **Legacy**) in Settings if your host's capacity readout drops below what your cameras need.
+- The inference runtime picker has moved from **Advanced** into **Settings** -> **Detection**.
+- Creality and Ultimaker integrations are no longer marked experimental.
+- Monitor settings and end-of-print review now live in **Configure** and **Review** tabs on each monitor. Reviewing a print is simpler too: just flag the frames where something went wrong instead of answering a separate pass/fail question for the whole print, and you can opt in or out during first-run setup.
+- Printer model is now set once on the printer itself instead of being asked on every review, and clicking **Ignore** on a review deletes its kept frames and recording to free up disk space.
+- The Docker image and desktop apps are roughly 45 MB larger to bundle the new models.
+- A print is kept and recorded for review from the moment its monitor starts watching, even when the linked printer can't be reached.
+
+### Removed
+
+- Classification results and `last_result` no longer include `distances` or `margin`, and `result` events no longer include `margin` (those were specific to Legacy's prototype classifier). Read `defect_score` instead.
+
+### Fixed
+
+- The dashboard and its camera feeds work behind a proxy that serves the hub under a path, such as Home Assistant Ingress.
+
 ## [2.6.7] - 2026-11-14
 
 ### Added

@@ -6,8 +6,7 @@
 
 </div>
 
-Which channels PrintGuard can alert you through, what it sends, and how to keep a flaky camera
-from filling your phone.
+Which alert channels PrintGuard supports, what actually gets sent, and how to stop a flaky Wi-Fi camera from blowing up your phone.
 
 - [Set up a channel](#set-up-a-channel)
 - [Channels](#channels)
@@ -16,93 +15,60 @@ from filling your phone.
 
 ## Set up a channel
 
-1. Open **Settings**, then the **Alerts** tab.
-2. Enable a channel and fill in its form. Each form links the service's own setup guide or API
-   reference.
-3. Press **Send test alert**, which uses what you typed and carries a blank picture where a real
-   alert carries a snapshot, then press **Save channels**. A channel with a starred field left
-   blank isn't saved, and the error names the field.
-4. A saved key, token, topic URL or webhook is never shown again. Its field is empty and reads
-   "Saved. Leave blank to keep it", and a test alert uses the saved one. Type in it to replace
-   the saved one, or press **Clear** and save to remove it. Switching a channel off and on again
-   keeps what you typed until you save. Changing a channel's address needs its saved secrets typed
-   again.
-5. Turn on **Push notifications** on each monitor that should use it.
+1. Go to **Settings** -> **Alerts**.
+2. Switch on a channel and fill in its fields. Every form links straight to that service's setup guide or API docs.
+3. Click **Send test alert** (which tests the values currently in the form and attaches a blank image where a real alert attaches a snapshot), then click **Save channels**. If a required field is blank, PrintGuard refuses to save and tells you which field is missing.
+4. Saved secrets (keys, tokens, ntfy topic URLs and Discord webhooks) are never shown back in the UI. Their inputs stay blank with "Saved. Leave blank to keep it", and test alerts use the saved value. Type a new value to replace it, or hit **Clear** and save to delete it. Toggling a channel off and back on keeps what you typed until you save. If you change a channel's server address, you'll need to re-enter its saved secrets for safety.
+5. Enable **Push notifications** on each monitor you want alerts from (under its **Configure** tab).
 
-Every enabled channel gets every notice, so there's no routing to set up. A monitor with
-**Push notifications** off still shows everything on the dashboard.
+Every enabled channel receives every alert, so there's no routing setup to fuss with. A monitor with **Push notifications** off still flags defects and warnings on the dashboard.
 
 ## Channels
 
-| Channel | You need | Notes |
+| Channel | What you need | Notes |
 |---|---|---|
-| [ntfy](https://ntfy.sh) | A topic URL, on ntfy.sh or your own server | No account needed. Use a hard-to-guess topic, or a protected one with an access token. Anyone with an open topic's URL can read it, so the URL is kept out of the dashboard, bug reports and the API like a password. Defect alerts and fault warnings are sent at urgent priority, and recoveries and a plugin's notices without it. Your own server takes snapshots once [attachments](https://docs.ntfy.sh/config/#attachments) are on, which needs `attachment-cache-dir` and `base-url` set |
-| [Pushover](https://pushover.net) | An application token from [pushover.net/apps/build](https://pushover.net/apps/build) and your user key | A one-off app purchase. Priority defaults to High, which bypasses the quiet hours set on the device. Recoveries and a plugin's notices go at Normal at most |
-| [Telegram](https://telegram.org) | A bot token from @BotFather and your chat ID | A topic ID, the last number in a link to the topic, sends alerts to that topic of a forum group. Recoveries and a plugin's notices are sent without a sound |
-| [Discord](https://discord.com) | A webhook URL, from Server Settings, Integrations, then Webhooks | Recoveries and a plugin's notices are sent with notifications suppressed. An alert never mentions anyone, so a monitor named `@everyone` pings nobody |
-| Desktop notification | Nothing to fill in | Desktop app only. A native notification on the computer running the app, with the window open or closed. macOS asks for permission the first time, and a send fails with an error while notifications are switched off for PrintGuard in the system settings. A recovery looks like any other notice |
+| [ntfy](https://ntfy.sh) | A topic URL on ntfy.sh or your own server | No account required. Pick a hard-to-guess topic name, or protect it with an access token. Anyone who knows an open topic URL can read it, so PrintGuard treats the URL like a password and hides it from the UI, bug reports and API. Defect alerts and fault warnings go at urgent priority; recoveries and plugin notices go at normal priority. Self-hosted ntfy servers need [attachments](https://docs.ntfy.sh/config/#attachments) enabled (`attachment-cache-dir` and `base-url`) to receive snapshots |
+| [Pushover](https://pushover.net) | An app token from [pushover.net/apps/build](https://pushover.net/apps/build) and your user key | One-off app purchase per platform. Defaults to High priority so alerts cut through device quiet hours; recoveries and plugin notices cap at Normal |
+| [Telegram](https://telegram.org) | A bot token from `@BotFather` and your chat ID | You can also set a topic ID (the last number in a link to the topic) to post into a specific topic in a forum group. Recoveries and plugin notices are sent silently |
+| [Discord](https://discord.com) | A webhook URL (Server Settings -> Integrations -> Webhooks) | Recoveries and plugin notices are sent silently. Mentions are disabled on all alerts, so naming a monitor `@everyone` won't ping your server |
+| Desktop notification | Nothing to configure | Desktop app only. Shows a native OS notification on the machine running the app, even when the window is closed. macOS prompts for notification permission the first time; if notifications are disabled for PrintGuard in system settings, sending fails with an error. Recoveries look the same as other notifications |
 
-Home Assistant gets the same defects and snapshots over MQTT, covered in
-[API & MCP](api.md#home-assistant). The **Progress reports** [plugin](plugins.md) sends a tally of
-a print through these same channels.
+Home Assistant receives the same defects and snapshots over MQTT (see [API & MCP](api.md#home-assistant)). If you want periodic print progress updates pushed through these same channels, check out the **Progress reports** [plugin](plugins.md).
 
 ## What gets sent
 
-| Notice | When | Carries |
+| Notice | Trigger | What's inside |
 |---|---|---|
-| Defect alert | A defect holds for a monitor's consecutive count | A snapshot, the score and whether the print was paused, cancelled or left running. A pause or cancel that failed is called out |
-| Fault warning | A camera drops or freezes, a watching monitor has no camera, or a printer's state can't be read while its monitor watches | Which one, and whether the monitor has stopped watching or can no longer pause the print |
-| Recovery | A faulted camera or printer has stayed healthy | Sent quietly where the channel has a way to, as the [channels](#channels) say |
-| Plugin notice | A [plugin](plugins.md) granted `alert:send` sends one | Its own title and text and no snapshot, sent quietly like a recovery |
+| Defect alert | A defect holds for the monitor's consecutive frame count | Snapshot, risk score and whether PrintGuard paused, cancelled or left the print running. If a pause or cancel failed, it says so clearly |
+| Fault warning | A camera disconnects or freezes, a watching monitor has no camera, or a printer stops responding while being watched | Which component failed and whether monitoring stopped or auto-pause is unavailable |
+| Recovery | A faulted camera or printer stays healthy again | Sent quietly on channels that support quiet notices (see [Channels](#channels)) |
+| Plugin notice | Sent by a [plugin](plugins.md) with `alert:send` permission | The plugin's title and message, no snapshot, sent quietly like a recovery |
 
-A monitor set to **Alert only** says so in the alert, so you know the print is still running. A
-pause or cancel is tried up to three times in 45 seconds before it's reported as failed. An
-Elegoo printer gets 135 seconds, since a Centauri Carbon 2 answers only once it has finished
-moving. A pause the printer refuses counts as done when the print is already paused or over, and
-a cancel when it's already over.
+If a monitor is set to **Alert only**, the notification makes that clear so you know the print is still running. When PrintGuard tries to pause or cancel a print, it retries up to three times over 45 seconds before reporting failure. Elegoo printers get up to 135 seconds, because a Centauri Carbon 2 waits until its current move finishes before replying. If the printer refuses a pause because the print is already paused or finished (or refuses a cancel because it's already finished), PrintGuard treats that as done.
 
-A monitor's [cooldown](monitoring.md#monitor-settings) holds back its whole response to the next
-defect, the pause or cancel included. Pushes with the same outcome are also at least 30 seconds
-apart for each monitor, whatever the cooldown, so a pause that worked is still pushed straight
-after one that failed.
+A monitor's [cooldown](monitoring.md#monitor-settings) holds back the whole defect response (including pause/cancel). On top of that, pushes with the exact same outcome are rate-limited to at least 30 seconds apart per monitor regardless of cooldown, though a successful pause will still push immediately after a failed one.
 
-A name or message longer than a service takes is cut with an ellipsis. Pushover takes a 250
-character title and a 1024 character message, Telegram 1024 characters with a picture and 4096 without, Discord 2000
-characters and ntfy a 250 character title and a 4096 byte message.
+Long names or messages are truncated with an ellipsis to fit each service's limits: Pushover allows 250 characters for titles and 1024 for messages; Telegram allows 1024 characters with a photo and 4096 without; Discord allows 2000 characters; ntfy allows 250 characters for titles and 4096 bytes for messages.
 
-Channels are sent to together and each gets 30 seconds to answer. One that doesn't is reported as
-failed and holds up neither the others nor the monitor.
+All enabled channels are notified in parallel with a 30-second timeout each, so one slow or broken service never delays the others or blocks the monitor.
 
-A channel that fails to deliver raises an error on the dashboard. It isn't retried. An alert
-counts as delivered only when the service answers in its own way, so a topic or webhook URL that
-answers with a sign-in page, as an auth proxy does, is reported as failed. A topic or webhook URL
-is saved with its `http://` or `https://` in front. An ntfy server
-that refuses the snapshot is sent the alert again as text, and the dashboard error says the
-picture was refused.
+If a channel fails to deliver, PrintGuard raises a dashboard error and does not retry it. Delivery only counts as successful when the service returns its expected response, so a webhook or ntfy URL sitting behind an auth proxy login page is properly flagged as failed. Always include `http://` or `https://` on topic and webhook URLs. If an ntfy server rejects the snapshot attachment, PrintGuard automatically retries the alert as plain text and logs an error on the dashboard explaining that the image was rejected.
 
-Give a channel the address it answers on, not one that redirects to it. A redirect is never
-followed, so the alert, or the test alert, fails and names the address to use.
+Give each channel its final endpoint URL rather than one that redirects. PrintGuard never follows redirects on notification requests; if a URL redirects, the alert (or test alert) fails and tells you the target URL to use instead.
 
 ## Faults and the grace period
 
-A print nobody is watching is worth hearing about, so faults notify you too, for every monitor
-with **Push notifications** on. These rules keep that from turning into a stream of messages.
+If a camera dies mid-print and nobody tells you, detection is pointless, so PrintGuard pushes fault warnings for every monitor with **Push notifications** turned on. A few simple guardrails stop that from turning into notification spam:
 
 | Rule | Value |
 |---|---|
-| A fault has to last this long before it's announced | **Fault grace period (seconds)** in the Alerts tab. Two minutes by default, from 30 seconds to 15 minutes |
-| A feed counts as frozen | After 30 seconds without a scored frame, and the grace period starts then |
-| A fault that is still there is announced again | Every 30 minutes for as long as it lasts |
-| A recovery is announced once the feed has held | One minute, doubling after each relapse up to 15 minutes, and back to one minute after 15 minutes healthy |
+| How long a fault must last before alerting | **Fault grace period (seconds)** under **Settings** -> **Alerts** (default 2 minutes, configurable from 30 seconds to 15 minutes) |
+| When a feed counts as frozen | After 30 seconds with no newly scored frame (the grace period starts from that point) |
+| Reminder while a fault stays broken | Every 30 minutes until it recovers |
+| How long a feed must stay healthy before sending a recovery | 1 minute initially, doubling after each relapse up to 15 minutes, then resetting to 1 minute after 15 clean minutes |
 
-Raise the grace period for a wireless camera that drops out and comes straight back. It can't be
-turned off. The dashboard's warning waits for it too, and until then only the camera's own
-status reads offline.
+If you have a Wi-Fi camera that occasionally blips offline and reconnects a few seconds later, bump up the grace period. It can't be switched off completely. Dashboard warnings follow the same grace period; until it expires, only the camera's own status badge shows offline.
 
-A camera that reconnects quickly enough to clear the grace period every time gets one warning
-for the whole unstable episode, once it has been missing for more than a tenth of the last ten
-minutes. It names the share it dropped out for, skips the grace period and has its own notice
-when the feed is steady again. That one is worth chasing at the camera.
+What if a camera keeps dropping out and reconnecting just fast enough to reset the grace period every time? PrintGuard catches that too: if a camera has been offline for more than 10% of the last 10 minutes, you get a single unstable-feed warning (skipping the grace period) telling you what percentage of the time it's been dropping, followed by a recovery notice once it settles down. If you see that one, it's usually worth checking the camera's Wi-Fi signal or power supply.
 
-[Troubleshooting](troubleshooting.md#detection-and-alerts) has the fixes for alerts that never
-arrive or arrive too often.
+If alerts aren't turning up or are firing too often, check [Troubleshooting](troubleshooting.md#detection-and-alerts).

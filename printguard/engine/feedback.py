@@ -35,7 +35,7 @@ class Refused(Exception):
 
 
 def printer_model(typed: Any) -> str:
-    """Cleans the printer model a reviewer typed into what the Worker accepts.
+    """Cleans the printer model typed on a printer into what the Worker accepts.
 
     Args:
         typed: The text as typed, or None.

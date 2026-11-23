@@ -20,3 +20,6 @@ updates:
       day: monday
       timezone: Europe/London
     open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: python
+        versions: [">=3.15"]

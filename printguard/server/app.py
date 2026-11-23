@@ -8,6 +8,7 @@ import ipaddress
 import json
 import logging
 import os
+import posixpath
 import re
 import secrets
 import time
@@ -16,7 +17,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from string import Template
 from typing import Annotated, Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 import idna
@@ -57,19 +58,41 @@ WEB_SCHEMES = ("http", "https")
 SOCKET_SCHEMES = {"ws": "http", "wss": "https"}
 
 
-def dashboard_frame_headers(framing_origins: set[str]) -> dict[str, str]:
-    """The headers that say who may frame the dashboard.
+DASHBOARD_BOOT_SCRIPT_HASH = "sha256-9v2BNecE/VYFGP00fgfDt/cH/LWbIF3Wq0HeRGMUo7w="
+DASHBOARD_CSP = (
+    f"default-src 'self'; script-src 'self' '{DASHBOARD_BOOT_SCRIPT_HASH}'; "
+    "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://raw.githubusercontent.com; "
+    "media-src 'self' blob: data:; font-src 'self' data:; "
+    "connect-src 'self' ws: wss: https://raw.githubusercontent.com; "
+    "worker-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'"
+)
+
+
+def dashboard_frame_headers(framing_origins: set[str], *, shell: bool = False) -> dict[str, str]:
+    """The security and framing headers served with the dashboard and its static files.
 
     Args:
         framing_origins: The origins listed in ``PRINTGUARD_ORIGINS``, normalised.
+        shell: Whether the response is the dashboard HTML shell, which also gets
+            the full dashboard Content-Security-Policy. Plugin sandbox documents
+            carry their own stricter meta policies and must not inherit the shell's
+            ``script-src``.
 
     Returns:
-        The hub's own pages and those origins may frame it. With none listed
-        the legacy header goes along with the policy. With some it is left off,
-        since it has no way to name more than the hub's own origin.
+        Headers limiting framing to the hub's own pages and any listed origins,
+        blocking MIME sniffing and referrer leakage, and attaching the dashboard
+        CSP on the shell document.
     """
-    policy = " ".join(["frame-ancestors 'self'", *sorted(framing_origins)])
-    return {"Content-Security-Policy": policy} if framing_origins else {"X-Frame-Options": "SAMEORIGIN", "Content-Security-Policy": policy}
+    frame_ancestors = " ".join(["frame-ancestors 'self'", *sorted(framing_origins)])
+    policy = f"{DASHBOARD_CSP}; {frame_ancestors}" if shell else frame_ancestors
+    headers = {
+        "Content-Security-Policy": policy,
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+    }
+    if not framing_origins:
+        headers["X-Frame-Options"] = "SAMEORIGIN"
+    return headers
 
 
 class WebStaticFiles(StaticFiles):
@@ -78,10 +101,11 @@ class WebStaticFiles(StaticFiles):
     def __init__(self, *args: Any, framing_origins: set[str] = frozenset(), **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._frame_headers = dashboard_frame_headers(framing_origins)
+        self._shell_headers = dashboard_frame_headers(framing_origins, shell=True)
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         response = await super().get_response(path, scope)
-        response.headers.update(self._frame_headers)
+        response.headers.update(self._shell_headers if path in ("", ".", "index.html") else self._frame_headers)
         response.headers["Cache-Control"] = ASSET_CACHE_CONTROL if path.startswith("assets/") else REVALIDATE_CACHE_CONTROL
         return response
 
@@ -147,6 +171,28 @@ def origin_allowed(connection: HTTPConnection, allowed: set[str], *, required: b
         return requested == normalised_origin(f"{scheme}://{host}")
     except ValueError:
         return False
+
+
+def hls_relative_location(requested: str, location: str) -> str:
+    """Rewrites a MediaMTX redirect as a path relative to the one the browser asked for.
+
+    MediaMTX answers with a redirect from its own root, which the hub serves
+    under ``/hls/``. A relative redirect lands in the right place whatever
+    prefix a reverse proxy (Home Assistant Ingress, for example) serves the hub
+    under, where a root-absolute one would leave it.
+
+    Args:
+        requested: The stream path the browser asked for, after ``/hls/``.
+        location: The root-absolute ``Location`` MediaMTX answered with.
+
+    Returns:
+        The same target, relative to the requested path.
+    """
+    target = urlsplit(location)
+    relative = posixpath.relpath(target.path, posixpath.dirname(f"/{requested}"))
+    if target.path.endswith("/") and not relative.endswith("/"):
+        relative += "/"
+    return urlunsplit(("", "", relative, target.query, target.fragment))
 
 
 def parse_command(text: str | None) -> dict[str, Any] | None:
@@ -665,7 +711,7 @@ def create_app() -> FastAPI:
             k: v for k, v in upstream.headers.items() if k.lower() not in hop_by_hop and not k.lower().startswith("access-control-")
         }
         if headers.get("location", "").startswith("/"):
-            headers["location"] = f"/hls{headers['location']}"
+            headers["location"] = hls_relative_location(path, headers["location"])
         return StreamingResponse(
             upstream.aiter_raw(), status_code=upstream.status_code, headers=headers,
             background=BackgroundTask(upstream.aclose),

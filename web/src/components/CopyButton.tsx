@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-export async function copyText(text: string, button: HTMLButtonElement): Promise<void> {
+async function copyText(text: string, button: HTMLButtonElement): Promise<void> {
   if (navigator.clipboard) return navigator.clipboard.writeText(text);
   const field = document.createElement("textarea");
   field.value = text;

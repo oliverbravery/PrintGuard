@@ -1,11 +1,25 @@
+import { type LucideIcon, Pause, Play, RefreshCw, SkipBack, SkipForward, Square } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { floatCamera, floatSupported } from "../float";
+import type { BUTTON_ICONS } from "../plugins";
 import { useStore } from "../store";
 import type { PluginNode as Node, PluginRecord } from "../types";
 import { Feed } from "./Feed";
 import { Toggle } from "./Toggle";
 
 const TONES: Record<string, string> = { ok: "chip-ok", warn: "chip-warn", bad: "chip-bad", accent: "chip-accent" };
+
+const ICONS: Record<(typeof BUTTON_ICONS)[number], LucideIcon> = {
+  play: Play,
+  pause: Pause,
+  stop: Square,
+  previous: SkipBack,
+  next: SkipForward,
+  refresh: RefreshCw,
+};
+
+type Act = (action: string, arg: unknown) => void;
 
 function Labelled({ label, children }: { label?: string; children: ReactNode }) {
   if (!label) return children;
@@ -17,11 +31,10 @@ function Labelled({ label, children }: { label?: string; children: ReactNode }) 
   );
 }
 
-function PluginInput({ node, pluginId }: { node: Node; pluginId: string }) {
-  const pluginAct = useStore((s) => s.pluginAct);
+function PluginInput({ node, act }: { node: Node; act: Act }) {
   const [draft, setDraft] = useState<string | null>(null);
   const commit = () => {
-    if (draft !== null && node.action) pluginAct(pluginId, node.action, node.kind === "number" ? Number(draft) : draft);
+    if (draft !== null && node.action) act(node.action, node.kind === "number" ? Number(draft) : draft);
     setDraft(null);
   };
 
@@ -40,42 +53,50 @@ function PluginInput({ node, pluginId }: { node: Node; pluginId: string }) {
   );
 }
 
-export function PluginNodeView({ plugin, node }: { plugin: PluginRecord; node: Node }) {
-  return <NodeView node={node} pluginId={plugin.id} mayViewCameras={plugin.granted.includes("camera:view")} />;
+export function PluginNodeView({ plugin, node, panel = false }: { plugin: PluginRecord; node: Node; panel?: boolean }) {
+  const pluginAct = useStore((s) => s.pluginAct);
+  const act = (action: string, arg: unknown) => pluginAct(plugin.id, action, arg, panel);
+  return <NodeView node={node} pluginId={plugin.id} mayViewCameras={plugin.granted.includes("camera:view")} act={act} />;
 }
 
 export function usePluginSurface(surface: "monitor" | "settings", monitorId: string): { plugin: PluginRecord; node: Node }[] {
-  const { engine, pluginViews } = useStore();
-  return (engine?.plugins ?? [])
+  const { plugins, pluginViews } = useStore(useShallow((s) => ({ plugins: s.engine?.plugins, pluginViews: s.pluginViews })));
+  return (plugins ?? [])
     .filter((plugin) => plugin.enabled && plugin.manifest.surfaces.includes(surface))
     .map((plugin) => ({ plugin, node: pluginViews[plugin.id]?.[`${surface}:${monitorId}`] }))
     .filter((drawn): drawn is { plugin: PluginRecord; node: Node } => drawn.node != null);
 }
 
-function NodeView({ node, pluginId, mayViewCameras }: { node: Node; pluginId: string; mayViewCameras: boolean }) {
-  const { engine, pluginAct, pluginAssets, toast } = useStore();
+function NodeView({ node, pluginId, mayViewCameras, act }: { node: Node; pluginId: string; mayViewCameras: boolean; act: Act }) {
+  const { cameras, assets, toast } = useStore(
+    useShallow((s) => ({
+      cameras: node.type === "camera" ? s.engine?.cameras : undefined,
+      assets: node.type === "image" ? s.pluginAssets[pluginId] : undefined,
+      toast: s.toast,
+    })),
+  );
 
   if (node.type === "row" || node.type === "col") {
     return (
       <div className={node.type === "row" ? "flex flex-wrap items-center gap-2" : "flex flex-col gap-2"}>
         {(node.children ?? []).map((child, index) => (
-          <NodeView key={index} node={child} pluginId={pluginId} mayViewCameras={mayViewCameras} />
+          <NodeView key={index} node={child} pluginId={pluginId} mayViewCameras={mayViewCameras} act={act} />
         ))}
       </div>
     );
   }
 
   if (node.type === "text") {
-    return <span className={node.muted ? "text-[0.7rem] text-text-2" : "text-xs text-text-1"}>{node.value}</span>;
+    return <span className={node.muted ? "text-xs text-text-2" : "text-xs text-text-1"}>{node.value}</span>;
   }
 
   if (node.type === "chip") {
-    return <span className={`chip chip-message ${TONES[node.tone ?? ""] ?? ""}`}>{node.value}</span>;
+    return <span className={`chip chip-message ${node.tone && Object.hasOwn(TONES, node.tone) ? TONES[node.tone] : ""}`}>{node.value}</span>;
   }
 
   if (node.type === "camera") {
-    if (!mayViewCameras) return <span className="text-[0.7rem] text-text-2">Camera feeds not permitted</span>;
-    const camera = engine?.cameras.find((c) => c.id === node.camera_id);
+    if (!mayViewCameras) return <span className="text-xs text-text-2">Camera feeds not permitted</span>;
+    const camera = cameras?.find((c) => c.id === node.camera_id);
     return (
       <div className="min-w-[12rem] flex-1 border border-line-0">
         <Feed camera={camera} />
@@ -84,8 +105,8 @@ function NodeView({ node, pluginId, mayViewCameras }: { node: Node; pluginId: st
   }
 
   if (node.type === "image") {
-    const url = pluginAssets[pluginId]?.[node.asset ?? ""];
-    return url ? <img src={url} alt={node.label ?? ""} className="max-h-40 max-w-full rounded border border-line-0" /> : null;
+    const url = node.asset && assets && Object.hasOwn(assets, node.asset) ? assets[node.asset] : undefined;
+    return url ? <img src={url} alt={node.label ?? ""} className="max-h-40 max-w-full border border-line-0" /> : null;
   }
 
   if (node.type === "float") {
@@ -106,17 +127,24 @@ function NodeView({ node, pluginId, mayViewCameras }: { node: Node; pluginId: st
       <Toggle
         label={node.label ?? "Toggle"}
         on={node.on === true}
-        onChange={(on) => node.action && pluginAct(pluginId, node.action, on)}
+        onChange={(on) => node.action && act(node.action, on)}
       />
     );
   }
 
-  if (node.type === "input") return <PluginInput node={node} pluginId={pluginId} />;
+  if (node.type === "input") return <PluginInput node={node} act={act} />;
 
   if (node.type === "button") {
+    const Icon = node.icon && Object.hasOwn(ICONS, node.icon) ? ICONS[node.icon as keyof typeof ICONS] : null;
     return (
-      <button className="btn" onClick={() => node.action && pluginAct(pluginId, node.action, node.arg)}>
-        {node.label}
+      <button
+        className={Icon ? "btn grid w-9 place-items-center px-0" : "btn"}
+        aria-label={Icon ? node.label : undefined}
+        title={Icon ? node.label : undefined}
+        disabled={node.disabled}
+        onClick={() => node.action && act(node.action, node.arg)}
+      >
+        {Icon ? <Icon size={16} aria-hidden /> : node.label}
       </button>
     );
   }
@@ -126,7 +154,7 @@ function NodeView({ node, pluginId, mayViewCameras }: { node: Node; pluginId: st
       <select
         className="field"
         value={String(node.value ?? "")}
-        onChange={(event) => node.action && pluginAct(pluginId, node.action, event.target.value)}
+        onChange={(event) => node.action && act(node.action, event.target.value)}
       >
         {(node.options ?? []).map((option) => (
           <option key={option.value} value={option.value}>

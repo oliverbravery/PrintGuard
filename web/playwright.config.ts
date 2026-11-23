@@ -20,8 +20,8 @@ export default defineConfig<LaunchOptions>({
   reporter: "list",
   projects: [
     { name: "screenshots", testDir: "screenshots" },
-    { name: "sandbox", testDir: "tests", use: { ...devices["Desktop Chrome"] } },
-    { name: "sandbox-webkit", testDir: "tests", use: { ...devices["Desktop Safari"] } },
+    { name: "sandbox", testDir: "tests", fullyParallel: true, use: { ...devices["Desktop Chrome"] } },
+    { name: "sandbox-webkit", testDir: "tests", fullyParallel: true, use: { ...devices["Desktop Safari"] } },
     { name: "launch", ...launch, use: { ...devices["Desktop Chrome"], channel: "chrome", ...launch.use } },
     { name: "launch-webkit", ...launch, use: { ...devices["Desktop Safari"], ...launch.use } },
   ],

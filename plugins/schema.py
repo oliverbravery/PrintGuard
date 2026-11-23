@@ -23,8 +23,8 @@ SCHEMA_FILE = HERE / "plugin.schema.json"
 SCHEMA_URL = "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/plugin.schema.json"
 
 SURFACE_HELP = {
-    "panel": "A panel of its own on the dashboard.",
-    "monitor": "Drawn on every monitor tile, once per monitor.",
+    "panel": "A row of its own under the monitors on the dashboard.",
+    "monitor": "Drawn beside the selected monitor's feed and on its row in the fleet, once per monitor.",
     "settings": "Drawn in every monitor's settings, once per monitor.",
 }
 
@@ -82,11 +82,16 @@ def schema() -> dict:
                 "pattern": plugins.ID_PATTERN.pattern,
                 "description": "Identifies the plugin everywhere, 3 to 40 lowercase letters, digits or hyphens.",
             },
-            "name": {"type": "string", "maxLength": plugins.MAX_NAME_CHARS, "description": "Shown on the panel and in Settings. Defaults to the id."},
+            "name": {"type": "string", "maxLength": plugins.MAX_NAME_CHARS, "description": "Shown on its row on the dashboard and in Settings. Defaults to the id."},
             "version": {
                 "type": "string",
                 "pattern": plugins.VERSION_PATTERN.pattern,
                 "description": "Your own version, shown beside the name.",
+            },
+            "min_printguard": {
+                "type": "string",
+                "pattern": plugins.MIN_PRINTGUARD_PATTERN.pattern,
+                "description": "The oldest PrintGuard version it runs on, such as 3.0.0. An older hub refuses to install it.",
             },
             "description": {"type": "string", "maxLength": 400, "description": "One line about what it does."},
             "author": {"type": "string", "maxLength": 80},

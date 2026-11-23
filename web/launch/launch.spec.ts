@@ -23,13 +23,13 @@ const test = APP_WINDOW
     })
   : launch;
 
-function tile(page: Page, monitor: string) {
-  return page.locator("article").filter({ has: page.getByRole("heading", { name: monitor, exact: true }) });
+function row(page: Page, monitor: string) {
+  return page.locator("main li").filter({ has: page.getByRole("link", { name: monitor, exact: true }) });
 }
 
 async function risk(page: Page, monitor: string) {
-  const label = await tile(page, monitor).getByRole("img", { name: /^risk / }).getAttribute("aria-label");
-  return Number(label!.match(/\d+/)![0]);
+  const text = await row(page, monitor).textContent();
+  return Number(text!.match(/risk\s*(\d+)%/)![1]);
 }
 
 test.describe.configure({ mode: "serial" });
@@ -52,18 +52,19 @@ test("a failing print is caught end to end", async ({ page, baseURL, cameraUrl }
   await page.goto(baseURL!);
   await page.getByRole("dialog", { name: "How PrintGuard works" }).getByRole("button", { name: "Skip" }).click();
 
-  await page.getByRole("button", { name: "Cameras", exact: true }).click();
-  const registry = page.getByRole("dialog", { name: "Camera registry" });
+  await page.getByRole("link", { name: "Cameras", exact: true }).click();
   for (const feed of FEEDS) {
-    await registry.getByPlaceholder("Name").fill(feed.camera);
-    await registry.getByPlaceholder(/stream URL/).fill(`${cameraUrl}/${feed.path}`);
-    await registry.getByRole("button", { name: "Register stream" }).click();
-    await expect(registry.getByText(feed.camera, { exact: true })).toBeVisible({ timeout: 60_000 });
+    await page.getByRole("button", { name: "Add camera" }).click();
+    const form = page.getByRole("dialog", { name: "Register a camera" });
+    await form.getByPlaceholder("Name").fill(feed.camera);
+    await form.getByPlaceholder(/stream URL/).fill(`${cameraUrl}/${feed.path}`);
+    await form.getByRole("button", { name: "Register stream" }).click();
+    await expect(page.getByRole("heading", { name: feed.camera, exact: true })).toBeVisible({ timeout: 60_000 });
   }
-  await registry.getByRole("button", { name: "Close dialog" }).click();
 
-  for (const feed of FEEDS) {
-    await page.getByRole("button", { name: "+ Monitor" }).click();
+  await page.getByRole("link", { name: "Monitors", exact: true }).click();
+  for (const [index, feed] of FEEDS.entries()) {
+    await page.getByRole("button", { name: index === 0 ? "Open Add a monitor" : "Add monitor" }).click();
     const form = page.getByRole("dialog", { name: "Add monitor" });
     await form.getByPlaceholder("Monitor name").fill(feed.monitor);
     const camera = await form.locator("option", { hasText: feed.camera }).getAttribute("value");
@@ -72,18 +73,20 @@ test("a failing print is caught end to end", async ({ page, baseURL, cameraUrl }
     await expect(form).toBeHidden();
   }
 
-  await page.getByRole("button", { name: "Open Failing print monitor details" }).click();
+  await page.getByRole("link", { name: "Failing print", exact: true }).click();
+  await page.getByRole("tab", { name: "Tune" }).click();
   await page.getByRole("slider", { name: /Alert threshold/ }).press("Home");
-  await page.getByRole("button", { name: "Close monitor details" }).click();
 
   for (const feed of FEEDS) {
-    await expect(tile(page, feed.monitor).getByText(/starting stream|no signal/)).toBeHidden({ timeout: 90_000 });
-    await expect(tile(page, feed.monitor).getByText(/^(?!0\.0\/)\d+\.\d\/\d+\.\d$/)).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("link", { name: feed.monitor, exact: true }).click();
+    const selected = page.getByRole("region", { name: `${feed.monitor}, selected monitor` });
+    await expect(selected.getByText(/(?<![\d.])(?!0\.0\/)\d+\.\d\/\d+\.\d fps/)).toBeVisible({ timeout: 90_000 });
   }
-  await expect(tile(page, "Failing print").getByText("DEFECT DETECTED")).toBeVisible({ timeout: 90_000 });
+  await expect(row(page, "Failing print").getByText("defect", { exact: true })).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByText("DEFECT DETECTED")).toBeVisible();
   await expect.poll(async () => (await risk(page, "Failing print")) - (await risk(page, "Healthy print"))).toBeGreaterThan(0);
   await page.waitForTimeout(HEALTHY_WATCH_MS);
-  await expect(tile(page, "Healthy print").getByText("DEFECT DETECTED")).toBeHidden();
+  await expect(row(page, "Healthy print").getByText("defect", { exact: true })).toBeHidden();
   await page.screenshot({ path: test.info().outputPath("dashboard.png") });
   expect(crashes).toEqual([]);
 });

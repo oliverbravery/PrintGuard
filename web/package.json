@@ -5,8 +5,6 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "site": "vite site",
-    "site:build": "tsc -b && vite build site",
     "typecheck": "tsc --noEmit",
     "screenshots": "playwright test --project=screenshots",
     "test:sandbox": "playwright test --project=sandbox --project=sandbox-webkit",
@@ -16,6 +14,8 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@fontsource-variable/instrument-sans": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
     "@tailwindcss/vite": "^4.3.0",
     "acorn": "^8.18.0",
     "acorn-walk": "^8.3.5",
@@ -29,11 +29,13 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-image-crop": "^11.1.2",
+    "react-router": "^8.5.2",
     "tailwindcss": "^4.3.0",
     "three": "^0.159.0",
     "zustand": "^5.0.13"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.61.1",
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.0",

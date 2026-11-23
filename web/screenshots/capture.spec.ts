@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { test, type Browser, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import { deflateSync } from "node:zlib";
+import { SHOT_SIZES } from "../src/guideShots";
 import type { Camera, DeviceState, EngineState, Monitor, PrintFile, Printer, ScorePoint } from "../src/types";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -23,7 +24,7 @@ const camera = (id: string, name: string, source: Camera["source"], inferring = 
 
 const idle: DeviceState = { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: { actual: 24.3, target: 0 }, bed: { actual: 23.1, target: 0 } };
 const printer = (id: string, name: string, provider: string, status: string, progress: number, job: string, remaining_s: number, nozzle: number, bed: number): Printer => ({
-  id, name, provider, config: {}, online: true,
+  id, name, provider, model: "", config: {}, online: true,
   device_state: { status, progress, job, remaining_s, nozzle: { actual: nozzle - 0.4, target: nozzle }, bed: { actual: bed + 0.2, target: bed } },
 });
 
@@ -79,7 +80,7 @@ function engine(): EngineState {
       monitor("m2", "Ender 3 V3", "c2", "p2", true),
       monitor("m3", "Bambu X1C", "c3", ""),
     ],
-    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], glass: { opacity: 0, tone: 0 }, inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT, feedback: "ask", recording_days: 7 },
+    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], glass: { opacity: 0, tone: 0 }, model: "standard", inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT, feedback: "ask", recording_days: 7 },
     tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: INTEGRATIONS, notifiers: [],
     plugins: [], plugin_permissions: PERMISSIONS, plugin_events: {}, plugin_platforms: PLATFORMS,
     plugin_event_permissions: { state: "state:read", frame: "camera:frames", history: "history:read" },
@@ -188,7 +189,7 @@ const INSTALLED = {
 }
 
 interface Crop extends Omit<Scene, "name" | "theme"> {
-  id: string;
+  id: keyof typeof SHOT_SIZES;
   target: (page: Page) => Locator;
   pad?: number;
   tallest?: number;
@@ -200,13 +201,10 @@ interface Scene {
   width: number;
   height: number;
   theme: "dark" | "light";
-  detailId?: string;
-  printId?: string;
+  route?: string;
   customising?: boolean;
-  settingsTab?: string;
   dialog?: string;
   history?: Record<string, ScorePoint[]>;
-  hideFeeds?: boolean;
   catalogue?: unknown[];
   prepare?: (page: Page) => Promise<void>;
   tuner?: boolean;
@@ -244,7 +242,6 @@ async function openReview(page: Page): Promise<void> {
   await page.evaluate(
     ({ review, frames, timeline, pictures }) => {
       (window as unknown as { __pg: { setState: (s: unknown) => void } }).__pg.setState({
-        reviewId: review.id,
         reviewData: { [review.id]: { ...review, frames, timeline } },
         snapshotCache: {
           ...Object.fromEntries(frames.map((frame) => [frame.id, frame.score > 0.5 ? pictures.defect : pictures.healthy])),
@@ -254,8 +251,8 @@ async function openReview(page: Page): Promise<void> {
     },
     { review: REVIEW, frames: REVIEW_FRAMES, timeline: REVIEW_TIMELINE, pictures: FRAMES },
   );
-  await page.getByRole("button", { name: "No, something went wrong" }).click();
-  await page.getByRole("button", { name: /^Frame \d+ of \d+ at .* marked Good/ }).last().click();
+  await page.getByRole("button", { name: /^Something went wrong in/ }).last().click();
+  await page.getByRole("button", { name: /^Something went wrong in/ }).nth(-2).click();
 }
 
 const HISTORY_SNAPS = [0.86, 0.91, 0.78].map((score, index) => ({ id: `h${index}`, ts: NOW / 1000 - 120 - index * 1500, score, action: index === 2 ? "none" : "pause" }));
@@ -277,7 +274,6 @@ async function openHistory(page: Page): Promise<void> {
   await page.evaluate(
     ({ history, picture }) => {
       (window as unknown as { __pg: { setState: (s: unknown) => void } }).__pg.setState({
-        statsMonitorId: "m2",
         historyData: { m2: history },
         snapshotCache: Object.fromEntries(history.snaps.map((snap) => [snap.id, picture])),
       });
@@ -287,46 +283,41 @@ async function openHistory(page: Page): Promise<void> {
   await page.getByRole("button", { name: /^Snapshot at/ }).first().waitFor();
 }
 
-async function openCameraEditor(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Edit", exact: true }).first().click();
-  await page.getByRole("slider", { name: "Detection rate" }).scrollIntoViewIfNeeded();
-}
-
 const SCENES: Scene[] = [
-  { name: "review", width: 1360, height: 860, theme: "dark", mutate: (e) => void (e.reviews = [REVIEW]), prepare: openReview },
-  { name: "history", width: 1360, height: 860, theme: "dark", mutate: (e) => void (e.reviews = PRINTS_KEPT), prepare: openHistory },
-  { name: "camera-editor", width: 1360, height: 680, theme: "dark", dialog: "cameras", prepare: openCameraEditor },
-  { name: "settings-storage", width: 1360, height: 860, theme: "dark", settingsTab: "storage", mutate: (e) => void (e.reviews = PRINTS_KEPT) },
-  { name: "dashboard", width: 1360, height: 620, theme: "dark" },
-  { name: "dashboard-light", width: 1360, height: 620, theme: "light" },
-  { name: "printer-detail", width: 1360, height: 860, theme: "dark", detailId: "m1" },
-  { name: "prints", width: 1360, height: 860, theme: "dark", dialog: "prints", mutate: idlePrinters },
-  { name: "print-viewer", width: 1360, height: 860, theme: "dark", printId: "f1", mutate: idlePrinters },
+  { name: "review", width: 1360, height: 860, theme: "dark", route: "/monitors/m2/review/r1", mutate: (e) => void (e.reviews = [REVIEW]), prepare: openReview },
+  { name: "history", width: 1360, height: 860, theme: "dark", route: "/monitors/m2/history", mutate: (e) => void (e.reviews = PRINTS_KEPT), prepare: openHistory },
+  { name: "camera-editor", width: 1360, height: 760, theme: "dark", route: "/cameras/c1" },
+  { name: "settings-storage", width: 1360, height: 860, theme: "dark", route: "/settings/storage", mutate: (e) => void (e.reviews = PRINTS_KEPT) },
+  { name: "settings-detection", width: 1360, height: 1240, theme: "dark", route: "/settings/detection" },
+
+  { name: "dashboard", width: 1360, height: 900, theme: "dark", route: "/monitors/m2" },
+  { name: "dashboard-light", width: 1360, height: 900, theme: "light", route: "/monitors/m2" },
+  { name: "printer-detail", width: 1360, height: 880, theme: "dark", route: "/monitors/m1" },
+  { name: "prints", width: 390, height: 844, theme: "dark", route: "/prints", mutate: idlePrinters },
+  { name: "print-viewer", width: 1360, height: 860, theme: "dark", route: "/prints/f1", mutate: idlePrinters },
   {
-    name: "customise", width: 1360, height: 860, theme: "dark", customising: true,
+    name: "customise", width: 1360, height: 900, theme: "dark", customising: true,
     mutate: (e) => {
       e.settings.layout = {
         monitors: { order: [], pinned: ["m1"], hidden: ["m3"] },
-        cameras: { order: [], pinned: [], hidden: ["c3"] },
       };
     },
   },
   {
-    name: "plugins", width: 1360, height: 860, theme: "dark", settingsTab: "plugins", catalogue: CATALOGUE,
+    name: "plugins", width: 1360, height: 860, theme: "dark", route: "/settings/plugins", catalogue: CATALOGUE,
     mutate: (e) => {
       e.plugins = [INSTALLED as never];
     },
   },
   {
-    name: "plugin-page", width: 1360, height: 900, theme: "dark", settingsTab: "plugins", catalogue: CATALOGUE,
+    name: "plugin-page", width: 1360, height: 900, theme: "dark", route: "/settings/plugins/spotify", catalogue: CATALOGUE,
     prepare: async (page) => {
-      await page.getByRole("button", { name: "Spotify", exact: true }).click();
       await page.waitForTimeout(700);
       await page.waitForFunction(() => Array.from(document.images).every((i) => i.complete));
     },
   },
-  { name: "plugins-live", width: 1360, height: 720, theme: "dark", plugins: ["spotify", "picture-in-picture"], mutate: live },
-  { name: "glass", width: 1360, height: 720, theme: "dark", plugins: ["spotify", "picture-in-picture"], tuner: true, mutate: live },
+  { name: "plugins-live", width: 1360, height: 900, theme: "dark", plugins: ["spotify", "picture-in-picture"], mutate: live },
+  { name: "glass", width: 1360, height: 900, theme: "dark", plugins: ["spotify", "picture-in-picture"], tuner: true, mutate: live },
 ];
 
 const surfaces = (e: EngineState) => {
@@ -395,15 +386,16 @@ const DESK = { width: 1000, height: 820 } as const;
 
 const CROPS: Crop[] = [
   {
-    id: "alert", ...DESK, pad: 0,
+    id: "alert", ...DESK, width: 1360, height: 900, pad: 0,
     mutate: (e) => {
       e.monitors = e.monitors.slice(0, 2);
     },
-    target: (page) => page.locator(".tile-alert"),
+    route: "/monitors/m2",
+    target: (page) => page.getByRole("region", { name: /selected monitor$/ }),
   },
   {
-    id: "standby", ...DESK, pad: 0, hideFeeds: true, mutate: stoodDown, history: { m3: series(() => 0) },
-    target: (page) => page.locator(".tile").nth(1),
+    id: "standby", ...DESK, pad: 0, mutate: stoodDown, history: { m3: series(() => 0) },
+    target: (page) => page.locator("main li").nth(1),
   },
   {
     id: "checklist", ...DESK, height: 1000,
@@ -412,27 +404,28 @@ const CROPS: Crop[] = [
       e.printers = [];
       e.monitors = [];
     },
-    target: (page) => page.locator(".panel").filter({ hasText: "GET PRINTGUARD WATCHING" }).first(),
+    target: (page) => page.getByRole("heading", { name: "Get PrintGuard watching" }).locator("xpath=../.."),
   },
   {
-    id: "cameras", ...DESK,
-    target: (page) => page.locator("section").filter({ hasText: "CAMERA REGISTRY" }).locator(".panel").first(),
+    id: "cameras", ...DESK, route: "/cameras", pad: 0, tallest: 210,
+    target: (page) => page.getByRole("tablist", { name: "Camera groups" }).locator("xpath=../.."),
   },
   {
-    id: "tuning", ...DESK, height: 1500, detailId: "m1",
-    target: (page) => page.locator("section").filter({ hasText: "Watch this monitor" }).first(),
+    id: "tuning", ...DESK, route: "/monitors/m1", pad: 0,
+    prepare: (page) => page.getByRole("tab", { name: "Tune" }).click(),
+    target: (page) => page.getByRole("tabpanel", { name: "Tune" }),
   },
   {
-    id: "printers", ...DESK, height: 1000, dialog: "printers", pad: 0,
-    target: (page) => page.locator("dialog > .panel"),
+    id: "printers", ...DESK, height: 1000, route: "/printers/p1", pad: 0, tallest: 440,
+    target: (page) => page.locator("main"),
   },
   {
-    id: "prints", ...DESK, height: 1000, dialog: "prints", pad: 0, mutate: idlePrinters,
-    target: (page) => page.locator("dialog > .panel"),
+    id: "prints", ...DESK, height: 1000, route: "/prints/f1", pad: 0, mutate: idlePrinters,
+    target: (page) => page.locator("main"),
   },
   {
-    id: "alerts", ...DESK, height: 1200, settingsTab: "alerts",
-    target: (page) => page.locator("#settings-panel-alerts"),
+    id: "alerts", ...DESK, height: 1200, route: "/settings/alerts",
+    target: (page) => page.getByRole("region", { name: "Alerts" }),
     mutate: (e) => {
       e.notifiers = NOTIFIERS as never;
       e.settings.notifiers = { ntfy: {} };
@@ -440,12 +433,12 @@ const CROPS: Crop[] = [
     },
   },
   {
-    id: "customise", ...DESK, customising: true, pad: 0,
-    target: (page) => page.locator(".tile").first(),
+    id: "customise", ...DESK, height: 1000, customising: true, pad: 0,
+    target: (page) => page.locator("main section").filter({ has: page.getByRole("heading", { name: /^Fleet/ }) }),
   },
   {
-    id: "plugins", ...DESK, height: 1600, settingsTab: "plugins", catalogue: CATALOGUE,
-    target: (page) => page.locator("#settings-panel-plugins"),
+    id: "plugins", ...DESK, height: 1600, route: "/settings/plugins", catalogue: CATALOGUE,
+    target: (page) => page.getByRole("region", { name: "Plugins" }),
     mutate: (e) => {
       e.plugins = [INSTALLED as never];
     },
@@ -561,7 +554,7 @@ async function stage(browser: Browser, scene: Scene): Promise<{ page: Page; clos
     if (wanted.startsWith("plugins/") && existsSync(local)) await route.fulfill({ path: local });
     else await route.fulfill({ status: 404, body: "" });
   });
-  await page.goto("/");
+  await page.goto(`/#${scene.route ?? "/"}`);
   await page.evaluate(
     ({ state, theme }) => {
       document.documentElement.dataset.theme = theme;
@@ -572,21 +565,19 @@ async function stage(browser: Browser, scene: Scene): Promise<{ page: Page; clos
       theme: scene.theme,
       state: {
         phase: "ready", engine: built, history: { ...history, ...scene.history },
-        detailId: scene.detailId ?? null, printId: scene.printId ?? null, customising: scene.customising ?? false,
-        dialog: scene.dialog ?? (scene.settingsTab ? "settings" : null), settingsTab: scene.settingsTab ?? null,
-        catalogue: scene.catalogue ?? null,
+        customising: scene.customising ?? false, dialog: scene.dialog ?? null, catalogue: scene.catalogue ?? null,
         ...(scene.plugins ? { link: null } : {}),
       },
     },
   );
   if (scene.plugins) await runPlugins(page, scene.plugins);
-  await page.waitForSelector(scene.settingsTab || scene.dialog || scene.printId ? "dialog" : built.monitors.length ? ".aspect-video" : "main");
-  if (scene.printId) await page.waitForSelector("dialog.modal-sheet input[type=range]");
+  await page.waitForSelector(scene.dialog ? "dialog" : "main h1");
+  if (scene.route?.startsWith("/prints/")) await page.waitForSelector("main input[type=range]");
   await page.addStyleTag({ content: "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}" });
   await page.evaluate((frames) => {
-    for (const el of document.querySelectorAll<HTMLElement>(".aspect-video")) {
+    for (const el of document.querySelectorAll<HTMLElement>(".feed")) {
       const img = document.createElement("img");
-      img.src = el.closest(".tile-alert") ? frames.defect : frames.healthy;
+      img.src = el.dataset.camera === "c2" ? frames.defect : frames.healthy;
       img.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:3";
       el.appendChild(img);
     }
@@ -609,10 +600,12 @@ async function capture(browser: Browser, scene: Scene): Promise<void> {
 
 async function captureCrop(browser: Browser, crop: Crop, theme: "dark" | "light"): Promise<void> {
   const { page, close } = await stage(browser, { ...crop, name: crop.id, theme });
-  await page.addStyleTag({ content: `*{outline:none!important}${crop.hideFeeds ? ".aspect-video{display:none}" : ""}` });
+  if (crop.prepare) await crop.prepare(page);
+  await page.addStyleTag({ content: "*{outline:none!important}" });
+  await crop.target(page).scrollIntoViewIfNeeded();
   const box = (await crop.target(page).boundingBox())!;
   const pad = crop.pad ?? 10;
-  await page.screenshot({
+  const shot = await page.screenshot({
     path: guideShot(`${crop.id}-${theme}.jpg`),
     quality: 90,
     clip: {
@@ -622,7 +615,15 @@ async function captureCrop(browser: Browser, crop: Crop, theme: "dark" | "light"
       height: Math.min(crop.height - Math.max(0, box.y - pad), crop.tallest ?? box.height + pad * 2),
     },
   });
+  expect(jpegSize(shot), `SHOT_SIZES.${crop.id} in src/guideShots.ts`).toEqual(SHOT_SIZES[crop.id]);
   await close();
+}
+
+function jpegSize(jpeg: Buffer): number[] {
+  for (let at = 2; at < jpeg.length; at += 2 + jpeg.readUInt16BE(at + 2)) {
+    if (jpeg[at + 1] >= 0xc0 && jpeg[at + 1] <= 0xc2) return [jpeg.readUInt16BE(at + 7), jpeg.readUInt16BE(at + 5)];
+  }
+  throw new Error("no JPEG frame header");
 }
 
 async function runPlugins(page: import("@playwright/test").Page, ids: string[]): Promise<void> {
@@ -691,33 +692,35 @@ const PLUGIN_SHOTS: PluginShot[] = [
     id: "spotify",
     file: "dashboard.jpg",
     jpeg: true,
-    scene: { width: 1200, height: 700, plugins: ["spotify", "picture-in-picture"], mutate: live },
+    scene: { width: 1200, height: 900, plugins: ["spotify", "picture-in-picture"], mutate: live },
   },
   {
     id: "picture-in-picture",
     file: "monitor.png",
     scene: { width: 1200, height: 700, plugins: ["spotify", "picture-in-picture"], mutate: live },
-    target: (page) => page.locator(".tile").first(),
+    target: (page) => page.getByRole("region", { name: /selected monitor$/ }),
   },
   {
     id: "alert-sounds",
     file: "settings.png",
-    scene: { width: 1000, height: 1400, detailId: "m1", plugins: ["alert-sounds", "progress-reports"], mutate: surfaces },
+    scene: { width: 1000, height: 1400, route: "/monitors/m1", plugins: ["alert-sounds", "progress-reports"], mutate: surfaces },
     prepare: async (page) => {
-      await page.locator("section").filter({ hasText: "Alert sounds" }).getByRole("switch").click();
+      await page.getByRole("tab", { name: "Configure" }).click();
+      await page.getByRole("switch", { name: "Sound an alert" }).click();
       await page.waitForTimeout(500);
     },
-    target: (page) => page.locator("section").filter({ hasText: "Alert sounds" }).first(),
+    target: (page) => page.getByRole("heading", { name: "Alert sounds", level: 3 }).locator(".."),
   },
   {
     id: "progress-reports",
     file: "settings.png",
-    scene: { width: 1000, height: 1400, detailId: "m1", plugins: ["alert-sounds", "progress-reports"], mutate: surfaces },
+    scene: { width: 1000, height: 1400, route: "/monitors/m1", plugins: ["alert-sounds", "progress-reports"], mutate: surfaces },
     prepare: async (page) => {
-      await page.locator("section").filter({ hasText: "Progress reports" }).getByRole("switch").click();
+      await page.getByRole("tab", { name: "Configure" }).click();
+      await page.getByRole("switch", { name: "Send progress reports" }).click();
       await page.waitForTimeout(500);
     },
-    target: (page) => page.locator("section").filter({ hasText: "Progress reports" }).first(),
+    target: (page) => page.getByRole("heading", { name: "Progress reports", level: 3 }).locator(".."),
   },
 ];
 

@@ -1,29 +1,34 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { useNavigate } from "react-router";
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
+import { useCreated } from "../submit";
 import { Dialog } from "./Dialog";
 
 export function MonitorDialog() {
-  const { engine, send, openDialog, openDetail, isPending } = useStore();
+  const { engine, send, openDialog, saving } = useStore(
+    useShallow((s) => ({
+      engine: s.engine,
+      send: s.send,
+      openDialog: s.openDialog,
+      saving: s.isPending("monitor.add"),
+    })),
+  );
+  const navigate = useNavigate();
   const [name, setName] = useState("");
   const [cameraId, setCameraId] = useState("");
   const [printerId, setPrinterId] = useState("");
   const cameras = engine?.cameras ?? [];
   const printers = engine?.printers ?? [];
-  const monitors = engine?.monitors.length ?? 0;
-  const monitorsWhenSent = useRef<number | null>(null);
+  const monitors = engine?.monitors ?? [];
   const boundCameraId = cameras.some((c) => c.id === cameraId) ? cameraId : "";
   const boundPrinterId = printers.some((p) => p.id === printerId) ? printerId : "";
-  const saving = isPending("monitor.add");
   const close = () => openDialog(null);
 
-  useEffect(() => {
-    if (saving || monitorsWhenSent.current === null) return;
-    if (monitors > monitorsWhenSent.current) {
-      close();
-      openDetail(null);
-    }
-    monitorsWhenSent.current = null;
-  }, [saving]);
+  useCreated("monitor.add", monitors, (added) => {
+    close();
+    navigate(`/monitors/${added.id}`);
+  });
 
   return (
     <Dialog title="Add monitor" onClose={close}>
@@ -31,7 +36,7 @@ export function MonitorDialog() {
         className="space-y-3"
         onSubmit={(event) => {
           event.preventDefault();
-          monitorsWhenSent.current = monitors;
+          if (!name.trim() || !boundCameraId || saving) return;
           send({ cmd: "monitor.add", monitor: { name: name.trim(), camera_id: boundCameraId, printer_id: boundPrinterId } });
         }}
       >
@@ -45,7 +50,7 @@ export function MonitorDialog() {
           ))}
         </select>
         {!cameras.length && (
-          <p className="text-xs text-text-1">No cameras registered yet, add one from the camera registry first.</p>
+          <p className="text-sm text-text-1">No cameras registered yet. Add one on the Cameras page first.</p>
         )}
         <select className="field" aria-label="Printer" value={boundPrinterId} onChange={(e) => setPrinterId(e.target.value)}>
           <option value="">No printer (alerts only)</option>

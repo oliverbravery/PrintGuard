@@ -1,81 +1,33 @@
 import { create } from "zustand";
 import { alertOutcome } from "./history";
-import { currentLayout } from "./layout";
-import { log } from "./log";
+import { section } from "./layout";
 import type { Finding } from "./lint";
-import { PluginPanelHost } from "./panel";
-import { commandAllowed, LINK_ACTIONS, outboundLink, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget, type StoreChanges } from "./plugins";
-import { play, playFile } from "./sound";
-import { readStored, writeStored } from "./storage";
-import { published, resumePublishers, stopPublishing } from "./stream";
-import { applyTheme, measureCover } from "./theme";
-import { openIn } from "./urls";
+import { log } from "./log";
+import { applyOptimistic, commandFor, settle, withoutKeys, type OptimisticEntry, type OptimisticKind } from "./optimistic";
+import { createPluginRuntime } from "./pluginRuntime";
 import { extOf, FORMATS, sendPrint, type PrintDraft } from "./prints";
 import { recordedFrameKey } from "./review";
+import { readStored, writeStored } from "./storage";
+import { published, resumePublishers, stopPublishing } from "./stream";
+import { applyTheme } from "./theme";
 import { withPreview, type ParsedToolpath } from "./toolpath";
-import type { AdapterConfig, Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, PrintFile, Review, ScorePoint, UpdateRelease } from "./types";
+import type { AdapterConfig, Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, LayoutSection, MonitorHistory, PluginNode, Review, ScorePoint, UpdateRelease } from "./types";
+import { openIn } from "./urls";
+import { connectHub } from "./ws";
 
 const HISTORY_LIMIT = 240;
-const MAX_BACKGROUND_CHARS = 3 * 1024 * 1024;
-const BACKGROUND_IMAGE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/;
 const DOWNLOAD_URL_LIFETIME_MS = 60_000;
-const MAX_NOTICE_CHARS = 200;
 const UPDATE_DEBOUNCE_MS = 250;
 const REMOVAL = /^(camera|monitor|print)\.remove$/;
-const RECONNECT_DELAY_MS = 1500;
-const HUB_SILENCE_LIMIT_MS = 10_000;
-const BLOCKED_PAGE_SLACK_MS = 2_000;
 const BOOT_DROPS_BEFORE_HINT = 3;
 const HUB_NOT_ANSWERING = "The hub is not answering. Check the address, and that a proxy forwards WebSockets and the Origin header";
+const INTRO_SEEN_KEY = "pg.intro.seen";
+const RECONNECTING = "The hub is reconnecting, so that wasn't sent. Try again in a moment.";
 const updateTimers: Record<string, ReturnType<typeof setTimeout>> = {};
-
-type OptimisticKind = "camera" | "monitor" | "print" | "settings";
-
-interface OptimisticEntry {
-  kind: OptimisticKind;
-  id?: string;
-  patch: Record<string, unknown>;
-  unsent: Record<string, unknown>;
-  sent: Record<string, string>;
-}
-
-function withoutKeys<T>(record: Record<string, T>, keys: string[]): Record<string, T> {
-  return Object.fromEntries(Object.entries(record).filter(([key]) => !keys.includes(key)));
-}
-
-function settle(overlay: Record<string, OptimisticEntry>, reqId: string): Record<string, OptimisticEntry> {
-  const settled: Record<string, OptimisticEntry> = {};
-  for (const [key, entry] of Object.entries(overlay)) {
-    const answered = Object.keys(entry.sent).filter((field) => entry.sent[field] === reqId);
-    if (!answered.length) settled[key] = entry;
-    else if (Object.keys(entry.patch).some((field) => !answered.includes(field)))
-      settled[key] = { ...entry, patch: withoutKeys(entry.patch, answered), sent: withoutKeys(entry.sent, answered) };
-  }
-  return settled;
-}
-
-function applyOptimistic(engine: EngineState, overlay: Record<string, OptimisticEntry>): EngineState {
-  let cameras = engine.cameras;
-  let monitors = engine.monitors;
-  let prints = engine.prints;
-  let settings = engine.settings;
-  for (const entry of Object.values(overlay)) {
-    if (entry.kind === "camera") cameras = cameras.map((c) => (c.id === entry.id ? ({ ...c, ...entry.patch } as Camera) : c));
-    else if (entry.kind === "monitor") monitors = monitors.map((m) => (m.id === entry.id ? ({ ...m, ...entry.patch } as Monitor) : m));
-    else if (entry.kind === "print") prints = prints.map((p) => (p.id === entry.id ? ({ ...p, ...entry.patch } as PrintFile) : p));
-    else settings = { ...settings, ...entry.patch } as EngineState["settings"];
-  }
-  return { ...engine, cameras, monitors, prints, settings };
-}
 
 export function savedChannels(engine: EngineState | null): Record<string, AdapterConfig> {
   const withSecretsOnly = Object.fromEntries(Object.keys(engine?.secrets_set?.notifiers ?? {}).map((provider) => [provider, {}]));
   return { ...withSecretsOnly, ...engine?.settings.notifiers };
-}
-
-function commandFor(entry: OptimisticEntry): Record<string, unknown> {
-  if (entry.kind === "settings") return { cmd: "settings.update", patch: entry.patch };
-  return { cmd: `${entry.kind}.update`, id: entry.id, patch: entry.patch };
 }
 
 function appendScore(history: Record<string, ScorePoint[]>, monitorId: string, point: ScorePoint): Record<string, ScorePoint[]> {
@@ -93,15 +45,13 @@ function saveBase64(filename: string, base64: string, type: string) {
   setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_URL_LIFETIME_MS);
 }
 
-const INTRO_SEEN_KEY = "pg.intro.seen";
-
 export interface Toast {
   id: number;
   kind: "info" | "alert" | "error";
   text: string;
 }
 
-export type DialogKind = "cameras" | "printers" | "prints" | "monitor" | "settings" | "update" | "guide" | "intro" | "report" | "more" | null;
+export type DialogKind = "monitor" | "camera" | "printer" | "update" | "guide" | "intro" | "report" | null;
 
 export interface Upload {
   id: number;
@@ -113,7 +63,6 @@ export interface StagedPrint {
   id: number;
   file: File;
 }
-export type SettingsTabId = "appearance" | "alerts" | "plugins" | "mqtt" | "updates" | "api" | "storage" | "advanced";
 
 interface PgStore {
   phase: "booting" | "ready";
@@ -133,18 +82,12 @@ interface PgStore {
   releases: UpdateRelease[];
   pending: Record<string, { req_id: string; cmd: string }>;
   toasts: Toast[];
-  detailId: string | null;
-  statsMonitorId: string | null;
-  reviewId: string | null;
   reviewData: Record<string, Review>;
-  printId: string | null;
   uploads: Upload[];
   staged: StagedPrint[];
   historyData: Record<string, MonitorHistory | null>;
   snapshotCache: Record<string, string>;
   dialog: DialogKind;
-  settingsTab: SettingsTabId | null;
-  focusCameraId: string | null;
   createdToken: { name: string; secret: string } | null;
   customising: boolean;
   optimistic: Record<string, OptimisticEntry>;
@@ -158,14 +101,14 @@ interface PgStore {
   pluginFailures: Record<string, string>;
   catalogue: CatalogueEntry[] | null;
   pluginPages: Record<string, Record<string, string>>;
-  pluginAct(id: string, action: string, arg: unknown): void;
+  pluginAct(id: string, action: string, arg: unknown, toPanel?: boolean): void;
   checkPlugin(id: string): void;
   mountPanel(id: string, container: HTMLElement | null): void;
   fetchCatalogue(): void;
   fetchPluginPage(id: string): void;
   installPlugin(source: Record<string, unknown>, zip?: string): boolean;
   setCustomising(on: boolean): void;
-  mutateLayout(key: keyof Layout, fn: (section: LayoutSection) => LayoutSection): void;
+  mutateLayout(fn: (section: LayoutSection) => LayoutSection): void;
   resetLayout(): void;
   send(cmd: Record<string, unknown>): string | null;
   isPending(cmd: string, id?: string): boolean;
@@ -175,14 +118,10 @@ interface PgStore {
   updateSettings(patch: Record<string, unknown>, scope?: string): void;
   flushUpdates(): void;
   discover(): void;
-  openDialog(dialog: DialogKind, focusCameraId?: string | null): void;
-  openSettings(tab?: SettingsTabId): void;
-  openDetail(id: string | null): void;
-  openStats(id: string | null): void;
+  openDialog(dialog: DialogKind): void;
+  leavePage(sectionChanged: boolean): void;
   fetchHistory(monitorId: string): void;
-  openReview(id: string | null): void;
   fetchReview(id: string): void;
-  openPrint(id: string | null): void;
   stagePrints(files: File[]): void;
   unstage(id: number): void;
   uploadPrint(draft: PrintDraft, thumbnailFrom: ParsedToolpath | null, signal: AbortSignal): Promise<void>;
@@ -205,57 +144,12 @@ let uploadSeq = 0;
 let resumed = false;
 const toastedStartupWarnings = new Set<string>();
 
-function connectHub(onEvent: (event: any) => void, onUp: () => void, onDown: (wasUp: boolean) => void): EngineLink {
-  let socket: WebSocket;
-  const open = () => {
-    const opening = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws`);
-    socket = opening;
-    let connected = false;
-    let silence: ReturnType<typeof setTimeout>;
-    const drop = () => {
-      clearTimeout(silence);
-      opening.onclose = opening.onmessage = null;
-      log("warn", "hub socket closed, reconnecting");
-      onDown(connected);
-      setTimeout(open, RECONNECT_DELAY_MS);
-    };
-    const expectTick = () => {
-      clearTimeout(silence);
-      const armedAt = performance.now();
-      silence = setTimeout(() => {
-        if (performance.now() - armedAt > HUB_SILENCE_LIMIT_MS + BLOCKED_PAGE_SLACK_MS) return expectTick();
-        log("warn", "hub socket went silent");
-        opening.close();
-        drop();
-      }, HUB_SILENCE_LIMIT_MS);
-    };
-    opening.onopen = () => {
-      log("info", "hub socket connected");
-      connected = true;
-      expectTick();
-      onUp();
-    };
-    expectTick();
-    opening.onmessage = (msg) => {
-      expectTick();
-      onEvent(JSON.parse(msg.data));
-    };
-    opening.onclose = drop;
-  };
-  open();
-  return {
-    send: (cmd) => {
-      if (socket.readyState !== WebSocket.OPEN) return false;
-      socket.send(JSON.stringify(cmd));
-      return true;
-    },
-  };
-}
-
-const RECONNECTING = "The hub is reconnecting, so that wasn't sent. Try again in a moment.";
-
 export const useStore = create<PgStore>((set, get) => {
   let droppedWhileBooting = 0;
+  let lastSnapshot: EngineState | null = null;
+  const publishRequests = new Map<string, string>();
+  const signInTabs = new Map<string, Window | null>();
+  const registeredPublishers = new Set<string>();
 
   const clearPending = (reqId?: string) => {
     if (reqId == null) return;
@@ -274,11 +168,7 @@ export const useStore = create<PgStore>((set, get) => {
     return req_id;
   };
 
-  const forgetUnshownSnapshots = () => {
-    if (get().reviewId === null && get().statsMonitorId === null) set({ snapshotCache: {} });
-  };
-
-  let lastSnapshot: EngineState | null = null;
+  const plugins = createPluginRuntime(get, set, sendSilent, RECONNECTING);
 
   const withDeviceState = (engine: EngineState, printerId: string, deviceState: EngineState["printers"][number]["device_state"]): EngineState => ({
     ...engine,
@@ -322,17 +212,6 @@ export const useStore = create<PgStore>((set, get) => {
     updateTimers[key] = setTimeout(() => flushKey(key), UPDATE_DEBOUNCE_MS);
   };
 
-  const showBackground = (next: { id: string; image: string } | null) => {
-    set({ background: next });
-    void measureCover(next?.image ?? null);
-  };
-
-  const hosts = new Map<string, PluginHost>();
-  const codeRequests = new Map<string, string>();
-  const publishRequests = new Map<string, string>();
-  const signInTabs = new Map<string, Window | null>();
-  const registeredPublishers = new Set<string>();
-
   const stopUnregisteredPublishers = (cameras: Camera[]) => {
     for (const path of [...published.keys()]) {
       if (cameras.some((camera) => camera.source.path === path)) registeredPublishers.add(path);
@@ -341,10 +220,9 @@ export const useStore = create<PgStore>((set, get) => {
   };
 
   const dropInFlight = () => {
-    codeRequests.clear();
+    plugins.dropInFlight();
     for (const path of publishRequests.values()) registeredPublishers.add(path);
     publishRequests.clear();
-    configWrites.clear();
     for (const tab of signInTabs.values()) tab?.close();
     signInTabs.clear();
     set((s) => ({
@@ -362,217 +240,19 @@ export const useStore = create<PgStore>((set, get) => {
       clearTimeout(updateTimers[key]);
       flushKey(key);
     }
-    for (const id of unsavedStores.keys()) writeStore(id);
-  };
-  const unsavedStores = new Map<string, StoreChanges>();
-  const configWrites = new Map<string, string>();
-  const codeDigests = new Map<string, string>();
-
-  const writeStore = (id: string) => {
-    configWrites.set(sendSilent({ cmd: "plugin.update", id, patch: { store: unsavedStores.get(id) } }), id);
-  };
-
-  const panels = new Map<string, PluginPanelHost>();
-
-  const pluginState = (plugin: PluginRecord) => {
-    const engine = get().engine;
-    return engine ? projectState(engine, plugin.granted, engine.plugin_permissions) : {};
-  };
-
-  const pluginTargets = (plugin: PluginRecord): PluginTarget[] =>
-    plugin.manifest.surfaces
-      .filter((surface) => surface === "monitor" || surface === "settings")
-      .flatMap((surface) => (get().engine?.monitors ?? []).map((monitor) => ({ id: monitor.id, surface })));
-
-  const perform = (id: string, effects: PluginEffect[]) => {
-    const engine = get().engine;
-    const plugin = engine?.plugins.find((p) => p.id === id);
-    if (!engine || !plugin) return;
-    for (const effect of effects) {
-      if (effect.kind === "command" && effect.cmd) {
-        const name = String(effect.cmd.cmd);
-        if (!commandAllowed(name, plugin.granted, engine.plugin_permissions)) {
-          get().toast("error", `${plugin.manifest.name} tried to run ${name} without permission`);
-        } else if (get().reconnecting) get().toast("error", RECONNECTING);
-        else sendSilent(effect.cmd);
-      } else if (effect.kind === "http" && effect.request) {
-        sendSilent(outboundRequest(id, effect.request));
-      } else if (effect.kind === "socket" && effect.request) {
-        sendSilent(outboundSocket(id, String(effect.action), effect.request));
-      } else if (effect.kind === "link" && effect.request && LINK_ACTIONS.includes(String(effect.action))) {
-        sendSilent(outboundLink(id, String(effect.action), effect.request));
-      } else if (effect.kind === "notify") {
-        if (plugin.granted.includes("notify")) {
-          get().toast("info", `${plugin.manifest.name}: ${String(effect.text ?? "").slice(0, MAX_NOTICE_CHARS)}`);
-        }
-      } else if (effect.kind === "sound") {
-        const file = effect.asset ? get().pluginAssets[id]?.[effect.asset] : undefined;
-        if (!plugin.granted.includes("sound")) continue;
-        if (effect.asset) file && playFile(file);
-        else play(effect.tones ?? []);
-      } else if (effect.kind === "background") {
-        if (!plugin.granted.includes("background")) continue;
-        const image = String(effect.image ?? "");
-        showBackground(image.length <= MAX_BACKGROUND_CHARS && BACKGROUND_IMAGE.test(image) ? { id, image } : null);
-      } else if (effect.kind === "log") {
-        log("info", `plugin ${id}:`, effect.text);
-      }
-    }
-  };
-
-  const handlers = {
-    onView: (id: string, tree: PluginNode | null, targets: Record<string, PluginNode | null>) =>
-      set((s) => ({ pluginTrees: { ...s.pluginTrees, [id]: tree }, pluginViews: { ...s.pluginViews, [id]: targets } })),
-    onEffects: perform,
-    onStore: (id: string, { written, removed }: StoreChanges) => {
-      if (!removed.length && !Object.keys(written).length) return;
-      const unsaved = unsavedStores.get(id) ?? { written: {}, removed: [] };
-      unsavedStores.set(id, {
-        written: { ...withoutKeys(unsaved.written, removed), ...written },
-        removed: [...unsaved.removed.filter((key) => !(key in written)), ...removed],
-      });
-      writeStore(id);
-    },
-    onFailure: (id: string, failure: string) => {
-      dropHosts((hosted) => hosted === id);
-      set((s) => ({ pluginFailures: { ...s.pluginFailures, [id]: failure } }));
-      get().toast("error", `Plugin ${id} stopped: ${failure}`);
-    },
-  };
-
-  const dropHosts = (matches: (id: string) => boolean) => {
-    for (const [id, host] of hosts) {
-      if (!matches(id)) continue;
-      host.close();
-      hosts.delete(id);
-    }
-  };
-
-  const forgetPlugin = (id: string, keepPage: boolean) => {
-    dropHosts((hosted) => hosted === id);
-    panels.get(id)?.close();
-    panels.delete(id);
-    for (const url of Object.values(get().pluginAssets[id] ?? {})) URL.revokeObjectURL(url);
-    for (const [reqId, requested] of codeRequests) if (requested === id) codeRequests.delete(reqId);
-    codeDigests.delete(id);
-    const drop = <T>(record: Record<string, T>) => withoutKeys(record, [id]);
-    set((s) => ({
-      pluginPanels: drop(s.pluginPanels),
-      pluginFindings: drop(s.pluginFindings),
-      pluginAssets: drop(s.pluginAssets),
-      pluginTrees: drop(s.pluginTrees),
-      pluginViews: drop(s.pluginViews),
-      pluginPages: keepPage ? s.pluginPages : drop(s.pluginPages),
-    }));
-  };
-
-  const syncPlugins = (engine: EngineState) => {
-    const held = new Set([...hosts.keys(), ...panels.keys(), ...codeDigests.keys(), ...Object.keys(get().pluginPages), ...Object.keys(get().pluginAssets)]);
-    for (const id of held) {
-      const plugin = engine.plugins.find((p) => p.id === id);
-      if (!plugin) {
-        forgetPlugin(id, false);
-        unsavedStores.delete(id);
-      } else if (codeDigests.has(id) && codeDigests.get(id) !== JSON.stringify(plugin.digests)) forgetPlugin(id, true);
-    }
-    const wanted = new Set(engine.plugins.filter((p) => p.enabled && p.files.includes("plugin.js")).map((p) => p.id));
-    dropHosts((id) => !wanted.has(id));
-    if (get().background && !engine.plugins.some((p) => p.id === get().background?.id && p.enabled)) showBackground(null);
-    for (const [id, panel] of panels) {
-      if (engine.plugins.some((p) => p.id === id && p.enabled)) continue;
-      panel.close();
-      panels.delete(id);
-      set((s) => ({ pluginPanels: Object.fromEntries(Object.entries(s.pluginPanels).filter(([key]) => key !== id)) }));
-    }
-    const stale = Object.keys(get().pluginFailures).filter((id) => !engine.plugins.some((p) => p.id === id && p.enabled));
-    if (stale.length) {
-      set((s) => ({ pluginFailures: Object.fromEntries(Object.entries(s.pluginFailures).filter(([id]) => !stale.includes(id))) }));
-    }
-    const missing = new Set(
-      [
-        ...[...wanted].filter((id) => !hosts.has(id)),
-        ...engine.plugins.filter((p) => p.enabled && p.files.includes("panel.html") && !get().pluginPanels[p.id]).map((p) => p.id),
-        ...engine.plugins.filter((p) => p.enabled && p.granted.includes("sound") && !get().pluginAssets[p.id]).map((p) => p.id),
-      ].filter((id) => !get().pluginFailures[id]),
-    );
-    for (const id of missing) {
-      if ([...codeRequests.values()].includes(id)) continue;
-      codeRequests.set(sendSilent({ cmd: "plugin.code", id }), id);
-    }
-    for (const [id, host] of hosts) {
-      const plugin = engine.plugins.find((p) => p.id === id);
-      if (!plugin) continue;
-      void host.update(pluginState(plugin), pluginTargets(plugin), unsavedStores.has(plugin.id) ? undefined : plugin.config);
-    }
-    for (const [id, panel] of panels) {
-      const plugin = engine.plugins.find((p) => p.id === id);
-      if (plugin) panel.update(pluginState(plugin), plugin.secrets_set);
-    }
-  };
-
-  const forwardToPlugin = (id: string, event: Record<string, unknown>) => {
-    const engine = get().engine;
-    const plugin = engine?.plugins.find((p) => p.id === id);
-    if (!engine || !plugin) return;
-    const seen = projectEvent(event, engine.plugin_events, plugin.granted, engine.plugin_permissions, engine.plugin_event_permissions);
-    if (!seen) return;
-    void hosts.get(id)?.event(seen, pluginState(plugin), pluginTargets(plugin));
-    panels.get(id)?.event(seen);
-  };
-
-  const readPlugin = async (id: string, sources: Record<string, string>) => {
-    const engine = get().engine;
-    const plugin = engine?.plugins.find((p) => p.id === id);
-    if (!engine || !plugin) return;
-    const { lint } = await import("./lint");
-    const findings = lint(plugin.manifest, sources, engine.plugin_permissions, engine.plugin_event_permissions);
-    set((s) => ({ pluginFindings: { ...s.pluginFindings, [id]: findings } }));
-  };
-
-  const startPlugin = (id: string, sources: Record<string, string>, assets: Record<string, string>) => {
-    const engine = get().engine;
-    const plugin = engine?.plugins.find((p) => p.id === id);
-    if (!engine || !plugin || !plugin.enabled) return;
-    const types = engine.plugin_assets ?? {};
-    const blobs: Record<string, Blob> = {};
-    const files: Record<string, string> = {};
-    const text: Record<string, string> = {};
-    for (const [name, data] of Object.entries(assets)) {
-      const type = types[name.split(".").pop() ?? ""];
-      if (!type) continue;
-      const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
-      blobs[name] = new Blob([bytes], { type });
-      if (type.startsWith("text/") || type === "application/json") text[name] = new TextDecoder().decode(bytes);
-      else files[name] = URL.createObjectURL(blobs[name]);
-    }
-    for (const url of Object.values(get().pluginAssets[id] ?? {})) URL.revokeObjectURL(url);
-    set((s) => ({ pluginAssets: { ...s.pluginAssets, [id]: files } }));
-    set((s) => {
-      const { [id]: _dropped, ...rest } = s.pluginFailures;
-      return { pluginFailures: rest };
-    });
-    if (sources["panel.html"]) {
-      set((s) => ({ pluginPanels: { ...s.pluginPanels, [id]: { html: sources["panel.html"], assets: blobs } } }));
-    }
-    if (!hosts.has(id) && sources["plugin.js"]) {
-      const host = new PluginHost(plugin, sources["plugin.js"], text, handlers);
-      hosts.set(id, host);
-      void host.update(pluginState(plugin), pluginTargets(plugin));
-    }
+    plugins.resendUnsaved();
   };
 
   const onEvent = (event: any) => {
     for (const plugin of get().engine?.plugins ?? []) {
       if (event.id !== undefined && event.id !== plugin.id) continue;
-      if (plugin.enabled && plugin.manifest.events.includes(event.event)) forwardToPlugin(plugin.id, event);
+      if (plugin.enabled && plugin.manifest.events.includes(event.event)) plugins.forward(plugin.id, event);
     }
     switch (event.event) {
       case "state": {
         clearPending(event.req_id);
         publishRequests.delete(event.req_id);
-        const answeredWrite = configWrites.get(event.req_id);
-        configWrites.delete(event.req_id);
-        if (answeredWrite && ![...configWrites.values()].includes(answeredWrite)) unsavedStores.delete(answeredWrite);
+        plugins.onStateAck(event.req_id);
         const server = event as EngineState;
         if (get().engine && get().engine!.version !== server.version) {
           location.reload();
@@ -588,16 +268,11 @@ export const useStore = create<PgStore>((set, get) => {
           if (monitor.result) history = appendScore(history, monitor.id, monitor.result);
         }
         applyTheme(engine.settings?.theme ?? "system", engine.settings?.themes ?? [], engine.settings?.glass);
-        const monitorIds = new Set(server.monitors.map((m) => m.id));
-        const present = (monitorId: string | null) => (monitorId !== null && monitorIds.has(monitorId) ? monitorId : null);
         set((s) => ({
           engine,
           history,
           optimistic,
           outcome: issuedHere(event.req_id) ? { req_id: event.req_id, error: null } : s.outcome,
-          detailId: present(s.detailId),
-          statsMonitorId: present(s.statsMonitorId),
-          reviewId: server.reviews.some((r) => r.id === s.reviewId && monitorIds.has(r.monitor_id)) ? s.reviewId : null,
           phase: "ready",
           savedAt: { ...s.savedAt, ...Object.fromEntries(acknowledged.map((key) => [key, Date.now()])) },
           ...(firstRun ? { dialog: "intro" as const } : {}),
@@ -612,7 +287,7 @@ export const useStore = create<PgStore>((set, get) => {
           resumed = true;
           void resumePublishers(server.cameras, (reason) => get().toast("error", `publishing stopped: ${reason}`));
         }
-        syncPlugins(engine);
+        plugins.sync(engine);
         break;
       }
       case "plugin_page": {
@@ -620,14 +295,9 @@ export const useStore = create<PgStore>((set, get) => {
         set((s) => ({ pluginPages: { ...s.pluginPages, [event.id]: event.page ?? {} } }));
         break;
       }
-      case "plugin_code": {
-        if (codeRequests.get(event.req_id) !== event.id) break;
-        codeRequests.delete(event.req_id);
-        codeDigests.set(event.id, JSON.stringify(get().engine?.plugins.find((p) => p.id === event.id)?.digests));
-        void readPlugin(event.id, event.sources);
-        startPlugin(event.id, event.sources, event.assets ?? {});
+      case "plugin_code":
+        plugins.onCode(event.req_id, event.id, event.sources, event.assets ?? {});
         break;
-      }
       case "plugin_oauth": {
         clearPending(event.req_id);
         if (signInTabs.has(event.req_id)) openIn(signInTabs.get(event.req_id)!, event.url);
@@ -635,9 +305,8 @@ export const useStore = create<PgStore>((set, get) => {
         break;
       }
       case "plugin_effect":
-        perform(event.id, [event.effect]);
+        plugins.perform(event.id, [event.effect]);
         break;
-
       case "catalogue":
         clearPending(event.req_id);
         set({ catalogue: event.plugins });
@@ -728,8 +397,7 @@ export const useStore = create<PgStore>((set, get) => {
         }
         signInTabs.get(event.req_id)?.close();
         signInTabs.delete(event.req_id);
-        unsavedStores.delete(configWrites.get(event.req_id) ?? "");
-        configWrites.delete(event.req_id);
+        plugins.onError(event.req_id);
         const optimistic = event.req_id != null ? settle(get().optimistic, event.req_id) : get().optimistic;
         const engine = lastSnapshot ? applyOptimistic(lastSnapshot, optimistic) : get().engine;
         if (engine) applyTheme(engine.settings?.theme ?? "system", engine.settings?.themes ?? [], engine.settings?.glass);
@@ -782,18 +450,12 @@ export const useStore = create<PgStore>((set, get) => {
     releases: [],
     pending: {},
     toasts: [],
-    detailId: null,
-    statsMonitorId: null,
-    reviewId: null,
     reviewData: {},
-    printId: null,
     uploads: [],
     staged: [],
     historyData: {},
     snapshotCache: {},
     dialog: null,
-    settingsTab: null,
-    focusCameraId: null,
     createdToken: null,
     customising: false,
     optimistic: {},
@@ -808,12 +470,7 @@ export const useStore = create<PgStore>((set, get) => {
     catalogue: null,
     pluginPages: {},
 
-    pluginAct(id, action, arg) {
-      const plugin = get().engine?.plugins.find((p) => p.id === id);
-      const host = hosts.get(id);
-      if (plugin && host) void host.act(action, arg, pluginState(plugin), pluginTargets(plugin));
-    },
-
+    pluginAct: plugins.act,
 
     fetchCatalogue() {
       get().send({ cmd: "plugin.catalogue" });
@@ -827,31 +484,17 @@ export const useStore = create<PgStore>((set, get) => {
       return get().send({ cmd: "plugin.install", source, ...(zip ? { zip } : {}) }) !== null;
     },
 
-    mountPanel(id, container) {
-      panels.get(id)?.close();
-      panels.delete(id);
-      const engine = get().engine;
-      const plugin = engine?.plugins.find((p) => p.id === id);
-      const source = get().pluginPanels[id];
-      if (!container || !engine || !plugin || !source) return;
-      panels.set(id, new PluginPanelHost(plugin, container, source.html, source.assets, pluginState(plugin), handlers));
-    },
-
-    checkPlugin(id) {
-      if (get().pluginFindings[id] || [...codeRequests.values()].includes(id)) return;
-      const reqId = get().send({ cmd: "plugin.code", id });
-      if (reqId) codeRequests.set(reqId, id);
-    },
+    mountPanel: plugins.mountPanel,
+    checkPlugin: plugins.check,
 
     setCustomising(on) {
       set({ customising: on });
     },
 
-    mutateLayout(key, fn) {
+    mutateLayout(fn) {
       const engine = get().engine;
       if (!engine) return;
-      const base = currentLayout(engine.settings.layout);
-      get().updateSettings({ layout: { ...base, [key]: fn(base[key]) } });
+      get().updateSettings({ layout: { monitors: fn(section(engine.settings.layout)) } });
     },
 
     resetLayout() {
@@ -904,63 +547,23 @@ export const useStore = create<PgStore>((set, get) => {
       set({ discovered: null, discovering: get().send({ cmd: "discover" }) !== null });
     },
 
-    openDialog(dialog, focusCameraId = null) {
+    openDialog(dialog) {
       get().flushUpdates();
       if (get().dialog === "intro") writeStored(INTRO_SEEN_KEY, "1");
-      set({
-        dialog,
-        discovered: null,
-        printerTest: null,
-        notifyTest: null,
-        reportResult: null,
-        focusCameraId,
-        createdToken: null,
-        settingsTab: null,
-        savedAt: {},
-      });
+      set({ dialog, reportResult: null });
     },
 
-    openSettings(settingsTab = "alerts") {
+    leavePage(sectionChanged) {
       get().flushUpdates();
-      set({
-        dialog: "settings",
-        discovered: null,
-        printerTest: null,
-        notifyTest: null,
-        reportResult: null,
-        focusCameraId: null,
-        createdToken: null,
-        settingsTab,
-        savedAt: {},
-      });
-    },
-
-    openDetail(detailId) {
-      get().flushUpdates();
-      set({ detailId, printerTest: null, savedAt: {} });
-    },
-
-    openStats(statsMonitorId) {
-      get().flushUpdates();
-      set({ statsMonitorId });
-      forgetUnshownSnapshots();
+      set(sectionChanged ? { discovered: null, printerTest: null, notifyTest: null, createdToken: null, savedAt: {}, snapshotCache: {} } : { snapshotCache: {} });
     },
 
     fetchHistory(monitorId) {
       sendSilent({ cmd: "history.get", monitor_id: monitorId });
     },
 
-    openReview(reviewId) {
-      set({ reviewId });
-      forgetUnshownSnapshots();
-    },
-
     fetchReview(id) {
       sendSilent({ cmd: "review.get", id });
-    },
-
-    openPrint(printId) {
-      set({ printId });
     },
 
     stagePrints(files) {

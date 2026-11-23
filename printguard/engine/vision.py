@@ -1,4 +1,4 @@
-"""Preprocessing, prototype classification and defect scoring.
+"""Preprocessing, scoring and the image pipeline shared by every model.
 
 The model invocation itself is the platform's responsibility.
 """
@@ -12,71 +12,91 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
-INPUT_SIZE = 224
-RESIZE_SHORTEST = 256
 LONGEST_RATIO = 4
 SQUARE_OVERLAP = 0.2
+DECISION_BOUNDARY = 0.5
 # About 400 KB per float32 temporary, inside a Raspberry Pi 5 core's 512 KB L2 cache.
 ADJUST_BLOCK_PIXELS = 32768
 
 
 @dataclass(frozen=True)
 class Assets:
-    """Model companion data, the normalisation constants and class prototypes."""
+    """How one model's frames are prepared and its output read.
 
-    mean: tuple[float, ...]
-    std: tuple[float, ...]
-    prototypes: dict[str, np.ndarray]
+    Attributes:
+        name: The model's name as people see it, such as ``Standard``.
+        size: Side of the square the model takes, in pixels.
+        resize_shortest: Length the shorter side is resized to before the centre crop.
+        grey: Whether frames are collapsed to luminance, as the model was trained on.
+        mean: Per-channel normalisation mean.
+        std: Per-channel normalisation spread.
+        prototypes: Class prototypes the model's embedding is compared against,
+            or None for a model that gives its own probability.
+    """
+
+    name: str
+    size: int
+    resize_shortest: int
+    grey: bool
+    mean: np.ndarray
+    std: np.ndarray
+    prototypes: dict[str, np.ndarray] | None
 
 
-def assets_from_dicts(meta: dict[str, Any], protos: dict[str, list[float]]) -> Assets:
-    """Builds Assets from parsed metadata.json and prototypes.json contents.
+def assets_from_dicts(meta: dict[str, Any], protos: dict[str, list[float]] | None) -> Assets:
+    """Builds Assets from a model's parsed metadata.json and, for an embedding model, its prototypes.
 
     Args:
         meta: Parsed model metadata document.
-        protos: Mapping of class name to prototype embedding.
+        protos: Mapping of class name to prototype embedding, or None for a
+            model whose output is a probability.
 
     Returns:
         Immutable Assets ready for preprocessing and classification.
     """
     pre = meta["preprocessing"]
     return Assets(
-        mean=tuple(float(x) for x in pre["normalise_mean"]),
-        std=tuple(float(x) for x in pre["normalise_std"]),
-        prototypes={k: np.asarray(v, dtype=np.float32) for k, v in protos.items()},
+        name=meta["name"],
+        size=int(pre["center_crop_px"]),
+        resize_shortest=int(pre["resize_shortest_edge_px"]),
+        grey=pre["color"] == "grey",
+        mean=np.asarray(pre["normalise_mean"], dtype=np.float32),
+        std=np.asarray(pre["normalise_std"], dtype=np.float32),
+        prototypes=None if protos is None else {k: np.asarray(v, dtype=np.float32) for k, v in protos.items()},
     )
 
 
 def preprocess(rgb: np.ndarray, assets: Assets) -> np.ndarray:
     """Converts an RGB frame into the model's normalised NCHW input tensor.
 
-    Follows the torchvision transforms the model was trained with, resizing the
-    shortest edge to 256 through Pillow's bilinear filter, collapsing to luminance
-    and centre-cropping to 224. Sampling single pixels instead hands each frame's
-    sensor noise to the model, so a still scene's score jitters. Only the middle
-    of the long side survives the crop, so no more than ``LONGEST_RATIO`` times
-    the short side is resized, or a frame a few pixels tall and thousands wide
-    would be scaled up to hundreds of megabytes first.
+    Follows the torchvision eval transforms each model was trained with:
+    ``Resize`` of the shortest edge through Pillow's bilinear filter, sized
+    and rounded as torchvision sizes it, then ``CenterCrop``, with the frame
+    collapsed to luminance first for a model trained on grey frames. Sampling
+    single pixels instead hands each frame's sensor noise to the model, so a
+    still scene's score jitters. Only the middle of the long side survives the
+    crop, so no more than ``LONGEST_RATIO`` times the short side is resized,
+    or a frame a few pixels tall and thousands wide would be scaled up to
+    hundreds of megabytes first.
 
     Args:
         rgb: HxWx3 uint8 frame in RGB channel order.
-        assets: Normalisation constants to apply.
+        assets: The model's input size and normalisation constants.
 
     Returns:
-        Float32 tensor of shape (1, 3, 224, 224).
+        Float32 tensor of shape (1, 3, size, size).
     """
     image = Image.fromarray(rgb)
-    scale = RESIZE_SHORTEST / min(image.size)
-    width, height = (min(side, min(image.size) * LONGEST_RATIO) for side in image.size)
+    short = min(image.size)
+    width, height = (min(side, short * LONGEST_RATIO) for side in image.size)
     left, top = (image.width - width) // 2, (image.height - height) // 2
-    image = image.resize(
-        (round(width * scale), round(height * scale)), Image.Resampling.BILINEAR, box=(left, top, left + width, top + height)
-    )
-    left, top = (image.width - INPUT_SIZE) // 2, (image.height - INPUT_SIZE) // 2
-    image = image.convert("L").crop((left, top, left + INPUT_SIZE, top + INPUT_SIZE))
-    grey = np.asarray(image, dtype=np.float32) / 255.0
-    chans = np.stack([(grey - m) / s for m, s in zip(assets.mean, assets.std)], axis=0)
-    return chans[np.newaxis, ...].astype(np.float32)
+    resized = tuple(assets.resize_shortest if side == short else int(assets.resize_shortest * side / short) for side in (width, height))
+    image = image.resize(resized, Image.Resampling.BILINEAR, box=(left, top, left + width, top + height))
+    if assets.grey:
+        image = image.convert("L")
+    left, top = (int(round((side - assets.size) / 2.0)) for side in image.size)
+    pixels = np.atleast_3d(np.asarray(image.crop((left, top, left + assets.size, top + assets.size)), dtype=np.float32) / 255.0)
+    return ((pixels - assets.mean) / assets.std).transpose(2, 0, 1)[np.newaxis].astype(np.float32)
 
 
 def square_starts(long: int, short: int) -> list[int]:
@@ -120,26 +140,34 @@ def squares(rgb: np.ndarray) -> list[np.ndarray]:
     return [rgb[start : start + width] for start in square_starts(height, width)]
 
 
-def classify(embedding: np.ndarray, assets: Assets) -> dict[str, Any]:
-    """Classifies an embedding by nearest prototype in Euclidean distance.
+def classify(output: np.ndarray, assets: Assets) -> dict[str, Any]:
+    """Reads a model's output as its probability that the frame shows a failing print.
+
+    A model with prototypes gives an embedding, scored with the softmax over
+    negative squared prototype distances the Prototypical Network was trained
+    with. Every other model gives its own calibrated probability. Either way
+    0.5 is the decision boundary, so the score reads as the model's own
+    confidence.
 
     Args:
-        embedding: Flat embedding vector from the encoder.
-        assets: Prototypes to compare against.
+        output: The model's first output for one frame.
+        assets: Prototypes to compare an embedding against.
 
     Returns:
-        Dict with prediction, per-class distances and the distance margin.
+        Dict with the verdict at the decision boundary and the defect score in [0, 1].
 
     Raises:
-        ValueError: If the embedding is not finite, which means the runtime
+        ValueError: If the output is not finite, which means the runtime
             failed rather than that the frame is unclear.
     """
-    distances = {cls: float(np.linalg.norm(embedding - proto)) for cls, proto in assets.prototypes.items()}
-    if not all(math.isfinite(distance) for distance in distances.values()):
-        raise ValueError("the model returned a non-finite embedding")
-    ordered = sorted(distances.items(), key=lambda kv: kv[1])
-    margin = ordered[1][1] - ordered[0][1] if len(ordered) > 1 else 0.0
-    return {"prediction": ordered[0][0], "distances": distances, "margin": margin}
+    if not np.isfinite(output).all():
+        raise ValueError("the model returned a non-finite output")
+    if assets.prototypes is None:
+        score = float(output)
+    else:
+        success, failure = (float(np.linalg.norm(output.astype(np.float64) - assets.prototypes[name])) for name in ("success", "failure"))
+        score = 0.5 * (1.0 + math.tanh((success - failure) * (success + failure) / 2))
+    return {"prediction": "failure" if score >= DECISION_BOUNDARY else "success", "defect_score": score}
 
 
 def shrink(rgb: np.ndarray, shortest: int) -> np.ndarray:
@@ -285,25 +313,3 @@ def transform(
     rgb = rotate_frame(rgb, rotation)
     rgb = crop_frame(rgb, crop)
     return adjust(rgb, brightness, contrast, sharpness)
-
-
-def defect_score(result: dict[str, Any]) -> float:
-    """Returns the model's probability that a frame shows a failing print.
-
-    This is the softmax over negative squared prototype distances the
-    Prototypical Network was trained with, so 0.5 sits on the decision
-    boundary and the score reads as the model's own confidence.
-
-    Args:
-        result: Output of classify().
-
-    Returns:
-        Failure probability in [0, 1], or 0.5 when the frame could not be
-        classified or its distances are too large to compare.
-    """
-    distances = result.get("distances") or {}
-    if "success" not in distances or "failure" not in distances:
-        return 0.5
-    success, failure = distances["success"], distances["failure"]
-    score = 0.5 * (1.0 + math.tanh((success * success - failure * failure) / 2))
-    return score if math.isfinite(score) else 0.5

@@ -12,9 +12,9 @@ export const TOKEN_GROUPS: { label: string; tokens: TokenMeta[] }[] = [
     label: "Surfaces",
     tokens: [
       { key: "ink0", label: "Page", cssVar: "--color-ink-0" },
-      { key: "ink1", label: "Panel", cssVar: "--color-ink-1" },
-      { key: "ink2", label: "Panel top", cssVar: "--color-ink-2" },
-      { key: "ink3", label: "Raised", cssVar: "--color-ink-3" },
+      { key: "ink1", label: "Band", cssVar: "--color-ink-1" },
+      { key: "ink2", label: "Field", cssVar: "--color-ink-2" },
+      { key: "ink3", label: "Selected", cssVar: "--color-ink-3" },
     ],
   },
   {
@@ -29,7 +29,7 @@ export const TOKEN_GROUPS: { label: string; tokens: TokenMeta[] }[] = [
     label: "Lines",
     tokens: [
       { key: "line0", label: "Hairline", cssVar: "--color-line-0" },
-      { key: "line1", label: "Border", cssVar: "--color-line-1" },
+      { key: "line1", label: "Control", cssVar: "--color-line-1" },
     ],
   },
   {
@@ -49,16 +49,16 @@ export type Palette = Record<ThemeTokenKey, string>;
 
 export const PALETTES: Record<ThemeBase, Palette> = {
   dark: {
-    ink0: "#0b0c0a", ink1: "#11130e", ink2: "#181b13", ink3: "#20241a",
-    line0: "#262b20", line1: "#39402f",
-    text0: "#eceee6", text1: "#a8af9c", text2: "#7e866d",
-    accent: "#ff4d00", ok: "#8ac926", warn: "#ffb000", bad: "#ff3f34",
+    ink0: "#090908", ink1: "#121210", ink2: "#0d0d0c", ink3: "#1a1b17",
+    line0: "#242620", line1: "#6d7166",
+    text0: "#f2f2ec", text1: "#b5b8ad", text2: "#92968a",
+    accent: "#ff5a14", ok: "#84d829", warn: "#f5b832", bad: "#ff5c52",
   },
   light: {
-    ink0: "#e7e8e0", ink1: "#f2f3ec", ink2: "#fbfcf6", ink3: "#dfe1d6",
-    line0: "#d3d5c8", line1: "#c2c5b4",
-    text0: "#1b1d16", text1: "#4a4f40", text2: "#646959",
-    accent: "#b53608", ok: "#487212", warn: "#8d5d00", bad: "#bd271f",
+    ink0: "#f6f5f0", ink1: "#ecebe4", ink2: "#fbfaf7", ink3: "#e5e3d9",
+    line0: "#d5d3c8", line1: "#6c6f64",
+    text0: "#111210", text1: "#454740", text2: "#5e6157",
+    accent: "#bd3000", ok: "#1f6316", warn: "#854c00", bad: "#b81d18",
   },
 };
 
@@ -254,7 +254,7 @@ function resolveTheme(themeId: string, themes: CustomTheme[], glass: Glass = GLA
   return { base: window.matchMedia(MEDIA).matches ? "dark" : "light", colors: null };
 }
 
-const ON_ACCENT_INKS = ["#0b0c0a", "#f3f4ed"];
+const ON_ACCENT_INKS = ["#090908", "#ffffff"];
 
 function readableOn(hex: string): string {
   const accent = luminance(channels(hex));

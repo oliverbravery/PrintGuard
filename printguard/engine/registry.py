@@ -185,6 +185,7 @@ class Printer:
         id: Stable identifier used across the protocol.
         name: Display name.
         provider: Integration adapter id (octoprint, klipper, elegoo, prusa, bambu, …).
+        model: The printer model the user typed, sent with reviewed frames, or empty.
         config: Connection values matching the adapter's schema.
         device_state: Last normalised state polled from the service, or None.
         reported_status: The last status the service could actually report,
@@ -195,6 +196,7 @@ class Printer:
     name: str
     provider: str
     config: dict[str, Any]
+    model: str = ""
     device_state: dict[str, Any] | None = None
     reported_status: str | None = None
 
@@ -230,6 +232,7 @@ class Printer:
             "id": self.id,
             "name": self.name,
             "provider": self.provider,
+            "model": self.model,
             "config": credentials.public_config(self.config, secrets),
             "secrets_set": credentials.secrets_set(self.config, secrets),
             "device_state": self.device_state,
@@ -238,7 +241,7 @@ class Printer:
 
     def persisted(self) -> dict[str, Any]:
         """Serialises only what is needed to restore the printer on boot."""
-        return {"id": self.id, "name": self.name, "provider": self.provider, "config": self.config, "reported_status": self.reported_status}
+        return {"id": self.id, "name": self.name, "provider": self.provider, "model": self.model, "config": self.config, "reported_status": self.reported_status}
 
 
 @dataclass

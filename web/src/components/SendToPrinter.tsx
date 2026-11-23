@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { bedCamera, eligiblePrinters } from "../prints";
 import { useStore } from "../store";
 import type { PrintFile, Printer } from "../types";
@@ -11,7 +12,7 @@ function BedCheck({ print, printer, onStart, onClose }: { print: PrintFile; prin
   return (
     <Dialog title={`Print ${print.name} on ${printer.name}`} onClose={onClose}>
       <div className="space-y-4">
-        <div className="overflow-hidden rounded border border-line-0">
+        <div className="overflow-hidden border border-line-0">
           <Feed camera={engine ? bedCamera(engine, printer.id) : undefined} />
         </div>
         <p className="text-sm text-text-0">Is the build plate on and the bed clear?</p>
@@ -29,13 +30,14 @@ function BedCheck({ print, printer, onStart, onClose }: { print: PrintFile; prin
 }
 
 export function SendToPrinter({ print }: { print: PrintFile }) {
-  const { engine, send, isPending } = useStore();
+  const { engine, send, busy } = useStore(
+    useShallow((s) => ({ engine: s.engine, send: s.send, busy: s.isPending("print.start", print.id) })),
+  );
   const printers = engine ? eligiblePrinters(engine, print) : [];
   const [printerId, setPrinterId] = useState(printers[0]?.id ?? "");
   const [checkingBed, setCheckingBed] = useState(false);
   const chosen = printers.find((p) => p.id === printerId) ?? printers[0];
   const status = chosen?.device_state?.status;
-  const busy = isPending("print.start", print.id);
 
   useEffect(() => {
     if (!printers.some((p) => p.id === printerId)) setPrinterId(printers[0]?.id ?? "");
@@ -43,7 +45,7 @@ export function SendToPrinter({ print }: { print: PrintFile }) {
 
   if (!printers.length) {
     return (
-      <p className="mono text-[0.68rem] text-text-2">
+      <p className="mono text-xs text-text-2">
         {print.printer_ids.length ? "none of its printers is registered" : `no registered printer takes .${print.ext} files`}
       </p>
     );

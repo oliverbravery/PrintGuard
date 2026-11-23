@@ -6,10 +6,7 @@
 
 </div>
 
-PrintGuard keeps a few frames from each print on your hub. When a print ends you can label them
-and send them to me, and I use them to train the detection model on more printers, cameras and
-lighting than the public datasets cover. Nothing is sent unless you review a print and press
-Send.
+PrintGuard keeps a handful of frames locally on your hub from each print. Once a print finishes, you can look through them, flag any frames where something went wrong and send them to me so I can keep improving the detection models across real printers, cameras and lighting. The 3.0 models were trained entirely on community frames like these (you can read how they were trained in [this blog post](https://oliverbravery.uk/blog/rebuilding-printguards-brain)). It's completely opt-in: nothing ever leaves your hub unless you review a print and click **Send**.
 
 - [What's kept on your hub](#whats-kept-on-your-hub)
 - [Reviewing a print](#reviewing-a-print)
@@ -20,124 +17,82 @@ Send.
 
 ## What's kept on your hub
 
-| Frames | How many per print |
+| Frame type | Kept per print |
 |---|---|
-| The frame that fired each alert | The last 40 |
-| The highest scoring frames under the alert threshold, at least a minute apart | 5 |
-| Ordinary frames spread evenly over the print | Up to 19, starting at one a minute |
+| Frames that triggered a defect alert | Up to the last 40 |
+| Highest-scoring frames that stayed below the alert threshold (at least a minute apart) | Up to 5 |
+| Regular frames spread evenly across the print | Up to 19, starting at one per minute |
 
-A frame is kept as the model was given it, after the camera's rotation, crop and adjustments. One
-over 512px on its shorter side is scaled down to that. Frames are stored in the hub's data
-directory, so they survive a restart. The hub keeps the last 20 prints or 200 MB across every
-monitor and drops the oldest finished print first, apart from one waiting to send, which stays until it is sent or dismissed and isn't counted in the 20. The alert frames are the ones the risk
-history shows under **Risky moments**. Deleting a monitor deletes every print kept from it,
-including ones waiting for a review or to send.
+Frames are saved exactly as the model saw them (after rotation, crop and brightness/contrast/sharpness adjustments), and anything larger than 512px on its shorter side is scaled down to 512px. Everything is stored inside the hub's data directory, so it survives restarts. Across all monitors, the hub keeps the last 20 prints or 200 MB (whichever hits first), pruning the oldest finished prints first. Any print currently queued to send is kept until it finishes uploading or you cancel it, and doesn't count against the 20-print cap. Alert frames are the same snapshots shown under **Risky moments** on the history page. Deleting a monitor removes all saved prints belonging to it, including any waiting to be reviewed or sent.
 
-Each print is also recorded, one frame every 5 seconds, so you can scrub through it when you
-review it. An 8 hour print's recording takes about 100 MB. A recording is deleted once you send
-or skip its print, or 7 days after the print ended, which you can change to 3 or 14 days or
-switch off. Recordings are capped at 2 GB together, and the oldest go first.
+PrintGuard also records one frame every 5 seconds during a print so you can scrub through the whole job during review and pull in moments PrintGuard didn't pick automatically. An 8-hour print takes around 100 MB. Recordings are deleted automatically once you send or ignore the print, or after 7 days (you can change that to 3 or 14 days, or turn recordings off entirely). Total recording storage is capped at 2 GB, dropping the oldest first.
 
-A print ends when its printer reports idle or an error, or when you switch its monitor off, so a
-paused print stays open. A monitor
-with no printer has no way to know a print ended, so it closes one every 24 hours.
+A print opens as soon as its monitor starts watching, even before the linked printer has answered, and losing contact with the printer doesn't close it. It closes when the printer reports idle or an error, or when you switch the monitor off (a paused print stays open in case you rescue and resume it). Monitors without a linked printer have no way of knowing when a print ends, so they roll over once every 24 hours.
 
 ## Reviewing a print
 
-When a print ends its monitor shows a button to review the frames from the last print. Older prints are
-listed under **Prints** on the monitor's detailed history page. A print with no frames kept
-isn't offered for review.
+Open a monitor's **Review** tab to see its finished prints, newest first, with unreviewed ones marked. Click a print to see its kept frames next to the recording scrubber (prints with zero saved frames aren't listed).
 
-![The review sheet with a failed print's frames labelled good, failure and real failure](assets/review.png)
+![The review page with a failed print's frames labelled good, failure and real failure beside the recording](assets/review.png)
 
-1. Answer whether the print finished without any problems. A print you rescued and resumed still
-   had one.
-2. Press any frame to change its label. An alert frame is a real failure or a false alarm, and
-   any other frame is good or a failure.
-3. Use the × on a frame to leave it out, and **Undo** to put it back. **Leave all out** clears every frame, so you can put back just the ones you want to send. **Put all back** brings back the frames PrintGuard picked but not ones you added.
-4. Scrub through the print with the slider under the frames and use **Add as good** or **Add as
-   failure** to send a frame PrintGuard didn't pick. Marks on the slider show where the alerts and
-   picked frames are.
-5. Add your printer model if you like, then press **Send**. You can send 60 frames a day, and
-   the count above the frames shows how many you have chosen.
+1. Click the flag icon on any frame where something went wrong. On an alert frame, flagging marks it as a **Real failure** and leaving it unflagged marks it as a **False alarm**; on any other frame, flagging marks it as a **Failure**.
+2. Click `×` on any frame you'd rather not share, or hit **Clear all** if you only want to pick a few specific frames from the recording.
+3. Scrub through the recording on the left and click **Add as good** or **Add as failure** to include frames PrintGuard didn't automatically pick. Tick marks on the slider show where alerts and picked frames sit.
+4. Click **Send**. You can send up to 60 frames a day, and the counter above the grid keeps track of how many you've selected.
 
-**Not this print** takes it off your list of prints to review and marks it reviewed, not sent. Its
-frames stay on the hub, so you can still open it from **Prints** later.
+Clicking **Ignore** deletes the print's saved frames and recording from your hub (showing you how much disk space it'll free first) and removes its alert snapshots from risk history.
 
 ## What's sent
 
-- The frames you kept, with the label you gave each one.
-- Each frame's risk score, time and which of the three kinds above it is, or that you added it from the recording.
+When you press **Send**, PrintGuard uploads:
+
+- The frames you chose to keep, along with your labels.
+- Each frame's risk score, timestamp and kind (alert, near miss, regular, or added from the recording).
 - A random ID for the print and for each frame.
-- The monitor's alert threshold at the time you send.
-- The type of printer connection, such as `klipper` or `none`, and the printer model if you typed one.
-- The PrintGuard version.
-- A random ID for your hub, issued the first time you send.
+- The monitor's alert threshold at the time of sending.
+- The printer integration type (e.g. `klipper` or `none`), plus the printer model if you filled it in on the **Printers** page.
+- Your PrintGuard version.
+- A random hub ID generated the first time you send.
 
-No names, camera URLs or credentials are sent. Frames go to a private Cloudflare R2
-bucket in the EU through [a small Worker](../feedback-worker) you can read. I download them,
-re-encode them and delete them from the bucket. Re-encoding drops anything a file carries beyond
-its pixels, and a frame over 4096 by 4096 pixels is discarded. I keep each frame's labels and the
-time it reached the inbox, and anything I haven't collected is deleted after 30 days. They are used only to train PrintGuard's detection model.
+No monitor names, camera URLs or credentials are ever sent. Uploads go to a private Cloudflare R2 bucket in the EU through a small [Cloudflare Worker](../feedback-worker) whose code is right here in the repo for anyone to inspect. I download the frames, re-encode them so nothing but the raw pixels remains (discarding anything over 4096×4096 pixels) and delete them from the bucket. I keep the frame labels and upload timestamps, and anything I haven't pulled down is automatically deleted after 30 days. Everything sent is used purely to train PrintGuard's detection models.
 
-Your hub doesn't send its address, but the Worker sees the public IP address every request
-comes from, as any server does. It uses it only for the per-network limit below.
+Your hub doesn't include your IP in the payload, though the Worker sees your public IP on the incoming HTTP request like any web server does. It only uses it to enforce the per-network daily limit below:
 
-| What the Worker holds | For how long | Why |
+| What the Worker stores | Retention | Purpose |
 |---|---|---|
-| A keyed hash of your IPv4 address, or of the /48 of your IPv6 address, with a count of today's frames and new hubs | Until 03:00 UTC the next day | The per-network daily limit |
-| Your hub ID with a count of today's frames, and the ID and size of each frame sent today | Until 03:00 UTC the next day | The per-hub daily limit, and counting a frame sent twice once |
-| Your hub ID, or the hash above, with a count of this minute's requests | A minute | Turning away a hub or network that sends too fast |
+| A keyed hash of your IPv4 address (or `/48` prefix for IPv6), with counts of today's frames and new hubs | Until 03:00 UTC the next day | Per-network daily limit |
+| Your hub ID with today's frame count, plus IDs and sizes of frames sent today | Until 03:00 UTC the next day | Per-hub daily limit and deduplicating retries |
+| Your hub ID or IP hash with this minute's request count | 1 minute | Basic burst rate-limiting |
 
-The address itself is never stored, and the hash can't be turned back into one without the
-Worker's secret key. The Worker keeps no logs or traces.
+Your raw IP address is never written to storage, the hash can't be reversed without the Worker's secret key, and the Worker keeps no logs or traces.
 
 ## Limits
 
-The inbox runs on Cloudflare's free tier, which has a fixed amount of room, so the Worker caps
-what it takes. A frame that hits a limit stays on your hub and sends by itself once the limit resets. A print also waits when the inbox is full,
-closed or can't be reached, and the hub tries it again after six hours, or sooner when the inbox
-says when there will be room.
+Because I run the inbox on Cloudflare's free tier out of pocket, there are a few hard caps to keep storage and requests within budget. If a print hits a limit, the remaining frames stay queued on your hub and automatically retry once the limit resets (or after 6 hours if the inbox is full, closed or unreachable, or sooner if the Worker reports a reset time).
 
-| Limit | Value | What you see |
+| Limit | Cap | Message in the UI |
 |---|---|---|
-| One hub | 60 frames a day | "You've sent as many frames as one PrintGuard can in a day." |
-| One network | 120 frames a day, and 3 new hubs | "Your network has sent as many frames as it can today." |
-| Everyone | 1,000 frames a day | "PrintGuard has had all the frames it can take today." |
-| The inbox | 5 GB | "The inbox for training frames is full." The Worker counts the bucket again before saying so, at most once an hour, so pulling frames out reopens it within the hour |
-| One frame | 150 KB | Nothing. The hub shrinks the frame once and skips it if it's still too big |
-| Speed | 100 frames a minute for one hub, 10 new hubs a minute for one network | Nothing. The hub tries again a minute later |
+| Per hub | 60 frames a day | "You've sent as many frames as one PrintGuard can in a day." |
+| Per network | 120 frames a day, 3 new hubs | "Your network has sent as many frames as it can today." |
+| Global (everyone) | 1,000 frames a day | "PrintGuard has had all the frames it can take today." |
+| Total bucket size | 5 GB | "The inbox for training frames is full." The Worker re-measures the bucket at most once an hour, so it reopens within an hour after I pull frames down |
+| Single frame size | 150 KB | Silent. The hub shrinks the frame once and skips it if it's still over the cap |
+| Request rate | 100 frames/min per hub, 10 new hubs/min per network | Silent. The hub retries a minute later |
 
-Daily limits reset at midnight UTC, and the review sheet shows that time in your own time zone.
-A print that is waiting has **Try now** and **Cancel sending** on its sheet. A frame the hub
-skips isn't counted as sent. A frame the inbox already holds is answered as sent without being
-written again, so it doesn't count twice and the copy keeps the labels of the first send. A print
-none of whose frames could be sent goes back to waiting for a review. The hub drops control
-characters from the printer model you type, and the Worker refuses a frame with one in its labels
-or with a label written as an RFC 2047 encoded word, such as `=?utf-8?q?x?=`. It also refuses a
-file that isn't a complete JPEG or is over 4096 by 4096 pixels.
+Daily counters reset at midnight UTC, and the review page shows that time converted to your local time zone. Queued prints have **Try now** and **Cancel sending** buttons on their review page. Skipped frames don't count as sent. If a frame gets uploaded twice, the Worker acknowledges it without storing a duplicate or counting it twice (keeping the labels from the first upload). If zero frames from a print could be sent, the print returns to waiting for review. The hub strips control characters from printer models, and the Worker rejects frames with control characters or RFC 2047 encoded words (like `=?utf-8?q?x?=`) in labels, incomplete JPEGs, or images larger than 4096×4096.
 
-The limit for everyone is shared, so a handful of busy networks can use it up for the day.
-Your frames wait on your hub until it resets.
+Since the 1,000-frame global daily cap is shared across all users, a few busy days can fill it up; your queued frames just sit safely on your hub and go out once it resets.
 
 ## Having your frames deleted
 
-Your hub ID is in **Settings**, under **Storage**, once you've sent a print. Ask by
-[raising an issue on GitHub](https://github.com/oliverbravery/PrintGuard/issues/new) with that
-ID and I'll delete every frame sent under it. The ID is random and says nothing about you.
+Once you've sent at least one print, you'll find your hub ID under **Settings** -> **Storage**. If you ever want your frames removed, [open a GitHub issue](https://github.com/oliverbravery/PrintGuard/issues/new) with that ID and I'll delete everything sent under it. The ID is completely random and doesn't identify you.
 
-Your hub gets a new ID if I ever replace the key the inbox signs IDs with. Frames sent under the
-old ID can't be traced to your hub after that, so I couldn't find them to delete.
+One caveat: if I ever rotate the signing key the inbox uses for hub IDs, your hub will get a fresh ID on its next upload, and older frames from before the rotation can no longer be linked back to your hub to be deleted.
 
 ## Storage settings
 
-Turn off **Ask me to review frames after a print** in **Settings**, under **Storage**. The hub
-then keeps only alert frames, for the risk history, and never prompts. The same tab lists each
-recording with its size and when it's deleted, so you can delete one or all of them, and sets how
-long recordings are kept.
+If you don't want to participate, switch off **Ask me to review frames after a print** during the first-run walkthrough or any time under **Settings** -> **Storage**. PrintGuard will then only keep alert snapshots for risk history and won't prompt you to review prints. That same tab shows every saved recording with its size and expiry date, lets you delete individual recordings or wipe them all, and lets you set how long recordings are kept.
 
-![The Storage tab in Settings, with the review switch, how long recordings are kept and the recording of each print](assets/settings-storage.png)
+![Storage in Settings, with the review switch, how long recordings are kept and the recording of each print](assets/settings-storage.png)
 
-Switching it off also settles the prints the hub already holds. A print waiting for a review or
-waiting to send is dismissed, and every frame that isn't an alert is deleted from the hub. A
-print that is uploading stops after the frame it's on. Frames already sent stay in the inbox. Nothing is sent while it is off, and **Send** says so. A frame the hub can't delete is reported as a warning, and the switch still takes effect.
+Turning the review switch off also cleans up what's currently waiting on your hub: prints waiting for review or queued to send are dismissed, all non-alert frames are deleted, and an in-progress upload stops after the current frame. Frames that have already arrived in the inbox stay there. While it's off, nothing can be sent and **Send** stays disabled. If a file can't be deleted for some reason, PrintGuard logs a warning and still applies the setting.

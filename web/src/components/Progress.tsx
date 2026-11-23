@@ -8,9 +8,9 @@ export function Progress({ label, value, total, className = "" }: { label: strin
       aria-valuemin={0}
       aria-valuemax={total}
     >
-      <div aria-hidden className="h-1.5 flex-1 overflow-hidden rounded-full bg-accent/25">
+      <div aria-hidden className="h-1.5 flex-1 overflow-hidden bg-accent/25">
         <div
-          className="h-full rounded-full bg-accent transition-[width] duration-500"
+          className="h-full bg-accent transition-[width] duration-500"
           style={{ width: `${(value / total) * 100}%` }}
         />
       </div>

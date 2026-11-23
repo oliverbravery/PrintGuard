@@ -74,6 +74,8 @@ EVENT_LOG_LEVELS = {"alert": logging.INFO, "warning": logging.WARNING, "error": 
 UPDATE_CHECK_INTERVAL_S = 86400.0
 UPDATE_RETRY_S = 900.0
 RUNTIME_DRAIN_TIMEOUT_S = 10.0
+INFERENCE_SETTINGS = ("model", "inference_runtime")
+"""The settings the platform loads detection with, so changing one reloads it."""
 PLUGIN_RATE_LIMIT = 60
 PLUGIN_RATE_WINDOW_S = 60.0
 PLUGIN_TIMEOUT_S = 10.0
@@ -134,6 +136,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "themes": [],
     "glass": {"opacity": 0.0, "tone": 0.0},
     "layout": {},
+    "model": "standard",
     "inference_runtime": "auto",
     "catalogue_url": plugins.CATALOGUE_URL,
     "fault_grace_s": GRACE_DEFAULT_S,
@@ -230,6 +233,7 @@ class Engine:
             "review.send": self._cmd_review_send,
             "review.retry": self._cmd_review_retry,
             "review.dismiss": self._cmd_review_dismiss,
+            "review.delete": self._cmd_review_delete,
             "review.add": self._cmd_review_add,
             "recording.frame": self._cmd_recording_frame,
             "recording.delete": self._cmd_recording_delete,
@@ -365,7 +369,7 @@ class Engine:
         if not (reported_status is None or isinstance(reported_status, str)):
             raise ValueError("its last status is text")
         config = self._restored_config(INTEGRATIONS[printer["provider"]], printer["config"], f"printer '{printer['name']}'")
-        self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], config=config, reported_status=reported_status))
+        self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], model=printer["model"], config=config, reported_status=reported_status))
 
     def _restored_config(self, adapter: Adapter, config: dict[str, Any], owner: str) -> dict[str, Any]:
         """A stored adapter config as a save would take it, warning of each value that had to be cleared.
@@ -708,8 +712,8 @@ class Engine:
         adapter says its actions are slow, and READ_BACK_S after it for the
         printer to be read back, a camera that is given
         CAMERA_OPEN_WAIT_S to open, one printer's cameras that open in turn, and
-        a switch of inference runtime, which waits for the inferences in flight
-        and then loads the model.
+        a switch of detection model or runtime, which waits for the inferences
+        in flight and then loads the model.
         """
         command = message.get("cmd")
         if command in ("printer.action", "printer.heat"):
@@ -720,7 +724,7 @@ class Engine:
         if command == "printer.cameras.refresh":
             return REQUEST_TIMEOUT_S + CAMERA_OPEN_WAIT_S * CAMERAS_OPENED_IN_TURN
         patch = message.get("patch")
-        if command == "settings.update" and isinstance(patch, dict) and patch.get("inference_runtime", self.settings["inference_runtime"]) != self.settings["inference_runtime"]:
+        if command == "settings.update" and isinstance(patch, dict) and any(patch.get(key, self.settings[key]) != self.settings[key] for key in INFERENCE_SETTINGS):
             return REQUEST_TIMEOUT_S + RUNTIME_DRAIN_TIMEOUT_S + RUNTIME_LOAD_ALLOWANCE_S
         return REQUEST_TIMEOUT_S
 
@@ -764,8 +768,7 @@ class Engine:
         rgb = await self.platform.decode_jpeg(data)
         if rgb is None:
             raise RuntimeError("could not decode image")
-        result = await infer_squares(self.platform, vision.squares(rgb))
-        return {**result, "defect_score": vision.defect_score(result)}
+        return await infer_squares(self.platform, vision.squares(rgb))
 
     def save(self) -> None:
         """Writes the registries and settings to the platform's state store."""
@@ -952,7 +955,7 @@ class Engine:
         anything awaited, since one edited, switched off or removed while an
         earlier monitor's frame was being kept must not be acted on as it was.
         """
-        score = vision.defect_score(result)
+        score = result["defect_score"]
         for monitor_id in [monitor["id"] for monitor in self.monitors.values() if monitor["camera_id"] == camera.id]:
             monitor = self._watching_through(monitor_id, camera)
             if monitor is None:
@@ -971,15 +974,15 @@ class Engine:
                         "camera_id": camera.id,
                         **point,
                         "prediction": "failure" if score >= monitor["threshold"] else "success",
-                        "margin": round(result.get("margin", 0.0), 4),
                         "ms": self.scheduler.stats()["infer_ms"],
                     }
                 )
             await self.watchdog.on_score(monitor, frame, score)
             monitor = self._watching_through(monitor_id, camera)
-            if monitor is not None and self.settings["feedback"] == "ask" and self._print_known(monitor):
+            if monitor is not None and self.settings["feedback"] == "ask":
+                printer = self.printers.get(monitor["printer_id"])
                 try:
-                    if await self.reviews.sample(monitor, frame, score, ts, recording=self.settings["recording_days"] > 0):
+                    if await self.reviews.sample(monitor, frame, score, ts, recording=self.settings["recording_days"] > 0, answered=printer is None or printer.reported_status is not None):
                         self.save()
                 except Exception as exc:
                     self.report_failure(f"keeping a frame of '{monitor['name']}' for review", exc)
@@ -988,16 +991,6 @@ class Engine:
         """The monitor as it stands now, if it is still watching through this camera."""
         monitor = self.monitors.get(monitor_id)
         return monitor if monitor and monitor["camera_id"] == camera.id and monitor_watching(monitor, self.printers) else None
-
-    def _print_known(self, monitor: dict[str, Any]) -> bool:
-        """Whether a frame of a monitor can be put down to a print.
-
-        A printer that has not been read yet, as after its connection is
-        edited, is watched in case it is printing. A frame kept then would
-        begin a print that an idle printer's first answer ends at once.
-        """
-        printer = self.printers.get(monitor["printer_id"])
-        return printer is None or printer.reported_status is not None
 
     async def note_alert(self, monitor_id: str, alert: dict[str, Any], frame: Frame) -> None:
         """Records a fired alert in a monitor's history and keeps the frame that fired it.
@@ -1027,7 +1020,10 @@ class Engine:
 
     def settle_reviews(self) -> bool:
         """Ends the review of every print that is over, returning whether any did."""
-        return self.reviews.settle(self.monitors, self.printers, self.watchdog.responding, self.settings["feedback"] == "ask")
+        ended = self.reviews.settle(self.monitors, self.printers, self.watchdog.responding, self.settings["feedback"] == "ask")
+        if ended:
+            self._hold("delete the frames kept of what was no print", self.reviews.discard_not_prints())
+        return ended
 
     def _start_send(self, review: Review, req_id: Any = None) -> None:
         """Starts uploading a review, or has the upload already under way answer this request too."""
@@ -1501,7 +1497,7 @@ class Engine:
         record = sanitise_printer(printer_id, message.get("printer", {}))
         INTEGRATIONS[record["provider"]].require(record["config"])
         reports.require_storable(record["config"].values())
-        printer = Printer(id=printer_id, name=record["name"], provider=record["provider"], config=record["config"])
+        printer = Printer(id=printer_id, name=record["name"], provider=record["provider"], model=record["model"], config=record["config"])
         self.printers.add(printer)
         self._schedule_reconcile(printer)
 
@@ -1530,6 +1526,7 @@ class Engine:
         reports.require_storable(record["config"].values())
         was = (existing.provider, existing.config)
         existing.name = record["name"]
+        existing.model = record["model"]
         existing.provider = record["provider"]
         existing.config = record["config"]
         if was != (existing.provider, existing.config):
@@ -1835,11 +1832,14 @@ class Engine:
                 or already sent, or no frame is left to send.
         """
         self._require_feedback_on()
+        known = self.reviews.get(message["id"])
+        monitor = self.monitors.get(known.monitor_id) if known else None
+        printer = self.printers.get(monitor.get("printer_id") or "") if monitor else None
         review = self.reviews.submit(
             message["id"],
             failures=set(message.get("failures") or []),
             removed=set(message.get("removed") or []),
-            printer=feedback.printer_model(message.get("printer")),
+            printer=printer.model if printer else "",
         )
         self._start_send(review, message.get("req_id"))
 
@@ -1852,6 +1852,9 @@ class Engine:
 
     async def _cmd_review_dismiss(self, message: dict[str, Any]) -> None:
         self.reviews.dismiss(message["id"])
+
+    async def _cmd_review_delete(self, message: dict[str, Any]) -> None:
+        await self.reviews.delete(message["id"])
 
     async def _cmd_review_add(self, message: dict[str, Any]) -> None:
         """Keeps a frame from a finished print's recording and answers with the print's frames.
@@ -1934,7 +1937,7 @@ class Engine:
             ValueError: If the patch names a setting there is not, a value in it
                 is not one the setting takes, or an address changed while a
                 stored secret was being kept.
-            RuntimeError: If the runtime could not be switched.
+            RuntimeError: If the model or runtime could not be switched.
         """
         patch = dict(message.get("patch", {}))
         unknown = sorted(set(patch) - set(SETTINGS_DEFAULTS))
@@ -1964,8 +1967,8 @@ class Engine:
         for provider, config in patch.get("notifiers", {}).items():
             reports.require_storable(config.values())
             NOTIFIERS[provider].require(config)
-        if settings["inference_runtime"] != self.settings["inference_runtime"]:
-            await self._switch_runtime(settings)
+        if any(settings[key] != self.settings[key] for key in INFERENCE_SETTINGS):
+            await self._switch_inference(settings)
         switched_on = settings["update_check"] and not self.settings["update_check"]
         self.settings = {**self.settings, **{key: settings[key] for key in patch}}
         if switched_on:
@@ -1974,8 +1977,8 @@ class Engine:
             await self._tidy_up("delete the frames kept for review", self.reviews.stop_asking())
         logger.info("settings updated: %s", sorted(patch))
 
-    async def _switch_runtime(self, settings: dict[str, Any]) -> None:
-        """Waits for the inferences in flight, then loads the runtime the settings name.
+    async def _switch_inference(self, settings: dict[str, Any]) -> None:
+        """Waits for the inferences in flight, then loads the model and runtime the settings name.
 
         An inference that has not come back after RUNTIME_DRAIN_TIMEOUT_S is
         given up on, since one wedged in a runtime would hold every camera
@@ -2002,7 +2005,7 @@ class Engine:
         finally:
             switch.cancel()
         if switch.cancelled():
-            raise RuntimeError("an inference did not finish, so the runtime was not switched")
+            raise RuntimeError("an inference did not finish, so the model and runtime were not switched")
         switch.result()
 
     async def _cmd_token_create(self, message: dict[str, Any]) -> None:
@@ -2124,6 +2127,8 @@ class Engine:
         manifest = plugins.sanitise_manifest(manifest)
         if not plugins.runs_here(manifest["platforms"], self.platform.host):
             raise ValueError(f"{manifest['id']} only runs on {', '.join(manifest['platforms'])}, not {self.platform.host}")
+        if not plugins.supports(manifest.get("min_printguard", ""), self.platform.version):
+            raise ValueError(f"{manifest['name']} needs PrintGuard {manifest['min_printguard']} or newer")
         sources = plugins.sanitise_sources(sources)
         assets = plugins.sanitise_assets(files)
         if set(manifest["assets"]) - set(assets):
@@ -2262,7 +2267,11 @@ class Engine:
 
     async def _cmd_plugin_catalogue(self, message: dict[str, Any]) -> None:
         await self._refresh_catalogue(quiet=True)
-        self.emit({"event": "catalogue", "plugins": self.catalogue, "req_id": message.get("req_id")})
+        listed = [
+            {**entry, "supported": plugins.supports(str(entry.get("min_printguard") or ""), self.platform.version)}
+            for entry in self.catalogue
+        ]
+        self.emit({"event": "catalogue", "plugins": listed, "req_id": message.get("req_id")})
 
     async def _cmd_plugin_page(self, message: dict[str, Any]) -> None:
         """Hands over the page files a zip-installed plugin carries.
