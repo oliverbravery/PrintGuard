@@ -1,4 +1,5 @@
 import { ArrowDown, ArrowUp, GripVertical } from "lucide-react";
+import type { ReactNode } from "react";
 import { moveWithinGroup, reorderGroup, section, togglePinned, toggleHidden } from "../layout";
 import { useStore } from "../store";
 import type { SortableHandle } from "./Sortable";
@@ -8,7 +9,7 @@ export function useReorder(visible: string[]) {
   return (ids: string[]) => mutateLayout((sec) => reorderGroup(sec, visible, ids));
 }
 
-export function LayoutControls({
+function LayoutControls({
   id,
   name,
   handle,
@@ -48,5 +49,38 @@ export function LayoutControls({
         Hide
       </button>
     </div>
+  );
+}
+
+export function LayoutRow({
+  id,
+  name,
+  handle,
+  visible,
+  group,
+  thumb,
+  trailing,
+  below,
+  children,
+}: {
+  id: string;
+  name: string;
+  handle?: SortableHandle;
+  visible: string[];
+  group: string[];
+  thumb?: ReactNode;
+  trailing?: ReactNode;
+  below?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <li ref={handle?.setNodeRef} style={handle?.style} className={`list-row flex-wrap gap-y-2 ${handle?.isDragging ? "z-10 bg-ink-1" : ""}`}>
+      {thumb}
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">{children}</div>
+      {trailing}
+      {(handle || below) && (
+        <div className="basis-full">{handle ? <LayoutControls id={id} name={name} handle={handle} visible={visible} group={group} /> : below}</div>
+      )}
+    </li>
   );
 }

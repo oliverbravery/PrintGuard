@@ -1,13 +1,10 @@
 import { useEffect, useRef } from "react";
 import { useStore } from "../store";
 import type { PluginRecord } from "../types";
-import { Cell } from "./FleetLedger";
-import { LayoutControls, useReorder } from "./LayoutControls";
+import { LayoutRow, useReorder } from "./LayoutControls";
 import { ListHead } from "./Page";
 import { PluginNodeView } from "./PluginNode";
 import { Sortable, SortableItem, type SortableHandle, verticalListSortingStrategy } from "./Sortable";
-
-const COLUMNS = "grid-cols-[6.5rem_minmax(0,1fr)_auto] @3xl:grid-cols-[8rem_minmax(0,1fr)_auto]";
 
 function PluginWebview({ plugin, hidden }: { plugin: PluginRecord; hidden: boolean }) {
   const mountPanel = useStore((s) => s.mountPanel);
@@ -33,63 +30,50 @@ function PluginRow({ plugin, handle, visible, group }: { plugin: PluginRecord; h
     : item?.image && assets && Object.hasOwn(assets, item.image)
       ? assets[item.image]
       : undefined;
-  const name = (
-    <span className="flex items-center gap-2">
-      <h3 className="label truncate">{plugin.manifest.name}</h3>
-      {!plugin.verified && <span className="chip">third party</span>}
-    </span>
-  );
   return (
-    <li
-      ref={handle?.setNodeRef}
-      style={handle?.style}
-      className={`relative grid border-b border-line-0 ${COLUMNS} ${handle?.isDragging ? "z-10 bg-ink-1" : "hover:bg-ink-1"}`}
+    <LayoutRow
+      id={plugin.id}
+      name={plugin.manifest.name}
+      handle={handle}
+      visible={visible}
+      group={group}
+      thumb={item && <div className="aspect-video w-20 shrink-0 overflow-hidden border border-line-0 bg-ink-1">{image && <img src={image} alt="" className="size-full object-contain" />}</div>}
+      below={
+        item?.actions?.length ? (
+          <div className="flex flex-wrap justify-end gap-1">
+            {item.actions.map((action, index) => (
+              <PluginNodeView key={index} plugin={plugin} node={action} panel={panel} />
+            ))}
+          </div>
+        ) : undefined
+      }
     >
-      {item && (
-        <div className="p-2">
-          <div className="aspect-video overflow-hidden border border-line-0 bg-ink-1">{image && <img src={image} alt="" className="size-full object-contain" />}</div>
-        </div>
+      <span className="flex items-center gap-2">
+        <h3 className="label truncate">{plugin.manifest.name}</h3>
+        {!plugin.verified && <span className="chip">third party</span>}
+      </span>
+      {item ? (
+        <>
+          <span className="truncate font-bold">{item.title}</span>
+          {item.description && <span className="mono truncate text-xs text-text-2">{item.description}</span>}
+        </>
+      ) : tree ? (
+        <PluginNodeView plugin={plugin} node={tree} panel={panel} />
+      ) : (
+        (failure || !panel) && <span className="text-sm text-text-2">{failure ?? "Starting"}</span>
       )}
-      <div
-        className={`flex min-w-0 flex-col justify-center gap-1 ${item ? "border-l border-line-0 px-3 py-2" : `px-4 py-3 ${handle ? "col-span-2" : "col-span-3"}`}`}
-      >
-        {name}
-        {item ? (
-          <>
-            <span className="truncate font-bold">{item.title}</span>
-            {item.description && <span className="mono truncate text-xs text-text-2">{item.description}</span>}
-          </>
-        ) : tree ? (
-          <PluginNodeView plugin={plugin} node={tree} panel={panel} />
-        ) : (
-          (failure || !panel) && <span className="text-sm text-text-2">{failure ?? "Starting"}</span>
-        )}
-        {panel && <PluginWebview plugin={plugin} hidden={Boolean(tree)} />}
-      </div>
-      {(handle || item) && (
-        <Cell className="items-end">
-          {handle ? (
-            <LayoutControls id={plugin.id} name={plugin.manifest.name} handle={handle} visible={visible} group={group} />
-          ) : (
-            <div className="flex flex-wrap justify-end gap-1">
-              {item!.actions?.map((action, index) => (
-                <PluginNodeView key={index} plugin={plugin} node={action} panel={panel} />
-              ))}
-            </div>
-          )}
-        </Cell>
-      )}
-    </li>
+      {panel && <PluginWebview plugin={plugin} hidden={Boolean(tree)} />}
+    </LayoutRow>
   );
 }
 
-export function PluginLedger({ plugins, visible, pinned }: { plugins: PluginRecord[]; visible: string[]; pinned: string[] }) {
+export function PluginList({ plugins, visible, pinned }: { plugins: PluginRecord[]; visible: string[]; pinned: string[] }) {
   const customising = useStore((s) => s.customising);
   const group = plugins.map((plugin) => plugin.id);
   const reorder = useReorder(visible);
   if (plugins.length === 0) return null;
   return (
-    <section aria-label="Plugins" className="@container border-b border-rule">
+    <section aria-label="Plugins">
       <div className="surface sticky top-0 z-[5]">
         <ListHead title={`Plugins · ${plugins.length}`} />
       </div>

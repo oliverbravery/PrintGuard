@@ -387,29 +387,6 @@ button.chip:hover {
   pointer-events: none;
 }
 
-.splitter {
-  display: grid;
-  place-items: center;
-  height: 0.75rem;
-  border-top: 1px solid var(--color-rule);
-  background: var(--color-ink-1);
-}
-
-.splitter::after {
-  content: "";
-  width: 2.5rem;
-  height: 0.25rem;
-  background: var(--color-line-1);
-}
-
-.splitter:is([data-separator="hover"], [data-separator="active"]) {
-  border-color: var(--color-accent);
-}
-
-.splitter:is([data-separator="hover"], [data-separator="active"])::after {
-  background: var(--color-accent);
-}
-
 .topbar {
   position: relative;
   z-index: 30;
@@ -1223,7 +1200,7 @@ dialog.modal::backdrop {
   background: var(--color-ink-1);
 }
 
-.list-row[aria-current] {
+.list-row:is([aria-current], :has([aria-current])) {
   background: var(--color-ink-3);
   box-shadow: inset 3px 0 0 var(--color-accent);
 }

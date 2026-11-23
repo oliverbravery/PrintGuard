@@ -613,12 +613,12 @@ async function stubFloat(page: import("@playwright/test").Page) {
   });
 }
 
-test("a monitor surface draws on each monitor and nothing on the dashboard", async ({ page }) => {
+test("a monitor surface draws on the selected monitor and nothing on the dashboard", async ({ page }) => {
   await stubFloat(page);
   await dashboardWithPlugin(page, MONITOR_PIP, PLUGIN.granted, ["monitor"]);
 
   await expect(page.locator("section", { hasText: "Picture in picture" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Float Bench" })).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "Float Bench" })).toHaveCount(1);
   await page.getByRole("region", { name: /selected monitor$/ }).getByRole("button", { name: "Float Bench" }).click();
 
   await expect.poll(() => page.evaluate(() => (window as any).__floated)).toBe(1);

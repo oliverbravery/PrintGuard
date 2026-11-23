@@ -201,23 +201,12 @@ test("a history or review page goes back when what it shows is removed elsewhere
 });
 
 
-test("a monitor asks about its last print only", async ({ page }) => {
-  await dashboard(page, { engine: engine({ reviews: [review(), review({ id: "r2", status: "dismissed" })] }) });
-  await expect(page.getByRole("heading", { name: "Prusa" })).toBeVisible();
-  await expect(page.getByRole("link", { name: /^Review/ })).toHaveCount(0);
-
-  await emit(page, { event: "state", ...engine({ reviews: [review({ status: "dismissed" }), review({ id: "r2", frames: 7 })] }) });
-  const link = page.getByRole("link", { name: "Review 7 frames from Prusa" });
-  await expect(link).toBeVisible();
-  await link.click();
-  await expect(page).toHaveURL(/#\/monitors\/m1\/review\/r2$/);
-});
-
 test("one kept frame is not called frames on the monitor or in its review", async ({ page }) => {
   await dashboard(page, { engine: engine({ reviews: [review({ frames: 1 })] }) });
-  const link = page.getByRole("link", { name: "Review 1 frame from Prusa" });
-  await expect(link).toBeVisible();
-  await link.click();
+  await page.getByRole("tab", { name: /^Review/ }).click();
+  const print = page.getByRole("tabpanel", { name: /^Review/ }).getByRole("link");
+  await expect(print).toContainText("1 frame ·");
+  await print.click();
   await expect(page.getByRole("main").getByRole("button", { name: "Send 1 frame" })).toBeVisible();
 });
 
@@ -657,7 +646,7 @@ test("a monitor that is off or on standby shows no live figures and says which i
   await expect(rows).toHaveCount(2);
   for (const row of await rows.all()) {
     await expect(row).not.toContainText("5.0");
-    await expect(row.getByRole("img", { name: "risk unknown" })).toBeVisible();
+    await expect(row).not.toContainText("%");
   }
   await expect(rows.nth(0)).toContainText("standby");
   await expect(rows.nth(1)).toContainText("off");
@@ -3241,12 +3230,12 @@ test("the selected monitor's risk bar keeps its width when the score drops to on
 });
 
 test("the page fits the screen, with the fleet and each list scrolling on their own", async ({ page }) => {
-  const monitors = Array.from({ length: 8 }, (_, index) => monitor({ id: `m${index}`, name: `Printer ${index}` }));
+  const monitors = Array.from({ length: 14 }, (_, index) => monitor({ id: `m${index}`, name: `Printer ${index}` }));
   const prints = Array.from({ length: 30 }, (_, index) => ({ id: `f${index}`, name: `part ${index}`, filename: `part${index}.gcode`, ext: "gcode", size: 1000, printer_ids: [], uploaded: index, meta: {}, thumbnail: null }));
   await dashboard(page, { engine: engine({ monitors, prints }) });
   const hero = page.getByRole("region", { name: "Printer 0, selected monitor" });
   const heroTop = (await hero.boundingBox())!.y;
-  const lastMonitor = page.getByRole("link", { name: "Printer 7", exact: true });
+  const lastMonitor = page.getByRole("link", { name: "Printer 13", exact: true });
   await expect(lastMonitor).not.toBeInViewport();
   await lastMonitor.scrollIntoViewIfNeeded();
   await expect(lastMonitor).toBeInViewport();
@@ -3266,50 +3255,6 @@ test("the page fits the screen, with the fleet and each list scrolling on their 
   await expect(lastPrint).toBeInViewport();
   expect((await title.boundingBox())!.y).toBe(titleTop);
   expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight)).toBe(true);
-});
-
-test("the divider, its arrow keys and the layout buttons resize the fleet, and the size is remembered", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 900 });
-  const state = { engine: engine({ monitors: [monitor(), monitor({ id: "m2", name: "MK4" })] }) };
-  await dashboard(page, state);
-  const fleetTop = async () => (await page.getByRole("heading", { name: /^Fleet/ }).boundingBox())!.y;
-  const divider = page.getByRole("separator", { name: "Selected monitor height" });
-  const start = await fleetTop();
-  const handle = (await divider.boundingBox())!;
-  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(handle.x + handle.width / 2, handle.y - 120, { steps: 6 });
-  await page.mouse.up();
-  expect(start - (await fleetTop())).toBeGreaterThan(100);
-  expect(start - (await fleetTop())).toBeLessThan(140);
-
-  const dragged = await fleetTop();
-  await divider.press("ArrowDown");
-  expect(await fleetTop()).toBeGreaterThan(dragged);
-
-  await page.getByRole("button", { name: "Layout", exact: true }).click();
-  const beforeTaller = await fleetTop();
-  await page.getByRole("button", { name: "Taller", exact: true }).click();
-  expect(await fleetTop()).toBeLessThan(beforeTaller);
-
-  const kept = await fleetTop();
-  await page.reload();
-  await dashboard(page, state);
-  expect(await fleetTop()).toBe(kept);
-});
-
-test("the fleet can't grow over the selected monitor's risk, and what's pinned under it stays in view", async ({ page }) => {
-  await dashboard(page, { engine: engine({ monitors: [monitor(), monitor({ id: "m2", name: "MK4" })] }) });
-  const handle = (await page.getByRole("separator", { name: "Selected monitor height" }).boundingBox())!;
-  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(handle.x + handle.width / 2, 0, { steps: 8 });
-  await page.mouse.up();
-  const hero = page.getByRole("region", { name: "Prusa, selected monitor" });
-  const risk = (await hero.getByRole("img", { name: /^risk/ }).boundingBox())!;
-  const pinned = hero.getByText("Link a printer to pause or cancel failing prints automatically.");
-  await expect(pinned).toBeInViewport();
-  expect(risk.y + risk.height).toBeLessThan((await pinned.boundingBox())!.y);
 });
 
 test("on a phone the fleet is the page, a monitor opens on its own and back returns to the fleet", async ({ page }) => {
@@ -3433,11 +3378,3 @@ test("non-web URLs in release notes, plugin OAuth registration, and schema links
   await expect(page.getByRole("link", { name: "Register an app" })).toHaveCount(0);
 });
 
-test("opening Layout while the fleet is folded expands the fleet", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await dashboard(page, { engine: engine({ printers: [jobPrinter()], monitors: [monitor({ printer_id: "p1" })] }) });
-  await page.getByRole("button", { name: "Hide the fleet" }).click();
-  await expect(page.getByRole("button", { name: "Show the fleet" })).toHaveAttribute("aria-expanded", "false");
-  await page.getByRole("button", { name: "Layout", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Hide the fleet" })).toHaveAttribute("aria-expanded", "true");
-});

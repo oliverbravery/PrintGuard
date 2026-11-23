@@ -34,7 +34,6 @@ export function Page({
   back,
   actions,
   subview = false,
-  titleHidden = false,
   phoneBack,
   children,
 }: {
@@ -42,27 +41,20 @@ export function Page({
   back?: Back;
   actions?: ReactNode;
   subview?: boolean;
-  titleHidden?: boolean;
   phoneBack?: Back;
   children: ReactNode;
 }) {
   return (
     <div className="page" data-subview={subview || undefined}>
       <title>{`${title} · PrintGuard`}</title>
-      {titleHidden ? (
-        <h1 tabIndex={-1} className="sr-only">
+      <div className="page-head">
+        {phoneBack && <BackLink back={phoneBack} className="md:hidden" />}
+        {back && <BackLink back={back} className={phoneBack ? "max-md:hidden" : ""} />}
+        <h1 tabIndex={-1} className="page-title">
           {title}
         </h1>
-      ) : (
-        <div className="page-head">
-          {phoneBack && <BackLink back={phoneBack} className="md:hidden" />}
-          {back && <BackLink back={back} className={phoneBack ? "max-md:hidden" : ""} />}
-          <h1 tabIndex={-1} className="page-title">
-            {title}
-          </h1>
-          {actions && <div className="page-actions">{actions}</div>}
-        </div>
-      )}
+        {actions && <div className="page-actions">{actions}</div>}
+      </div>
       {children}
     </div>
   );
@@ -70,7 +62,7 @@ export function Page({
 
 export function Split({ list, detail, detailShown }: { list: ReactNode; detail: ReactNode; detailShown: boolean }) {
   return (
-    <div className="page-fill grid md:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
+    <div className="page-fill grid md:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[22rem_minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
       <div className={`relative min-w-0 border-rule md:border-r overflow-y-auto ${detailShown ? "max-md:hidden" : ""}`}>{list}</div>
       <div className={`relative min-w-0 overflow-y-auto ${detailShown ? "" : "max-md:hidden"}`}>{detail}</div>
     </div>

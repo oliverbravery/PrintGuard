@@ -38,17 +38,44 @@ function Block({ children, className = "" }: { children: React.ReactNode; classN
   return <div className={`border-b border-line-0 px-4 py-3 ${className}`}>{children}</div>;
 }
 
-function ControlPane({ monitor }: { monitor: Monitor }) {
-  const { camera, printer, historyPoints } = useStore(
+function RiskBlock({ monitor }: { monitor: Monitor }) {
+  const { online, historyPoints } = useStore(
     useShallow((s) => ({
-      camera: s.engine?.cameras.find((c) => c.id === monitor.camera_id),
-      printer: s.engine?.printers.find((p) => p.id === monitor.printer_id),
+      online: Boolean(s.engine?.cameras.find((c) => c.id === monitor.camera_id)?.online),
       historyPoints: s.history[monitor.id],
     })),
   );
   const points = historyPoints ?? [];
+  const score = online && monitor.watching ? (points.at(-1)?.score ?? 0) : null;
+  return (
+    <Block className="border-t border-t-rule">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="label">Defect risk</span>
+        <Link to={`/monitors/${monitor.id}/history`} className="btn-inline">
+          History
+        </Link>
+      </div>
+      <RiskMeter score={score} threshold={monitor.threshold} size="hero" />
+      <div className="mt-2">
+        <Sparkline points={points} threshold={monitor.threshold} />
+      </div>
+      {monitor.alert && (
+        <p className="mono mt-2 text-xs text-bad">
+          {[`defect at ${(monitor.alert.score * 100).toFixed(0)}%`, alertOutcome(monitor.alert.action)].filter(Boolean).join(", ")}
+        </p>
+      )}
+    </Block>
+  );
+}
+
+function ControlPane({ monitor }: { monitor: Monitor }) {
+  const { camera, printer } = useStore(
+    useShallow((s) => ({
+      camera: s.engine?.cameras.find((c) => c.id === monitor.camera_id),
+      printer: s.engine?.printers.find((p) => p.id === monitor.printer_id),
+    })),
+  );
   const device = printer?.device_state;
-  const score = camera?.online && monitor.watching ? (points.at(-1)?.score ?? 0) : null;
   const state = monitorState(monitor, Boolean(camera?.online));
   return (
     <>
@@ -62,34 +89,17 @@ function ControlPane({ monitor }: { monitor: Monitor }) {
           {activeJob(device) ? jobText(device) : printer ? `${printer.name}, ${printer.device_state?.status ?? "no status yet"}` : "No printer, alerts only"}
         </p>
       </Block>
-      <Block>
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="label">Defect risk</span>
-          <Link to={`/monitors/${monitor.id}/history`} className="btn-inline">
-            History
-          </Link>
-        </div>
-        <RiskMeter score={score} threshold={monitor.threshold} size="hero" />
-        <div className="mt-2">
-          <Sparkline points={points} threshold={monitor.threshold} />
-        </div>
-        {monitor.alert && (
-          <p className="mono mt-2 text-xs text-bad">
-            {[`defect at ${(monitor.alert.score * 100).toFixed(0)}%`, alertOutcome(monitor.alert.action)].filter(Boolean).join(", ")}
-          </p>
-        )}
-      </Block>
       {printer ? (
         <>
           <div className="border-b border-rule">
             <HeaterReadouts state={device} />
           </div>
-          <div className="surface z-[1] lg:sticky lg:bottom-0">
+          <div className="surface z-[1] @3xl:sticky @3xl:bottom-0">
             <PrintActions key={printer.id} printer={printer} />
           </div>
         </>
       ) : (
-        <p className="surface z-[1] border-b border-rule px-4 py-3 text-sm text-text-1 lg:sticky lg:bottom-0">Link a printer to pause or cancel failing prints automatically.</p>
+        <p className="surface z-[1] border-b border-rule px-4 py-3 text-sm text-text-1 @3xl:sticky @3xl:bottom-0">Link a printer to pause or cancel failing prints automatically.</p>
       )}
     </>
   );
@@ -165,52 +175,51 @@ export function MonitorHero({ monitor }: { monitor: Monitor }) {
   const tabs = PANES.map((tab) => (tab.id === "review" && waiting ? { ...tab, badge: `${waiting} to review` } : tab));
   const prefix = "hero";
   return (
-    <section
-      aria-label={`${monitor.name}, selected monitor`}
-      className="grid lg:h-full lg:grid-cols-[minmax(0,1.32fr)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]"
-    >
-      <div className="flex min-w-0 flex-col border-rule max-lg:border-b lg:border-r">
-        <Feed
-          camera={camera}
-          active={!covered}
-          className="lg:aspect-auto lg:min-h-0 lg:flex-1"
-          banner={monitor.alert && <span className="mono relative z-[4] bg-bad px-4 py-1.5 text-xs font-bold tracking-[0.2em] text-on-bad">DEFECT DETECTED</span>}
-        >
-          {activeJob(device) && <ProgressBar state={device} className="absolute inset-x-0 bottom-0 z-[3] h-1" />}
-        </Feed>
-        <div className="mono flex min-h-11 items-stretch border-t border-rule text-xs">
-          <p className="flex min-w-0 flex-1 items-center justify-between gap-3 px-4 py-2">
-            <span className="truncate">{camera ? `${camera.name} · ${sourceLabel(camera.source)}` : "No camera"}</span>
-            {camera?.online && (
-              <span className="whitespace-nowrap text-text-2">
-                {monitor.watching ? `${camera.achieved_fps.toFixed(1)}/${camera.target_fps.toFixed(1)} fps · ` : ""}max {camera.max_fps.toFixed(0)}
-              </span>
-            )}
-          </p>
-          {tools.map(({ plugin, node }) => (
-            <div key={plugin.id} className="flex items-center border-l border-rule px-2">
-              <PluginNodeView plugin={plugin} node={node} />
-            </div>
-          ))}
+    <section aria-label={`${monitor.name}, selected monitor`} className="@container h-full">
+      <div className="grid @3xl:h-full @3xl:grid-cols-[minmax(0,1.32fr)_minmax(23rem,1fr)] @3xl:grid-rows-[minmax(0,1fr)]">
+        <div className="flex min-w-0 flex-col border-rule @max-3xl:border-b @3xl:min-h-0 @3xl:overflow-y-auto @3xl:border-r">
+          <Feed
+            camera={camera}
+            active={!covered}
+            banner={monitor.alert && <span className="mono relative z-[4] bg-bad px-4 py-1.5 text-xs font-bold tracking-[0.2em] text-on-bad">DEFECT DETECTED</span>}
+          >
+            {activeJob(device) && <ProgressBar state={device} className="absolute inset-x-0 bottom-0 z-[3] h-1" />}
+          </Feed>
+          <div className="mono flex min-h-11 items-stretch border-t border-rule text-xs">
+            <p className="flex min-w-0 flex-1 items-center justify-between gap-3 px-4 py-2">
+              <span className="truncate">{camera ? `${camera.name} · ${sourceLabel(camera.source)}` : "No camera"}</span>
+              {camera?.online && (
+                <span className="whitespace-nowrap text-text-2">
+                  {monitor.watching ? `${camera.achieved_fps.toFixed(1)}/${camera.target_fps.toFixed(1)} fps · ` : ""}max {camera.max_fps.toFixed(0)}
+                </span>
+              )}
+            </p>
+            {tools.map(({ plugin, node }) => (
+              <div key={plugin.id} className="flex items-center border-l border-rule px-2">
+                <PluginNodeView plugin={plugin} node={node} />
+              </div>
+            ))}
+          </div>
+          <RiskBlock monitor={monitor} />
         </div>
-      </div>
-      <div className="flex min-w-0 flex-col">
-        <Tabs prefix={prefix} label="Monitor panes" tabs={tabs} value={pane} onChange={setPane} cells />
-        <div className="relative flex-1 lg:min-h-0 lg:scroll-pb-14 lg:overflow-y-auto">
-          {PANES.map(({ id }) => (
-            <TabPanel
-              key={id}
-              prefix={prefix}
-              id={id}
-              className={pane === id ? "" : "hidden"}
-            >
-              {pane === id && id === "control" && <ControlPane monitor={monitor} />}
-              {pane === id && id === "tune" && <TunePane monitor={monitor} />}
-              {pane === id && id === "preheat" && <PreheatPaneFor monitor={monitor} />}
-              {pane === id && id === "configure" && <MonitorSettings key={monitor.id} monitor={monitor} />}
-              {pane === id && id === "review" && <ReviewList monitorId={monitor.id} />}
-            </TabPanel>
-          ))}
+        <div className="flex min-w-0 flex-col">
+          <Tabs prefix={prefix} label="Monitor panes" tabs={tabs} value={pane} onChange={setPane} cells />
+          <div className="relative flex-1 @3xl:min-h-0 @3xl:scroll-pb-14 @3xl:overflow-y-auto">
+            {PANES.map(({ id }) => (
+              <TabPanel
+                key={id}
+                prefix={prefix}
+                id={id}
+                className={pane === id ? "" : "hidden"}
+              >
+                {pane === id && id === "control" && <ControlPane monitor={monitor} />}
+                {pane === id && id === "tune" && <TunePane monitor={monitor} />}
+                {pane === id && id === "preheat" && <PreheatPaneFor monitor={monitor} />}
+                {pane === id && id === "configure" && <MonitorSettings key={monitor.id} monitor={monitor} />}
+                {pane === id && id === "review" && <ReviewList monitorId={monitor.id} />}
+              </TabPanel>
+            ))}
+          </div>
         </div>
       </div>
     </section>
