@@ -28,8 +28,8 @@ function row(page: Page, monitor: string) {
 }
 
 async function risk(page: Page, monitor: string) {
-  const label = await row(page, monitor).getByRole("img", { name: /^risk / }).getAttribute("aria-label");
-  return Number(label!.match(/\d+/)![0]);
+  const text = await row(page, monitor).textContent();
+  return Number(text!.match(/risk\s*(\d+)%/)![1]);
 }
 
 test.describe.configure({ mode: "serial" });
@@ -78,8 +78,9 @@ test("a failing print is caught end to end", async ({ page, baseURL, cameraUrl }
   await page.getByRole("slider", { name: /Alert threshold/ }).press("Home");
 
   for (const feed of FEEDS) {
-    await expect(row(page, feed.monitor).getByText("watching", { exact: true })).toBeVisible({ timeout: 90_000 });
-    await expect(row(page, feed.monitor).getByText(/^(?!0\.0 )\d+\.\d fps$/)).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("link", { name: feed.monitor, exact: true }).click();
+    const selected = page.getByRole("region", { name: `${feed.monitor}, selected monitor` });
+    await expect(selected.getByText(/(?<![\d.])(?!0\.0\/)\d+\.\d\/\d+\.\d fps/)).toBeVisible({ timeout: 90_000 });
   }
   await expect(row(page, "Failing print").getByText("defect", { exact: true })).toBeVisible({ timeout: 90_000 });
   await expect(page.getByText("DEFECT DETECTED")).toBeVisible();
