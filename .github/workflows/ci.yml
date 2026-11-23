@@ -31,7 +31,7 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci --prefix web
-      - run: uv run --locked --python ${{ matrix.python }} pytest
+      - run: uv run --locked --managed-python --python ${{ matrix.python }} pytest
 
   typecheck:
     name: typecheck
