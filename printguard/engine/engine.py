@@ -329,7 +329,7 @@ class Engine:
         except OSError as exc:
             self._warn_at_start(f"The recordings of prints waiting for review could not be read: {logs.describe(exc)}")
         await self.reconcile_declared_cameras()
-        self.cameras.sync_in_use(self.monitors, self.printers)
+        self.sync_cameras()
         self.watchdog.reconcile_cameras_once_read(self.printers.items)
         self.settle_reviews()
         runtime = self.platform.plugin_runtime
@@ -787,8 +787,12 @@ class Engine:
             }
         )
 
+    def sync_cameras(self) -> None:
+        """Recomputes which cameras are inferred on and which keep capturing."""
+        self.cameras.sync_in_use(self.monitors, self.printers, self.watchdog.awaited_cameras())
+
     def _sync(self, req_id: Any = None) -> None:
-        self.cameras.sync_in_use(self.monitors, self.printers)
+        self.sync_cameras()
         self.settle_reviews()
         self.save()
         event = self.state_event()
@@ -819,11 +823,10 @@ class Engine:
         self._attach_source(camera, source)
         logger.info("camera '%s' (%s) attached at %.1f fps", camera.name, camera.id, source.fps)
 
-    @staticmethod
-    def _attach_source(camera: Camera, source: FrameSource) -> None:
+    def _attach_source(self, camera: Camera, source: FrameSource) -> None:
         """Hands a camera the frame source that was opened for it."""
         camera.frame_source = source
-        source.set_monitoring(camera.in_use)
+        source.set_monitoring(camera.in_use or camera.id in self.watchdog.awaited_cameras())
         if source.fps > 0:
             camera.max_fps = source.fps
 

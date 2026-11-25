@@ -711,6 +711,7 @@ async def test_losing_the_camera_pauses_the_print_only_when_the_monitor_is_set_t
         assert not [call for call in platform.http_calls if call[0] == "POST"], "a blip shorter than the grace period does not pause the print"
         await asyncio.sleep(0.6)
         monitor = engine.state_event()["monitors"][0]
+        assert not source.standby, "a print paused for its camera keeps the camera capturing, so its return is seen"
         source.online = True
         await asyncio.sleep(0.1)
         assert not [event for event in _of(events, "warning") if "resume" in event["message"]], "the camera has to hold online before it is called back"

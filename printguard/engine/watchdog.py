@@ -229,7 +229,7 @@ class Watchdog:
         reports that print over. A pause keeps it, so a print resumed after a
         false alarm is not paused again at once.
         """
-        self._engine.cameras.sync_in_use(self._engine.monitors, self._engine.printers)
+        self._engine.sync_cameras()
         for monitor in self._engine.monitors.values():
             if not monitor_watching(monitor, self._engine.printers):
                 self.drop_streak(monitor["id"])
@@ -245,6 +245,10 @@ class Watchdog:
             self._engine.save()
         except OSError as exc:
             self._engine.report_failure("saving the state", exc)
+
+    def awaited_cameras(self) -> set[str]:
+        """Ids of the cameras paused prints are waiting on, which keep capturing so their return is seen."""
+        return {self._engine.monitors[mid]["camera_id"] for mid in self._camera_back_since if mid in self._engine.monitors}
 
     def forget(self, monitor_id: str) -> None:
         """Drops everything the watchdog holds for a monitor that was removed."""
@@ -474,6 +478,15 @@ class Watchdog:
     ) -> bool:
         """Follows one fault condition, announcing it once it outlasts the grace period and again once it has recovered.
 
+        Args:
+            key: The fault and the monitor it is on, such as ``offline:<id>``.
+            healthy: Whether the condition is clear on this tick.
+            now: Current monotonic time.
+            grace: How long the fault has to last before it is announced.
+            monitor: The monitor the fault is announced for.
+            down_message: What is said when the fault is announced.
+            up_message: What is said once it has recovered.
+
         Returns:
             Whether this call announced the fault for the first time.
         """
@@ -519,7 +532,13 @@ class Watchdog:
         self._announce(monitor, message, recovered)
 
     def _announce(self, monitor: dict[str, Any], message: str, recovered: bool = False) -> None:
-        """Shows a warning on the dashboard and pushes it when the monitor notifies."""
+        """Shows a warning on the dashboard and pushes it when the monitor notifies.
+
+        Args:
+            monitor: The monitor the warning is about.
+            message: What the warning says.
+            recovered: Whether it says a fault has cleared.
+        """
         self._engine.emit({"event": "warning", "monitor_id": monitor["id"], "message": message, "recovered": recovered})
         if monitor.get("notify"):
             self._schedule(f"the warning for '{monitor['name']}'", self._engine.send_alerts(f"PrintGuard {'recovered' if recovered else 'warning'}", message, None, urgent=not recovered))
@@ -625,13 +644,15 @@ class Watchdog:
 
         async def pause() -> None:
             try:
-                if await self._act(monitor, "pause") == "failed":
-                    if monitor["notify"]:
-                        await self._engine.send_alerts("PrintGuard warning", f"AUTOMATIC PAUSE FAILED for '{monitor['name']}' after losing its camera, check the printer", None)
+                action = await self._act(monitor, "pause")
+                if action == "failed" and monitor["notify"]:
+                    await self._engine.send_alerts("PrintGuard warning", f"AUTOMATIC PAUSE FAILED for '{monitor['name']}' after losing its camera, check the printer", None)
+                if action != "pause":
                     return
                 self._announce(monitor, f"Paused '{printer.name}' since '{monitor['name']}' can't see its print")
                 if offline:
                     self._camera_back_since[monitor["id"]] = None
+                    self._engine.sync_cameras()
                 await self.refresh(printer, after_command=True)
             finally:
                 self.responding.discard(monitor["id"])
@@ -660,6 +681,7 @@ class Watchdog:
         online = camera is not None and camera.online
         if printer is None or printer.reported_status in ENDED_STATUSES or (online and watching):
             del self._camera_back_since[mid]
+            self._engine.sync_cameras()
             return
         if not online or printer.reported_status != DeviceStatus.PAUSED.value:
             self._camera_back_since[mid] = None
@@ -669,6 +691,7 @@ class Watchdog:
             self._camera_back_since[mid] = now
         elif now - since >= RECOVER_HOLD_S:
             del self._camera_back_since[mid]
+            self._engine.sync_cameras()
             self._announce(monitor, f"Camera '{camera.name}' is back, so you can resume '{printer.name}' when you're ready", recovered=True)
 
     async def _act(self, monitor: dict[str, Any], wanted: str) -> str:
