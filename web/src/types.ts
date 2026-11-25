@@ -56,6 +56,7 @@ export interface DeviceState {
   remaining_s: number | null;
   nozzle: Heater | null;
   bed: Heater | null;
+  outcome: "finished" | "cancelled" | "error" | null;
 }
 
 export interface PreheatPreset {
@@ -138,8 +139,11 @@ export interface Snapshot {
 
 export interface ReviewFrame extends Omit<Snapshot, "action"> {
   action?: string;
-  kind: "alert" | "near" | "spaced" | "added";
+  kind: "alert" | "streak" | "spike" | "near" | "spaced" | "added";
   label?: "good" | "failure";
+  alert?: string;
+  streak?: number;
+  consecutive?: number;
   size: number;
 }
 

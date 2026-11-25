@@ -20,9 +20,25 @@ function toggled(ids: Set<string>, id: string): Set<string> {
   return next;
 }
 
+function flaggedWithItsStreak(ids: Set<string>, frames: ReviewFrame[], frame: ReviewFrame): Set<string> {
+  const flagging = !ids.has(frame.id);
+  const next = new Set(ids);
+  for (const member of frames) {
+    if (member.id !== frame.id && !(frame.kind === "alert" && member.alert === frame.id)) continue;
+    if (flagging) next.add(member.id);
+    else next.delete(member.id);
+  }
+  return next;
+}
+
 function verdict(frame: ReviewFrame, failure: boolean): string {
-  if (frame.kind === "alert") return failure ? "Real failure" : "False alarm";
+  if (frame.kind === "alert" || frame.kind === "streak") return failure ? "Real failure" : "False alarm";
   return failure ? "Failure" : "Good";
+}
+
+function picked(frame: ReviewFrame): string | null {
+  if (frame.kind === "streak") return `${frame.streak} of ${frame.consecutive}`;
+  return frame.kind === "added" || frame.kind === "spike" ? frame.kind : null;
 }
 
 function FrameCard({
@@ -52,8 +68,7 @@ function FrameCard({
       <span className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-3 py-2 pr-12">
         <Status tone={failure ? "bad" : "ok"}>{verdict(frame, failure)}</Status>
         <span className="mono text-xs text-text-2">
-          {frame.kind === "added" && "added · "}
-          {clock(frame.ts)} · {(frame.score * 100).toFixed(0)}%
+          {[picked(frame), clock(frame.ts), `${(frame.score * 100).toFixed(0)}%`].filter(Boolean).join(" · ")}
         </span>
       </span>
       <button
@@ -199,7 +214,7 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
             frame={frame}
             position={`Frame ${index + 1} of ${kept.length}`}
             failure={showsFailure(frame)}
-            onFlag={() => setFlagged((current) => toggled(current, frame.id))}
+            onFlag={() => setFlagged((current) => flaggedWithItsStreak(current, frames, frame))}
             onRemove={() => setRemoved((current) => toggled(current, frame.id))}
             onEnlarge={() => setEnlarged(frame)}
           />
@@ -220,10 +235,12 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
         <details className="text-sm text-text-2">
           <summary className="cursor-pointer py-1 hover:text-text-1 pointer-coarse:py-3">What's sent</summary>
           <p className="mt-1.5 leading-relaxed">
-            The frames shown here with the labels you gave them, each frame's risk score, timestamp and whether it was an
-            alert, near miss or regular frame, random IDs for the print and each frame, this monitor's alert threshold,
-            the printer integration type, the printer model (if set on the printer), the PrintGuard version and a random
-            ID for this hub. No names or camera URLs are sent. The inbox sees your IP address like any web server does,
+            The frames shown here with the labels you gave them. With each frame goes its risk score, timestamp and why it
+            was picked, the detection model and runtime that scored it, how many frames in a row were over the threshold,
+            the printer's status and progress at the time and whether the camera was cropped. With each print goes a random
+            ID for it and for each frame, this monitor's alert settings, what PrintGuard did on each alert and whether you
+            resumed a print it paused, how the print ended, the printer integration type, the printer model (if set on the
+            printer), the PrintGuard version and a random ID for this hub. No names or camera URLs are sent. The inbox sees your IP address like any web server does,
             and only keeps a keyed hash of it until the next day to enforce the daily limit. Frames are stored privately
             in the EU and used solely to train PrintGuard's detection models. To have yours deleted, open an issue on
             GitHub with the hub ID from Settings.
