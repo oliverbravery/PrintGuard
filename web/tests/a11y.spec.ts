@@ -6,9 +6,7 @@ const WCAG_22_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
 const base = engine();
 const state = engine({
-  settings: { ...base.settings, theme: "system", auto_update: true },
-  installs_updates: true,
-  update: { current: "1.0.0", latest: "2.0.0", available: true, download: null, checked_at: 0, releases_url: "https://github.com/o/r/releases", ready: "2.0.0" },
+  settings: { ...base.settings, theme: "system" },
   cameras: [camera(), camera({ id: "c2", name: "Garage", online: false, reason: "no frames for 30s" })],
   printers: [printer(), printer({ id: "p2", name: "MK4", device_state: { status: "paused", progress: 62, job: "bracket.gcode", remaining_s: 900, nozzle: { actual: 215, target: 215 }, bed: { actual: 60, target: 60 } } })],
   monitors: [
@@ -18,6 +16,13 @@ const state = engine({
   reviews: [review()],
   prints: [{ id: "f1", name: "benchy", filename: "benchy.gcode", ext: "gcode", size: 2_000_000, printer_ids: ["p1"], uploaded: 1, meta: {}, thumbnail: null }],
 });
+
+const downloaded = {
+  ...state,
+  settings: { ...state.settings, auto_update: true },
+  installs_updates: true,
+  update: { current: "1.0.0", latest: "2.0.0", available: true, download: null, checked_at: 0, releases_url: "https://github.com/o/r/releases", ready: "2.0.0" },
+};
 
 const ROUTES = [
   "/",
@@ -55,7 +60,7 @@ for (const theme of ["dark", "light"] as const) {
 
       for (const route of ROUTES) {
         test(`${route} meets WCAG 2.2 AA`, async ({ page }) => {
-          await dashboard(page, { engine: state }, route);
+          await dashboard(page, { engine: route === "/settings/updates" ? downloaded : state }, route);
           await expect(page.locator("main h1")).toBeAttached();
           const { violations } = await new AxeBuilder({ page }).withTags(WCAG_22_AA).exclude("video").analyze();
           expect(violations.map(({ id, nodes }) => `${id}: ${nodes.map((node) => node.target.join(" ")).join(", ")}`)).toEqual([]);
@@ -64,7 +69,7 @@ for (const theme of ["dark", "light"] as const) {
 
       for (const dialog of DIALOGS) {
         test(`the ${dialog} dialog meets WCAG 2.2 AA`, async ({ page }) => {
-          await dashboard(page, { engine: state, dialog });
+          await dashboard(page, { engine: dialog === "update" ? downloaded : state, dialog });
           await expect(page.getByRole("dialog")).toBeVisible();
           const { violations } = await new AxeBuilder({ page }).withTags(WCAG_22_AA).include("dialog").analyze();
           expect(violations.map(({ id, nodes }) => `${id}: ${nodes.map((node) => node.target.join(" ")).join(", ")}`)).toEqual([]);
