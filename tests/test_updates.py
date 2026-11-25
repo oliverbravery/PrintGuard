@@ -297,14 +297,15 @@ async def test_installing_now_fetches_a_release_newer_than_the_one_downloaded() 
     assert engine.state_event()["update"]["ready"] == "2.3.0"
 
 
-async def test_switching_automatic_installs_off_stops_a_downloaded_release_installing_by_itself(monkeypatch) -> None:
+@pytest.mark.parametrize("switched_off", ["auto_update", "update_check"])
+async def test_switching_automatic_installs_off_stops_a_downloaded_release_installing_by_itself(monkeypatch, switched_off: str) -> None:
     monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.01)
     monkeypatch.setattr(engine_module, "UPDATE_INSTALL_GRACE_S", 0.1)
     engine, platform = _desktop(releases=[_release("v2.3.0")])
     await engine.start()
     try:
         await asyncio.sleep(0.05)
-        await engine.request({"cmd": "settings.update", "patch": {"auto_update": False}})
+        await engine.request({"cmd": "settings.update", "patch": {switched_off: False}})
         await asyncio.sleep(0.2)
         assert platform.updater.installs == 0
         assert engine.state_event()["update"]["ready"] == "2.3.0", "the download is still there to install by hand"

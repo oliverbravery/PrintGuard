@@ -979,9 +979,10 @@ class Engine:
 
         The user gets a while to restart into it themselves first, so an idle
         hub does not restart the moment the download lands under someone
-        reading the dashboard.
+        reading the dashboard. Switching off either automatic installs or the
+        daily check stops it, since the dashboard shows them as one switch.
         """
-        if not self.settings["auto_update"] or not self._ready_update() or time.time() < self._install_update_after:
+        if not (self.settings["auto_update"] and self.settings["update_check"]) or not self._ready_update() or time.time() < self._install_update_after:
             return
         if not any(map(self._holds_a_print, self.monitors.values())):
             logger.info("installing PrintGuard v%s while no monitor holds a print", self.downloaded_update)
