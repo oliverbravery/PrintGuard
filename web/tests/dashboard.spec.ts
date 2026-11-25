@@ -3454,10 +3454,7 @@ test("a monitor with a printer shows an Auto-detect switch and explains its auto
   await expect(panel).toContainText("Automatic with Ender. Watching stops when the print ends.");
 
   await emit(page, { event: "state", ...linked({ device_state: { ...printer().device_state, status: "idle" } }, { watching: false }) });
-  await expect(panel).toContainText("Automatic with Ender. Watching starts when a print begins.");
-
-  await emit(page, { event: "state", ...linked({ device_state: { ...printer().device_state, status: "paused" } }, { watching: false }) });
-  await expect(panel).toContainText("Automatic with Ender. Watching resumes when the print continues.");
+  await expect(panel).toContainText("Automatic with Ender. Watching starts when it prints.");
 
   await emit(page, { event: "state", ...linked({ online: false, device_state: null }, { watching: true }) });
   await expect(panel).toContainText("Automatic with Ender. Still watching until it confirms it isn't printing.");

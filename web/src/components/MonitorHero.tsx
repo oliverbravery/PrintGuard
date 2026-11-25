@@ -74,10 +74,7 @@ function detectionNote(monitor: Monitor, hasCamera: boolean, printer: Printer | 
   if (!hasCamera) return monitor.enabled ? "No camera linked, so nothing is being watched." : "Link a camera to start detecting.";
   if (printer) {
     if (!monitor.enabled) return `Detection is off. PrintGuard won't watch when ${printer.name} prints.`;
-    if (monitor.watching === false)
-      return printer.device_state?.status === "paused"
-        ? `Automatic with ${printer.name}. Watching resumes when the print continues.`
-        : `Automatic with ${printer.name}. Watching starts when a print begins.`;
+    if (monitor.watching === false) return `Automatic with ${printer.name}. Watching starts when it prints.`;
     if (!printer.online) return `Automatic with ${printer.name}. Still watching until it confirms it isn't printing.`;
     return `Automatic with ${printer.name}. Watching stops when the print ends.`;
   }

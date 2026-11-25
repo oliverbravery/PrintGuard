@@ -11,7 +11,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Added
 
-- Each monitor's **Control** tab has a **Start detecting / Stop detecting** button when no printer is linked, and an **Auto-detect** switch with a status note when a printer is linked so it's clear detection follows the printer automatically.
+- Each monitor's **Control** tab can start and stop detection, or switch **Auto-detect** on and off when a printer is linked.
 
 ## [3.0.1] - 2026-11-23
 
