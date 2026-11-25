@@ -76,7 +76,7 @@ class Watchdog:
     """Watches inference scores per monitor and reacts to sustained defects.
 
     Attributes:
-        responding: Ids of the monitors with a defect response in flight.
+        responding: Ids of the monitors with a printer action in flight.
     """
 
     def __init__(self, engine: "Engine") -> None:
