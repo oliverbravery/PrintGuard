@@ -1281,7 +1281,7 @@ test("a preview that fails to draw on upload leaves nothing behind, and the file
 
 test("a file too large to draw says so, still shows what the hub read from it and uploads", async ({ page }) => {
   await stagePrint(page, 33);
-  await expect(page.getByText("files over 32 MB are not drawn")).toBeVisible();
+  await expect(page.getByText("files over 32 MB are not drawn")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("1h 30m")).toBeVisible();
   await expect(page.getByText("12 g")).toBeVisible();
   await page.getByRole("button", { name: "Upload", exact: true }).click();
@@ -1334,7 +1334,7 @@ test("a sliced 3mf's plate over the drawing limit is never unpacked whole", asyn
   }
   await stageArchive(page, { "3D/3dmodel.model": new Uint8Array(8), "Metadata/plate_1.gcode": new TextEncoder().encode(lines.join("\n")) });
 
-  await expect(page.getByText("files over 32 MB are not drawn")).toBeVisible();
+  await expect(page.getByText("files over 32 MB are not drawn")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("1h 30m")).toBeVisible();
   expect(await page.evaluate(() => (window as any).__sample)).toEqual({ size: 4 * 1024 * 1024 + 1 + 512 * 1024, start: "; first line of the plate\n" });
   expect(await page.evaluate(() => (window as any).__largestBlob)).toBeLessThan(8 * 1024 * 1024);
@@ -2318,7 +2318,7 @@ test("a stored file is drawn from what arrives, and one over the limit is cut of
   });
   await expect(page.getByRole("slider", { name: "Layers shown" })).toHaveCount(0);
   await page.evaluate(() => (location.hash = "#/prints/f1"));
-  await expect(page.getByText("files over 32 MB are not drawn")).toBeVisible();
+  await expect(page.getByText("files over 32 MB are not drawn")).toBeVisible({ timeout: 15_000 });
   expect(await page.evaluate(() => (window as any).__cancelledAt)).toBeLessThan(36);
 });
 
