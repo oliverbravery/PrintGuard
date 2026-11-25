@@ -9,6 +9,10 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [3.0.2] - 2026-11-24
 
+### Added
+
+- Monitors can pause their printer when the camera has been offline or frozen for longer than the fault grace period. It's off by default and switched on in the monitor's Tune tab.
+
 ## [3.0.1] - 2026-11-23
 
 ### Changed
