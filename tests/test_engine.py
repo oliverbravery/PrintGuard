@@ -682,6 +682,43 @@ async def test_a_taken_command_is_not_resent_when_the_read_back_does_not_show_it
     assert printer["online"] or read_back == "says_unknown", "a failed read after a command that went through does not take the printer offline"
 
 
+@pytest.mark.parametrize("pause_on_camera_loss", [False, True])
+async def test_losing_the_camera_pauses_the_print_only_when_the_monitor_is_set_to(monkeypatch, pause_on_camera_loss: bool) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.02)
+    monkeypatch.setattr(watchdog, "GRACE_MIN_S", 0.0)
+    monkeypatch.setattr(watchdog, "RESTART_AFTER_S", 10.0)
+    platform = FakePlatform(infer_s=0.01)
+    answer = platform.http
+
+    async def pausing(method: str, url: str, **request) -> tuple[int, object]:
+        response = await answer(method, url, **request)
+        if method == "POST" and "/api/job" in url:
+            platform.device_status = "Paused"
+        return response
+
+    monkeypatch.setattr(platform, "http", pausing)
+    async with running_engine(platform, camera_fps=[20.0]) as (engine, events):
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off", "fault_grace_s": 0.2}})
+        printer_id = await _register_printer(engine)
+        await engine.watchdog.poll_devices()
+        patch = {"printer_id": printer_id, "pause_on_camera_loss": pause_on_camera_loss}
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": patch})
+        next(iter(engine.cameras.values())).frame_source.online = False
+        await asyncio.sleep(0.15)
+        assert not [call for call in platform.http_calls if call[0] == "POST"], "a blip shorter than the grace period does not pause the print"
+        await asyncio.sleep(0.6)
+        monitor = engine.state_event()["monitors"][0]
+
+    commands = [request["json"] for request in platform.http_requests if request["method"] == "POST" and "/api/job" in request["url"]]
+    paused = [event for event in _of(events, "warning") if event["message"].startswith("Paused")]
+    if pause_on_camera_loss:
+        assert commands == [{"command": "pause", "action": "pause"}], commands
+        assert paused and not monitor["watching"], "the paused print is announced and stands its monitor down"
+    else:
+        assert not commands and not paused and monitor["watching"], "a monitor left at the default only warns"
+
+
 async def test_a_camera_dropout_ends_the_defect_streak() -> None:
     platform = FakePlatform(infer_s=0.02)
     platform.inference_blocked = True
