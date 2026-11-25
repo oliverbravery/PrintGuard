@@ -9,6 +9,14 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [3.0.2] - 2026-11-24
 
+### Added
+
+- The desktop app installs its own updates, downloading each release in the background and asking before it restarts. If you don't answer it installs once no monitor is watching a print. It's on for new installs, and you can turn it on under Settings, in Updates. This is the last release you need to download by hand.
+
+### Changed
+
+- The Windows download is an installer that needs no admin rights, `PrintGuard-windows-x64-Setup.exe`. The portable zip is still on every release.
+
 ## [3.0.1] - 2026-11-23
 
 ### Changed
