@@ -4,7 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 import { sourceLabel } from "../cameras";
 import { alertOutcome } from "../history";
 import { useStore } from "../store";
-import type { Monitor } from "../types";
+import type { Monitor, Printer } from "../types";
 import { Feed, useCovered } from "./Feed";
 import { DetailHead } from "./Page";
 import { MonitorSettings } from "./MonitorSettings";
@@ -18,6 +18,7 @@ import { Slider } from "./Slider";
 import { Sparkline } from "./Sparkline";
 import { DeviceStatus, monitorState, Status } from "./Status";
 import { TabPanel, Tabs } from "./Tabs";
+import { Toggle } from "./Toggle";
 
 type Pane = "control" | "tune" | "preheat" | "configure" | "review";
 
@@ -69,15 +70,30 @@ function RiskBlock({ monitor }: { monitor: Monitor }) {
   );
 }
 
+function detectionNote(monitor: Monitor, hasCamera: boolean, printer: Printer | undefined): string {
+  if (!hasCamera) return monitor.enabled ? "No camera linked, so nothing is being watched." : "Link a camera to start detecting.";
+  if (printer) {
+    if (!monitor.enabled) return `Detection is off. PrintGuard won't watch when ${printer.name} prints.`;
+    if (monitor.watching === false) return `Automatic with ${printer.name}. Watching starts when it prints.`;
+    if (!printer.online) return `Automatic with ${printer.name}. Still watching until it confirms it isn't printing.`;
+    return `Automatic with ${printer.name}. Watching stops when the print ends.`;
+  }
+  return monitor.enabled
+    ? "No printer linked. Stop detecting when your print finishes, or link a printer to watch and pause automatically."
+    : "No printer linked. Start detecting when you start a print, or link a printer to watch and pause automatically.";
+}
+
 function ControlPane({ monitor }: { monitor: Monitor }) {
-  const { camera, printer } = useStore(
+  const { camera, printer, updateMonitor } = useStore(
     useShallow((s) => ({
       camera: s.engine?.cameras.find((c) => c.id === monitor.camera_id),
       printer: s.engine?.printers.find((p) => p.id === monitor.printer_id),
+      updateMonitor: s.updateMonitor,
     })),
   );
   const device = printer?.device_state;
   const state = monitorState(monitor, Boolean(camera?.online));
+  const note = detectionNote(monitor, Boolean(camera), printer);
   return (
     <>
       <Block>
@@ -91,15 +107,33 @@ function ControlPane({ monitor }: { monitor: Monitor }) {
       </Block>
       {printer ? (
         <>
-          <div className="border-b border-rule">
+          <div className="border-b border-line-0">
             <HeaterReadouts state={device} />
+          </div>
+          <div className="space-y-2 border-b border-rule px-4 py-3">
+            <Toggle label="Auto-detect" on={monitor.enabled} onChange={(v) => updateMonitor(monitor.id, { enabled: v })} />
+            <p className="text-sm text-text-2">{note}</p>
           </div>
           <div className="surface z-[1] @3xl:sticky @3xl:bottom-0">
             <PrintActions key={printer.id} printer={printer} />
           </div>
         </>
       ) : (
-        <p className="surface z-[1] border-b border-rule px-4 py-3 text-sm text-text-1 @3xl:sticky @3xl:bottom-0">Link a printer to pause or cancel failing prints automatically.</p>
+        <>
+          <div className="border-b border-rule px-4 py-3">
+            <p className="text-sm text-text-2">{note}</p>
+          </div>
+          <div className="surface z-[1] border-b border-rule @3xl:sticky @3xl:bottom-0">
+            <button
+              type="button"
+              className={`cell-action w-full ${!monitor.enabled && camera ? "cell-action-primary" : ""}`}
+              disabled={!monitor.enabled && !camera}
+              onClick={() => updateMonitor(monitor.id, { enabled: !monitor.enabled })}
+            >
+              {monitor.enabled ? "Stop detecting" : "Start detecting"}
+            </button>
+          </div>
+        </>
       )}
     </>
   );
