@@ -190,11 +190,13 @@ describe("uploading a frame", () => {
     expect((await env.FRAMES.head(`${hub}/aaaaaaaaaaaa/${frameId(8400)}.jpg`))!.customMetadata).toMatchObject({
       kind: "streak",
       model: "standard",
+      runtime: "onnx",
       tiled: "true",
       streak: "2",
       status: "printing",
       progress: "41.5",
       consecutive: "3",
+      cooldown_s: "60",
       on_defect: "pause",
       outcome: "cancelled",
       alert: frameId(8402),

@@ -288,6 +288,7 @@ class ReviewLibrary:
         self._unanswered: set[str] = set()
         self._not_prints: list[Review] = []
         self._runs: dict[str, _Run] = {}
+        self._ended_runs: list[tuple[Review, _Run, int]] = []
         self._firing: dict[str, tuple[str, Scoring]] = {}
         self._stops = 0
 
@@ -427,15 +428,34 @@ class ReviewLibrary:
         _raise_first(outcomes)
         return bool(unwanted)
 
-    async def discard_not_prints(self) -> None:
-        """Deletes the files of every watch that ``settle`` found was no print.
+    async def finish_settled(self) -> bool:
+        """Finishes the file work queued by ``settle``.
+
+        Deletes watches that turned out to be no print, and keeps spikes from
+        any over-threshold streak that was still open when its print ended.
+
+        Returns:
+            Whether any settled print gained spike frames and should be saved.
 
         Raises:
-            OSError: If a file could not be deleted, once the rest were tried.
+            OSError: If a file could not be stored or deleted, once the rest were tried.
         """
         not_prints, self._not_prints = self._not_prints, []
-        outcomes = await asyncio.gather(*(self._discard(review) for review in not_prints), return_exceptions=True)
+        ended_runs, self._ended_runs = self._ended_runs, []
+        saved = False
+        outcomes: list[Any] = list(await asyncio.gather(*(self._discard(review) for review in not_prints), return_exceptions=True))
+        for review, run, stops in ended_runs:
+            if self._reviews.get(review.id) is not review or self._stops != stops or review.status not in ("ready", "dismissed"):
+                continue
+            try:
+                if await self._flush_run(review, run, stops):
+                    if review.status == "dismissed":
+                        review.status = "ready"
+                    saved = True
+            except Exception as exc:
+                outcomes.append(exc)
         _raise_first(outcomes)
+        return saved
 
     async def _remove_recording(self, review_id: str) -> None:
         await asyncio.gather(self._platform.files.remove(recording_key(review_id)), self._platform.files.remove(index_key(review_id)))
@@ -555,7 +575,7 @@ class ReviewLibrary:
                 review.spacing_s *= 2
             changed = True
         if over:
-            return await self._hold(review, monitor, record, kept_spaced, frame, stops) or changed
+            return await self._hold(review, monitor, record, kept_spaced if kept_spaced in review.frames else None, frame, stops) or changed
         if spacing or not printing:
             return changed
         return await self._contend(review, "near", record, frame, stops) or changed
@@ -570,10 +590,12 @@ class ReviewLibrary:
         if run.fired:
             return False
         run.held.append((spaced, None) if spaced else (record, await self._jpeg(frame)))
-        if len(run.held) < monitor["consecutive"]:
-            return False
-        earliest, jpeg = run.held.popleft()
-        return bool(jpeg) and await self._contend(review, "spike", earliest, jpeg, stops)
+        changed = False
+        while len(run.held) >= monitor["consecutive"]:
+            earliest, jpeg = run.held.popleft()
+            if jpeg:
+                changed = await self._contend(review, "spike", earliest, jpeg, stops) or changed
+        return changed
 
     async def _end_run(self, review: Review, monitor_id: str, stops: int) -> bool:
         """Ends a monitor's streak, keeping the highest of what it held as spikes unless it fired.
@@ -581,7 +603,14 @@ class ReviewLibrary:
         Returns:
             Whether the kept frames changed.
         """
-        run = self._runs.pop(monitor_id)
+        return await self._flush_run(review, self._runs.pop(monitor_id), stops)
+
+    async def _flush_run(self, review: Review, run: _Run, stops: int) -> bool:
+        """Keeps the highest of a finished streak's held frames as spikes unless it fired.
+
+        Returns:
+            Whether the kept frames changed.
+        """
         if run.fired:
             return False
         changed = False
@@ -600,7 +629,8 @@ class ReviewLibrary:
         held, run.held, run.fired = list(run.held), deque(), True
         for record, jpeg in held:
             if jpeg is None:
-                record["alert"] = alert_id
+                if record in review.frames:
+                    record["alert"] = alert_id
             else:
                 await self._keep(review, {**record, "kind": "streak", "alert": alert_id}, jpeg, stops)
         streaks = review.of_kind("streak")
@@ -658,7 +688,7 @@ class ReviewLibrary:
         A monitor watches a printer it has not heard from yet, as after its
         connection is edited. When that printer's first answer is that it is
         idle or has failed and nothing alerted, what was watched was no print,
-        so it is dropped and ``discard_not_prints`` deletes its files.
+        so it is dropped and ``finish_settled`` deletes its files.
 
         A print that ends keeps how, as its printer said on the read that ended
         it, and none when the printer does not say or the print ended by the
@@ -688,11 +718,13 @@ class ReviewLibrary:
                 continue
             review.ended = now
             review.outcome = printer.device_state["outcome"] if over and printer.device_state else None
-            self._runs.pop(review.monitor_id, None)
+            run = self._runs.pop(review.monitor_id, None)
             if review.id in self._unanswered and over and not review.of_kind("alert"):
                 self._reviews.pop(review.id)
                 self._not_prints.append(review)
             else:
+                if wanted and run and not run.fired and any(jpeg for _, jpeg in run.held):
+                    self._ended_runs.append((review, run, self._stops))
                 review.status = "ready" if wanted and review.frames else "dismissed"
             self._unanswered.discard(review.id)
             changed = True
@@ -784,6 +816,7 @@ class ReviewLibrary:
         """
         self._stops += 1
         self._runs.clear()
+        self._ended_runs.clear()
         self._firing.clear()
         reviews = list(self._reviews.values())
         for review in reviews:

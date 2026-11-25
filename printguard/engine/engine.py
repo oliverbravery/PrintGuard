@@ -1031,8 +1031,12 @@ class Engine:
         """Follows every running print's printer and ends the review of each that is over, returning whether any review changed."""
         changed = self.reviews.settle(self.monitors, self.printers, self.watchdog.responding, self.settings["feedback"] == "ask")
         if changed:
-            self._hold("delete the frames kept of what was no print", self.reviews.discard_not_prints())
+            self._hold("finish settling ended prints", self._finish_settled_reviews())
         return changed
+
+    async def _finish_settled_reviews(self) -> None:
+        if await self.reviews.finish_settled():
+            self.save()
 
     def _start_send(self, review: Review, req_id: Any = None) -> None:
         """Starts uploading a review, or has the upload already under way answer this request too."""

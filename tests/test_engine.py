@@ -3670,6 +3670,59 @@ async def test_spaced_frames_and_near_misses_wait_until_the_printer_is_past_0_pe
     assert {(frame["status"], frame["progress"]) for frame in spaced} == {("printing", 1.0)}
 
 
+async def test_a_streak_frame_thinned_out_of_spaced_is_still_kept_with_its_alert(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.0)
+    monkeypatch.setattr(reviews, "SPACED_MAX", 2)
+    platform = FakePlatform(infer_s=0.01)
+    async with running_engine(platform, camera_fps=[30.0]) as (engine, _):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"consecutive": 3, "cooldown_s": 600}})
+        await asyncio.sleep(0.1)
+        _scripted(platform, [0.1, 0.81, 0.85, 0.9])
+        review = await _finished_review(engine, wait_s=0.6)
+
+    [alert] = _of_kind(review, "alert")
+    assert [(frame["score"], frame["streak"], frame["alert"]) for frame in _of_kind(review, "streak")] == [
+        (0.81, 1, alert["id"]),
+        (0.85, 2, alert["id"]),
+    ], "a streak frame dropped by spaced thinning is still kept as part of the alert's streak"
+
+
+async def test_a_print_ending_mid_streak_keeps_its_held_frames_as_spikes(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
+    monkeypatch.setattr(reviews, "HIGHEST_APART_S", 0.0)
+    platform = FakePlatform(infer_s=0.01)
+    platform.device_status, platform.device_progress = "Operational", 0.0
+    two_scored, block = asyncio.Event(), asyncio.Event()
+    scores = iter([0.91, 0.92])
+
+    async def infer(rgb: np.ndarray) -> dict:
+        await asyncio.sleep(platform.infer_s)
+        score = next(scores, None)
+        if score is None:
+            two_scored.set()
+            await block.wait()
+            return {"prediction": "success", "defect_score": 0.0}
+        return {"prediction": "failure", "defect_score": score}
+
+    async with running_engine(platform, camera_fps=[30.0]) as (engine, _):
+        monitor_id = next(iter(engine.monitors))
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id}})
+        await asyncio.sleep(0.15)
+        platform.infer = infer
+        platform.device_status = "Printing"
+        await asyncio.wait_for(two_scored.wait(), timeout=2.0)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": False}})
+        block.set()
+        await asyncio.sleep(0.1)
+        review = await _review(engine, engine.state_event()["reviews"][0]["id"])
+
+    assert review["status"] == "ready"
+    assert [(frame["score"], frame["streak"]) for frame in _of_kind(review, "spike")] == [(0.91, 1), (0.92, 2)]
+    assert len(review["frames"]) == 2
+
+
 async def test_a_pause_counts_as_resumed_only_once_the_printer_was_seen_paused_and_the_print_keeps_how_it_ended(monkeypatch) -> None:
     monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
     platform = FakePlatform(infer_s=0.02)
