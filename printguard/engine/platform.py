@@ -87,7 +87,7 @@ class FrameSource(Protocol):
         ...
 
     def set_monitoring(self, active: bool) -> None:
-        """Starts or stops capture needed by inference."""
+        """Starts or stops capture needed by inference or to see a camera come back."""
         ...
 
     def close(self) -> None:

@@ -700,7 +700,7 @@ class ReviewLibrary:
         Args:
             monitors: Every monitor record by id.
             printers: The printer registry.
-            responding: Ids of the monitors with a defect response in flight.
+            responding: Ids of the monitors with a printer action in flight.
             wanted: Whether finished prints should wait to be reviewed.
 
         Returns:

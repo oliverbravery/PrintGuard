@@ -115,6 +115,7 @@ export interface Monitor {
   notify: boolean;
   on_defect: "none" | "pause" | "cancel";
   cooldown_s: number;
+  pause_on_camera_loss: boolean;
   alert?: Alert | null;
   watching?: boolean;
   result?: ScorePoint | null;

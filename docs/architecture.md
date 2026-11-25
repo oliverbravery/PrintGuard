@@ -204,6 +204,7 @@ Cameras and printers are independent registries; monitors bind one camera and an
 | `cooldown_s` | `60` | `0` to `600` |
 | `on_defect` | `"none"` | `"none"`, `"pause"`, `"cancel"` |
 | `notify` | `false` | |
+| `pause_on_camera_loss` | `false` | |
 
 Camera `detect_fps` defaults to `60` and clamps to `0.1` to `60`.
 
@@ -366,7 +367,7 @@ stateDiagram-v2
     end note
 ```
 
-The watchdog monitors four conditions: missing/offline watched camera, stalled camera (online with no completed inference for `STALL_GRACE_S` = 30 s), low coverage (<90% frame delivery over the last 10 minutes), and unreadable printer state while watching. Standby monitors forget prior camera faults so the next print gets a fresh grace period.
+The watchdog monitors four conditions: missing/offline watched camera, stalled camera (online with no completed inference for `STALL_GRACE_S` = 30 s), low coverage (<90% frame delivery over the last 10 minutes), and unreadable printer state while watching. Standby monitors forget prior camera faults so the next print gets a fresh grace period. A monitor with `pause_on_camera_loss` pauses its printer when an offline, stalled or missing camera is first announced, through the same retries as a defect pause. It never resumes the print, and after an outage it keeps the camera capturing, though nothing is inferred on it, and sends a recovery once the camera has held online for `RECOVER_HOLD_S`.
 
 Fault warnings (both dashboard toasts and push notifications) wait for `settings.fault_grace_s` (default 120 s, clamped 30 to 900 s), repeat every 30 minutes while unresolved, and suppress flapping by doubling recovery hold times from 1 minute up to 15 minutes. Camera re-attach runs on its own timer so longer grace periods never slow down recovery. A stall that transitions into a disconnect consolidates into one fault. Nothing in the alert path uses silent `except: pass`.
 

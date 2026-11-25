@@ -11,6 +11,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Added
 
+- Each monitor's **Control** tab can start and stop detection, or switch **Auto-detect** on and off when a printer is linked.
+- Monitors can pause their printer when the camera has been offline or frozen for longer than the fault grace period, switched on in the monitor's Tune tab.
 - Prints kept for review keep every frame of the streak that set off an alert, and up to five spikes that scored over the alert threshold without setting one off. Flagging an alert on the review page flags the frames that built up to it too.
 - Frames sent for training note what was true when they were scored, such as the model, the alert settings and the printer's progress, along with how the print ended and whether a print PrintGuard paused was resumed. [docs/feedback.md](docs/feedback.md#whats-sent) lists all of it.
 - The printer state in the API and plugins has an `outcome` saying how the last print ended (finished, cancelled or error) where the printer says.

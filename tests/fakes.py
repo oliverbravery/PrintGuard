@@ -31,8 +31,9 @@ class FakeSource:
         return Frame(rgb=rgb, seq=float(seq), ts=time.time())
 
     def set_monitoring(self, active: bool) -> None:
+        if self.standby == active:
+            self.online = active
         self.standby = not active
-        self.online = active
 
     def close(self) -> None:
         self.online = False

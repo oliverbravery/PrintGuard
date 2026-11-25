@@ -447,11 +447,17 @@ class CameraRegistry(Registry[Camera]):
         """Cameras eligible for inference, meaning in use, online and attached."""
         return [c for c in self.values() if c.in_use and c.online]
 
-    def sync_in_use(self, monitors: dict[str, dict[str, Any]], printers: "PrinterRegistry") -> None:
+    def sync_in_use(self, monitors: dict[str, dict[str, Any]], printers: "PrinterRegistry", awaited: set[str]) -> None:
         """Recomputes in_use flags from the monitors currently watching.
 
         A camera nothing watches is no longer inferred on, so its achieved rate
         goes back to zero and is measured afresh when it is watched again.
+
+        Args:
+            monitors: Every monitor, keyed by id.
+            printers: The printers those monitors may be linked to.
+            awaited: Ids of cameras that keep capturing though nothing watches
+                them, so a paused print is told when its camera is back.
         """
         bound = {m["camera_id"] for m in monitors.values() if monitor_watching(m, printers)}
         for camera in self.values():
@@ -459,7 +465,7 @@ class CameraRegistry(Registry[Camera]):
             if not camera.in_use:
                 camera.achieved_fps = camera.last_done = 0.0
             if camera.frame_source:
-                camera.frame_source.set_monitoring(camera.in_use)
+                camera.frame_source.set_monitoring(camera.in_use or camera.id in awaited)
 
 
 class PrinterRegistry(Registry[Printer]):
