@@ -109,6 +109,25 @@ class FakeFileStore:
         self.blobs.pop(key, None)
 
 
+class FakeUpdater:
+    """Stands in for the desktop app's Velopack updater, counting what it was asked to do."""
+
+    def __init__(self, version: str | None = "2.3.0") -> None:
+        self.version = version
+        self.failing = False
+        self.downloads = 0
+        self.installs = 0
+
+    async def download(self) -> str | None:
+        self.downloads += 1
+        if self.failing:
+            raise RuntimeError("the release feed is unreachable")
+        return self.version
+
+    async def install(self) -> None:
+        self.installs += 1
+
+
 class FakePluginRuntime:
     """A plugin runtime that runs nothing, so an engine counts as running plugins."""
 
@@ -165,6 +184,7 @@ class FakePlatform:
     version = "2.1.0"
     update_repo = "o/r"
     update_asset: str | None = None
+    updater: Any = None
     secrets: frozenset[str] = frozenset()
 
     def __init__(self, infer_s: float = 0.05, failing: bool = False) -> None:

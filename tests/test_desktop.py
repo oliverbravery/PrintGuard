@@ -197,11 +197,11 @@ def test_stopping_runs_the_hubs_shutdown_while_a_client_holds_a_stream_open(monk
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    monkeypatch.setattr(app_module, "create_app", lambda: hub)
+    monkeypatch.setattr(app_module, "create_app", lambda updater: hub)
     monkeypatch.setattr(app_module, "SHUTDOWN_GRACE_S", 0.3)
     monkeypatch.setattr(desktop, "STOP_TIMEOUT_S", 3.0)
     monkeypatch.setattr(desktop, "_health", lambda port: httpx.get(f"http://127.0.0.1:{port}/api/health").json())
-    server = desktop._Server(port)
+    server = desktop._Server(port, None)
     assert server.start()
 
     with httpx.stream("GET", f"http://127.0.0.1:{port}/stream") as held:

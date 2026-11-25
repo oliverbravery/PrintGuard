@@ -195,6 +195,22 @@ class PluginRuntime(Protocol):
         ...
 
 
+class Updater(Protocol):
+    """Installs newer releases of the desktop app over itself."""
+
+    async def download(self) -> str | None:
+        """Downloads the newest release, ready to install.
+
+        Returns:
+            The version downloaded, or None when no newer release is published.
+        """
+        ...
+
+    async def install(self) -> None:
+        """Quits the app, installs the downloaded release and opens it again."""
+        ...
+
+
 class Platform(Protocol):
     """Runtime services the engine needs but cannot implement portably."""
 
@@ -215,6 +231,10 @@ class Platform(Protocol):
     update_asset: str | None
     """Release asset filename this deployment updates with (the desktop app's
     installer), or None when the deployment updates outside the app."""
+
+    updater: Updater | None
+    """Installs releases of the desktop app in place, or None where updates
+    are installed outside the app, as in the container image."""
 
     plugin_runtime: PluginRuntime | None
     """Sandbox for the background half of plugins, or None when plugins are

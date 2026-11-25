@@ -11,6 +11,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Added
 
+- The desktop app installs its own updates, downloading each release in the background and asking before it restarts. If you don't answer it installs once no monitor is watching a print. It's on for new installs, and you can turn it on under Settings, in Updates. This is the last release you need to download by hand.
 - Each monitor's **Control** tab can start and stop detection, or switch **Auto-detect** on and off when a printer is linked.
 - Monitors can pause their printer when the camera has been offline or frozen for longer than the fault grace period, switched on in the monitor's Tune tab.
 - Prints kept for review keep every frame of the streak that set off an alert, and up to five spikes that scored over the alert threshold without setting one off. Flagging an alert on the review page flags the frames that built up to it too.
@@ -19,6 +20,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Changed
 
+- The Windows download is an installer that needs no admin rights, `PrintGuard-windows-x64-Setup.exe`. The portable zip is still on every release.
 - Regular frames and near misses wait until a linked printer reports it's past 0%, so the empty bed while it heats and levels isn't kept.
 - Klipper reads as 0% through a print until the first extrusion, where it used to count the start code and thumbnails.
 

@@ -22,6 +22,7 @@ const REMOVAL = /^(camera|monitor|print)\.remove$/;
 const BOOT_DROPS_BEFORE_HINT = 3;
 const HUB_NOT_ANSWERING = "The hub is not answering. Check the address, and that a proxy forwards WebSockets and the Origin header";
 const INTRO_SEEN_KEY = "pg.intro.seen";
+const UPDATE_OFFERED_KEY = "pg.update.offered";
 const RECONNECTING = "The hub is reconnecting, so that wasn't sent. Try again in a moment.";
 const updateTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 
@@ -262,6 +263,9 @@ export const useStore = create<PgStore>((set, get) => {
         const optimistic = event.req_id == null ? get().optimistic : settle(get().optimistic, event.req_id);
         const acknowledged = Object.keys(get().optimistic).filter((key) => !(key in optimistic));
         const firstRun = get().phase !== "ready" && !readStored(INTRO_SEEN_KEY);
+        const ready = server.installs_updates ? server.update?.ready : null;
+        const offerUpdate = Boolean(ready) && !firstRun && !get().dialog && readStored(UPDATE_OFFERED_KEY) !== ready;
+        if (offerUpdate) writeStored(UPDATE_OFFERED_KEY, ready!);
         const engine = Object.keys(optimistic).length ? applyOptimistic(server, optimistic) : server;
         let history = get().history;
         for (const monitor of server.monitors) {
@@ -275,7 +279,7 @@ export const useStore = create<PgStore>((set, get) => {
           outcome: issuedHere(event.req_id) ? { req_id: event.req_id, error: null } : s.outcome,
           phase: "ready",
           savedAt: { ...s.savedAt, ...Object.fromEntries(acknowledged.map((key) => [key, Date.now()])) },
-          ...(firstRun ? { dialog: "intro" as const } : {}),
+          ...(firstRun ? { dialog: "intro" as const } : offerUpdate ? { dialog: "update" as const } : {}),
         }));
         for (const warning of server.startup_warnings ?? []) {
           if (toastedStartupWarnings.has(warning)) continue;

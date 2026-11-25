@@ -199,6 +199,7 @@ PrintGuard doesn't phone home. Here is every outbound connection it will ever ma
 | Host | When |
 |---|---|
 | `api.github.com` | Startup and once daily for update checks (retrying after 15 minutes on failure, or on demand via **Check now**), plus resolving commits when installing/updating GitHub plugins |
+| `github.com` and GitHub's release download servers | Only the desktop app, downloading an update |
 | `raw.githubusercontent.com` | Fetching the plugin catalogue and plugin source files when browsing or installing plugins |
 | `*.ingest.de.sentry.io` | Only when you manually submit a bug report |
 | `printguard-feedback.oliverbravery.uk` | Only when you manually [send training frames](feedback.md) |
@@ -301,4 +302,4 @@ The container's healthcheck polls `/api/health` every 30 seconds, so `--wait` ex
 
 PrintGuard deliberately doesn't self-update its own container or ask for the Docker socket. Handing a camera-monitoring app the Docker socket effectively gives it root over the whole host, which isn't a trade-off I'm willing to make. If you want automatic container updates, use an external updater or your NAS's built-in container update flow.
 
-The desktop app checks the exact same GitHub releases and gives you a direct download button for your platform.
+The desktop app installs its own updates. With **Install updates automatically** on, under **Settings**, in **Updates** (the default for a new install), it downloads each release in the background, only the files that changed, and asks before restarting to install it. If you don't answer within an hour it installs by itself the next time no monitor is watching a print or holding one paused. A monitor with no printer linked is always watching, so on a setup like that it waits for you. You can skip a release from the same prompt, and with automatic installs off the update button downloads and installs it when you press it. A copy opened from the disk image or run from source can't update itself, so it offers the download instead.

@@ -237,6 +237,10 @@ jobs:
         if: matrix.name != 'container'
         with:
           version: "0.11.32"
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        if: matrix.name != 'container'
+        with:
+          dotnet-version: 9.0.321
       - uses: apple-actions/import-codesign-certs@288b8ec97b82c66b6f2a6baaf7acc8dfbcbe331c # v7.2.0
         if: matrix.name == 'macOS'
         with:
@@ -247,6 +251,7 @@ jobs:
         shell: bash
         env:
           APPLE_SIGNING_IDENTITY: Developer ID Application
+          GITHUB_TOKEN: ${{ github.token }}
         run: bash packaging/build.sh
       - name: Notarise the disk image, the only step handed the notarisation key
         if: matrix.name == 'macOS'
@@ -262,15 +267,15 @@ jobs:
           cp -R "$RUNNER_TEMP/dmg/PrintGuard.app" /Applications/
           hdiutil detach "$RUNNER_TEMP/dmg"
           open --env LOG_FILE="$RUNNER_TEMP/printguard.log" /Applications/PrintGuard.app
-      - name: Unzip the app as Explorer would a download and open it with its window open to Playwright
+      - name: Unzip the portable app as Explorer would a download and open it with its window open to Playwright
         if: matrix.name == 'Windows'
         shell: pwsh
         env:
           LOG_FILE: ${{ runner.temp }}\printguard.log
           PRINTGUARD_DEBUG_PORT: "9222"
         run: |
-          Expand-Archive dist\PrintGuard-windows-x64.zip -DestinationPath $env:RUNNER_TEMP
-          Get-ChildItem "$env:RUNNER_TEMP\PrintGuard" -Recurse -File -Exclude PrintGuard.exe | ForEach-Object {
+          Expand-Archive dist\PrintGuard-windows-x64.zip -DestinationPath "$env:RUNNER_TEMP\PrintGuard"
+          Get-ChildItem "$env:RUNNER_TEMP\PrintGuard" -Recurse -File -Exclude *.exe | ForEach-Object {
             Set-Content -LiteralPath $_.FullName -Stream Zone.Identifier -Value "[ZoneTransfer]`nZoneId=3"
           }
           Start-Process "$env:RUNNER_TEMP\PrintGuard\PrintGuard.exe" -WorkingDirectory "$env:RUNNER_TEMP\PrintGuard"

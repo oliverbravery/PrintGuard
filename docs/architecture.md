@@ -81,6 +81,7 @@ All routes enforce [host and origin checking](deployment.md#host-and-origin-chec
 | `inference_runtime` | The runtime the model actually runs on (`onnx` or `litert`), which `auto` leaves to `configure`. Kept beside every review frame |
 | `version` | Installed package version from `pyproject.toml` |
 | `update_repo`, `update_asset` | GitHub repo and platform desktop installer asset name |
+| `updater` | The desktop app's Velopack `Updater` (`download()`, `install()`), or `None` in the container and in a copy run from source or a disk image |
 | `plugin_runtime` | `PluginRuntime` instance, or `None` when `PRINTGUARD_PLUGINS=off` |
 | `secrets` | Deployment-level secrets outside `state.json` (like `MEDIAMTX_API` credentials) to scrub from logs and reports |
 | `files` | `FileStore` implementation |
@@ -138,11 +139,11 @@ Every command accepted by `Engine._handlers`:
 | Monitors | `monitor.add`, `monitor.update`, `monitor.remove` |
 | History | `history.get`, `snapshot.get`, `review.get`, `review.add`, `review.send`, `review.retry`, `review.dismiss`, `review.delete`, `recording.frame`, `recording.delete` |
 | Plugins | `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.code`, `plugin.catalogue`, `plugin.page`, `plugin.http`, `plugin.socket`, `plugin.call`, `plugin.answer`, `plugin.publish`, `plugin.secrets`, `plugin.oauth`, `plugin.effect` |
-| System | `settings.update`, `notify.test`, `notify.send`, `token.create`, `token.remove`, `update.check`, `update.releases`, `report.send`, `report.bundle` |
+| System | `settings.update`, `notify.test`, `notify.send`, `token.create`, `token.remove`, `update.check`, `update.releases`, `update.install`, `report.send`, `report.bundle` |
 
 Commands may pass a `req_id` echoed on the reply. Successful commands broadcast a `state` event (or their dedicated response event for read-only queries); failures return `error`. `FINISHING_COMMANDS` (`camera.remove`, `printer.update`, `printer.remove`, `printer.cameras.refresh`, `monitor.remove`, `print.remove`, `settings.update`, `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.secrets`) run under `Engine._background` so they complete cleanly even if the calling WebSocket closes or times out.
 
-Unknown IDs fail on both update and remove, unknown keys/bad values fail (with numeric monitor/camera bounds clamped, except `printer.heat` which rejects out-of-range targets), `camera.add` requires string device/path/url values, and `settings.update` accepts only `notifiers`, `update_check`, `mqtt`, `theme`, `themes`, `glass`, `layout`, `model`, `inference_runtime`, `catalogue_url`, `fault_grace_s`, `preheat`, `feedback` and `recording_days` (`0`, `3`, `7` or `14`). Adapter configs and `mqtt` validate declared field types (and `mqtt` rejects unknown fields). Empty-message exceptions report their class name.
+Unknown IDs fail on both update and remove, unknown keys/bad values fail (with numeric monitor/camera bounds clamped, except `printer.heat` which rejects out-of-range targets), `camera.add` requires string device/path/url values, and `settings.update` accepts only `notifiers`, `update_check`, `auto_update`, `skipped_version`, `mqtt`, `theme`, `themes`, `glass`, `layout`, `model`, `inference_runtime`, `catalogue_url`, `fault_grace_s`, `preheat`, `feedback` and `recording_days` (`0`, `3`, `7` or `14`). Adapter configs and `mqtt` validate declared field types (and `mqtt` rejects unknown fields). Empty-message exceptions report their class name.
 
 `printer.test`, `notify.test` and `report.send` succeed as commands and carry `ok` inside their own events. `review.send` and `review.retry` kick off background uploads (refused when `settings.feedback == "off"`), emitting `review_sent` after the closing `state` under the same `req_id`. Re-submitting an uploading print updates its selections without re-sending already-uploaded frames.
 
@@ -173,12 +174,12 @@ Fields inside `state_event()` ([`engine/engine.py`](../printguard/engine/engine.
 
 | Field | Contents |
 |---|---|
-| `host`, `version`, `update` | Deployment target, package version and release check status (`null` until checked) |
+| `host`, `version`, `update`, `installs_updates` | Deployment target, package version, release check status (`null` until checked, with `ready` naming a downloaded release) and whether the hub installs its own updates |
 | `cameras`, `printers`, `prints`, `tokens`, `plugins` | Public registry views (no token hashes, no plugin code/secret values, no adapter secrets, no Bambu access codes, URLs redacted) |
 | `monitors` | Monitor configs plus `watching`, latest `result` and active `alert` |
 | `reviews`, `feedback_hub` | Per-print frame/recording summaries and review statuses, plus the public half of the hub's training token |
 | `startup_warnings` | Boot-time warnings (skipped GPU, reset setting, dropped record) retained until restart and toasted once per page load |
-| `settings` | Public settings (notifier configs without secrets, MQTT without password, theme/custom themes/glass/layout, model, runtime, catalogue URL, grace period, preheat presets, update check, feedback/recording settings) |
+| `settings` | Public settings (notifier configs without secrets, MQTT without password, theme/custom themes/glass/layout, model, runtime, catalogue URL, grace period, preheat presets, update check and automatic installs, skipped release, feedback/recording settings) |
 | `secrets_set` | Map of stored secret field names for notifiers and MQTT (`{"notifiers": {...}, "mqtt": [...]}`) |
 | `stats` | `inference_device`, `infer_ms` and `capacity_fps` |
 | `integrations`, `notifiers` | Adapter schemas driving UI forms |
@@ -457,7 +458,9 @@ Plugin store writes use key-level diffs (`{"written": {...}, "removed": [...]}`)
 
 ## Updates and bug reports
 
-[`engine/updates.py`](../printguard/engine/updates.py) checks GitHub releases on boot and every 24 hours (retrying after 15 minutes on failure) while `settings.update_check` is on. Only the lightweight `update` summary (`current`, `latest`, `available`, `download`, `checked_at`, `releases_url`) rides in `state`; full release notes fetch on demand via `update.releases` (with `files_url` to resolve relative links).
+[`engine/updates.py`](../printguard/engine/updates.py) checks GitHub releases on boot and every 24 hours (retrying after 15 minutes on failure) while `settings.update_check` is on. Only the lightweight `update` summary (`current`, `latest`, `available`, `download`, `checked_at`, `releases_url`, `ready`) rides in `state`; full release notes fetch on demand via `update.releases` (with `files_url` to resolve relative links).
+
+The desktop app installs its own updates through `platform.updater`, which wraps [Velopack](https://velopack.io) in [`server/desktop.py`](../printguard/server/desktop.py) and reads the `releases.osx.json` or `releases.win.json` feed attached to each GitHub release. While `settings.auto_update` is on (the default for a hub with no saved state), each check downloads a newer release, as a delta when the last one is installed, unless it is `settings.skipped_version`. The downloaded version appears as `update.ready`, which the dashboard offers once per version. While `auto_update` stays on, the engine ticker installs it once `UPDATE_INSTALL_GRACE_S` (1 hour) has passed and no monitor is `watching` or has its printer paused, and `update.install` installs straight away, downloading first if it has to. Velopack never installs a download at launch by itself, so a skipped release stays skipped. Installing hands the release to Velopack, shuts the app down the same way a termination signal does, and Velopack swaps the bundle and opens it again.
 
 [`engine/reports.py`](../printguard/engine/reports.py) sends anonymous, user-initiated bug reports as a single Sentry feedback envelope over `platform.http` (no Sentry SDK, zero automatic telemetry). Reports carry the description, optional email, user attachments, dashboard URL/UA/viewport, scrubbed config/diagnostics (omitting MQTT address/login, theme, layout and active print filename) and both engine/UI log tails. `report.bundle` zips the exact same scrubbed files for local inspection or GitHub issues.
 
@@ -547,7 +550,7 @@ feedback-worker/     Cloudflare Worker + R2 training inbox and pull script
 plugins/             official plugins, catalogue.json, plugin.d.ts, schema.py and pin.py
 models/              legacy/, light/ and standard/ TFLite + ONNX models and metadata
 tests/               pytest suite (engine simulation, adapters, hub, plugin sandbox)
-packaging/           PyInstaller spec, build.sh, notarise.sh, macOS entitlements and Windows config
+packaging/           PyInstaller spec, build.sh (PyInstaller, then Velopack's vpk), notarise.sh, macOS entitlements and Windows config
 templates/           Unraid Community Applications template
 ca_profile.xml       Unraid Community Applications maintainer profile
 docs/                documentation pages and generated screenshots

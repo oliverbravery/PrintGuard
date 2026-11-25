@@ -29,7 +29,7 @@ import websockets
 from av.video.reformatter import VideoReformatter
 from ..engine import logs
 from ..engine.adapters import redirect_message
-from ..engine.platform import PLUGIN_HEADER, Frame, Notice, Redirects
+from ..engine.platform import PLUGIN_HEADER, Frame, Notice, Redirects, Updater
 from ..engine.reports import scrub_url, url_secrets
 from .bambu_camera import open_bambu_jpeg_stream
 from .events import parse_json, require_finite
@@ -762,9 +762,11 @@ class ServerPlatform:
         update_asset: str | None = None,
         mediamtx_login: tuple[str, str] | None = None,
         mediamtx_hls: str = "",
+        updater: Updater | None = None,
     ) -> None:
         self.version = metadata.version("printguard")
         self.update_asset = update_asset
+        self.updater = updater
         self.host = deployment(update_asset is not None)
         prepare_data_directory(data_dir)
         prepare_data_directory(data_dir / "prints")

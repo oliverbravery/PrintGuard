@@ -56,14 +56,14 @@ If you want to run PrintGuard on the computer next to your printer without touch
 
 [![Download for macOS](https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/oliverbravery/PrintGuard/releases/latest/download/PrintGuard-macos-arm64.dmg)
 &nbsp;
-[![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/oliverbravery/PrintGuard/releases/latest/download/PrintGuard-windows-x64.zip)
+[![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/oliverbravery/PrintGuard/releases/latest/download/PrintGuard-windows-x64-Setup.exe)
 
 </div>
 
-Turn on **Start at login** from the tray menu and you can leave it running in the background.
+Turn on **Start at login** from the tray menu and you can leave it running in the background. The app keeps itself up to date. It asks before restarting to install a release, and if you don't answer it waits until no monitor is watching a print.
 
 > [!NOTE]
-> The macOS app is signed and notarised. The Windows build is unsigned for now, so Windows SmartScreen will warn you on first launch: click **More info** and then **Run anyway**. On Linux, use the [Docker hub](#docker-for-an-always-on-server-or-nas) instead.
+> The macOS app is signed and notarised. The Windows build is unsigned for now, so Windows SmartScreen will warn you when you run the installer: click **More info** and then **Run anyway**. A portable `PrintGuard-windows-x64.zip` is on every [release](https://github.com/oliverbravery/PrintGuard/releases/latest) if you'd rather not install it. On Linux, use the [Docker hub](#docker-for-an-always-on-server-or-nas) instead.
 
 ### Docker for an always-on server or NAS
 

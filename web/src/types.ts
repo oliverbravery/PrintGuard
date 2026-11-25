@@ -412,12 +412,14 @@ export interface UpdateInfo {
   download: string | null;
   checked_at: number;
   releases_url: string;
+  ready: string | null;
 }
 
 export interface EngineState {
   host: string;
   version: string;
   update: UpdateInfo | null;
+  installs_updates: boolean;
   cameras: Camera[];
   printers: Printer[];
   prints: PrintFile[];
@@ -428,6 +430,8 @@ export interface EngineState {
   settings: {
     notifiers: Record<string, Record<string, string>>;
     update_check: boolean;
+    auto_update: boolean;
+    skipped_version: string;
     mqtt?: MqttConfig;
     theme: string;
     themes: CustomTheme[];
