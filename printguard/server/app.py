@@ -35,7 +35,7 @@ import printguard
 
 from ..engine import logs, oauth
 from ..engine.engine import Engine
-from ..engine.platform import PLUGIN_HEADER
+from ..engine.platform import PLUGIN_HEADER, Updater
 from ..engine.reports import MESSAGE_STANDALONE_BELOW, scrub, url_secrets
 from ..engine.urls import DEFAULT_PORTS, LOCAL_HOSTNAMES, LOCAL_SUFFIXES
 from .api import ApiAuth, build_api_app
@@ -408,8 +408,13 @@ def plugin_answer_fault(answer: dict[str, Any]) -> str | None:
     return None
 
 
-def create_app() -> FastAPI:
-    """Builds the application with the engine attached to its lifespan."""
+def create_app(updater: Updater | None = None) -> FastAPI:
+    """Builds the application with the engine attached to its lifespan.
+
+    Args:
+        updater: What installs the desktop app's releases over itself, or None
+            where they are installed outside the app.
+    """
     logs.setup_from_env()
     model_dir = Path(os.environ.get("MODEL_DIR", REPO_ROOT / "models"))
     data_dir = Path(os.environ.get("DATA_DIR", REPO_ROOT / "data"))
@@ -452,7 +457,7 @@ def create_app() -> FastAPI:
         async with AsyncExitStack() as resources:
             bundled = bool(mediamtx_binary) and Path(mediamtx_binary).exists()
             mediamtx_login = ("printguard", secrets.token_urlsafe(32)) if bundled else None
-            platform = ServerPlatform(model_dir, data_dir, mediamtx_api, mediamtx_rtsp, update_asset, mediamtx_login, mediamtx_hls)
+            platform = ServerPlatform(model_dir, data_dir, mediamtx_api, mediamtx_rtsp, update_asset, mediamtx_login, mediamtx_hls, updater)
             resources.push_async_callback(platform.close)
             if bundled:
                 streamer = EmbeddedMediaMTX(

@@ -83,7 +83,7 @@ exe = EXE(
     console=False,
     icon=ICON,
     codesign_identity=os.environ.get("APPLE_SIGNING_IDENTITY"),
-    entitlements_file=str(Path(SPECPATH) / "entitlements.plist"),
+    entitlements_file=str(Path(SPECPATH) / "PrintGuard.entitlements"),
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="PrintGuard")
 

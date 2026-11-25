@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Builds the PrintGuard desktop app for the host OS: builds the web UI, fetches
 # MediaMTX, generates a platform icon, runs PyInstaller, and packages the result
-# as a .dmg (macOS) or .zip (Windows) under dist/. The desktop app targets macOS
-# and Windows; Linux is served by the container image. Run after `uv sync`.
+# with Velopack, so it installs its own updates, as a .dmg (macOS) or a Setup.exe and
+# portable .zip (Windows) under dist/, beside the Velopack feed and packages each release
+# carries. The desktop app targets macOS and Windows; Linux is served by the container
+# image. Run after `uv sync`, with the .NET SDK installed for Velopack's vpk tool.
 # On macOS, APPLE_SIGNING_IDENTITY signs the app and disk image, and packaging/notarise.sh
 # then notarises the disk image, so the notarisation key is never in this script's environment.
+# GITHUB_TOKEN, when set, lifts GitHub's rate limit on fetching the last release to diff against.
 set -euo pipefail
 
 MEDIAMTX_VERSION=1.21.4
@@ -15,6 +18,11 @@ rm -rf dist build/desktop build/pyinstaller
 mkdir -p build/desktop
 
 (cd web && npm ci && npm run build)
+
+VERSION="$(uv version --short)"
+VELOPACK_VERSION="$(uv run --locked --extra desktop python -c 'from importlib.metadata import version; print(version("velopack"))')"
+dotnet tool install vpk --version "$VELOPACK_VERSION" --tool-path build/desktop/vpk
+VPK=build/desktop/vpk/vpk
 
 case "$(uname -m)" in
   arm64 | aarch64) ARCH=arm64 ;;
@@ -58,12 +66,22 @@ fi
 
 uv run --locked --extra desktop pyinstaller packaging/printguard.spec --noconfirm --distpath dist --workpath build/pyinstaller
 
+# The last release's package lets vpk add a delta, so an update downloads only what changed.
+releases=build/velopack
+"$VPK" download github --repoUrl https://github.com/oliverbravery/PrintGuard --outputDir "$releases" ${GITHUB_TOKEN:+--token "$GITHUB_TOKEN"}
+pack=("$VPK" pack --packId PrintGuard --packVersion "$VERSION" --packTitle PrintGuard --packAuthors "Oliver Bravery" --outputDir "$releases")
+
 if [ "$OS" = darwin ]; then
+  signing=()
+  if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+    signing=(--signAppIdentity "$APPLE_SIGNING_IDENTITY" --signEntitlements packaging/PrintGuard.entitlements)
+  fi
+  "${pack[@]}" --packDir dist/PrintGuard.app --mainExe PrintGuard --noInst ${signing[@]+"${signing[@]}"}
   out="dist/PrintGuard-${LABEL}.dmg"
   git clone -q https://github.com/create-dmg/create-dmg "build/desktop/create-dmg"
   git -C "build/desktop/create-dmg" checkout -q "$CREATE_DMG_COMMIT"
   staging="build/desktop/dmg"; rm -rf "$staging"; mkdir -p "$staging"
-  cp -R dist/PrintGuard.app "$staging/"
+  ditto -x -k "$releases/PrintGuard-osx-Portable.zip" "$staging"
   "build/desktop/create-dmg/create-dmg" \
     --volname PrintGuard \
     --volicon build/desktop/icon.icns \
@@ -77,10 +95,14 @@ if [ "$OS" = darwin ]; then
     codesign -s "$APPLE_SIGNING_IDENTITY" --timestamp "$out"
   fi
 else
-  out="dist/PrintGuard-${LABEL}.zip"
+  out="dist/PrintGuard-${LABEL}-Setup.exe"
   # Explorer marks every file of a downloaded zip as from the internet, and .NET refuses
   # to load the window's assemblies with that mark unless the exe's config allows it.
   cp packaging/PrintGuard.exe.config dist/PrintGuard/
-  powershell -NoProfile -Command "Compress-Archive -Path dist/PrintGuard -DestinationPath '$out' -Force"
+  "${pack[@]}" --packDir dist/PrintGuard --mainExe PrintGuard.exe --icon build/desktop/icon.ico
+  mv "$releases/PrintGuard-win-Setup.exe" "$out"
+  mv "$releases/PrintGuard-win-Portable.zip" "dist/PrintGuard-${LABEL}.zip"
 fi
+mv "$releases/PrintGuard-${VERSION}"-*.nupkg dist/
+mv "$releases"/releases.*.json dist/
 echo "$out"

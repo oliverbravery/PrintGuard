@@ -1,10 +1,11 @@
-"""Update check: GitHub release comparison, filtering and the command."""
+"""Update check: GitHub release comparison, filtering, the commands and the desktop app installing its own updates."""
 
 from __future__ import annotations
 
 import asyncio
 
-from fakes import FakePlatform
+import pytest
+from fakes import FakePlatform, FakeUpdater
 
 from printguard.engine import engine as engine_module
 from printguard.engine.engine import Engine
@@ -33,6 +34,15 @@ def _engine(version: str = "2.1.0", releases: list[dict] | None = None) -> tuple
     platform.version = version
     platform.releases = releases or []
     return Engine(platform), platform
+
+
+def _desktop(releases: list[dict] | None = None, settings: dict | None = None) -> tuple[Engine, FakePlatform]:
+    """An engine on a desktop app that installs its own updates, saved before with ``settings`` if given."""
+    engine, platform = _engine(releases=releases)
+    platform.updater = FakeUpdater()
+    if settings is not None:
+        platform.state = {"settings": settings}
+    return engine, platform
 
 
 async def _check(engine: Engine) -> dict:
@@ -141,4 +151,130 @@ async def test_version_and_default_setting_in_state() -> None:
     state = engine.state_event()
     assert state["version"] == "2.1.0"
     assert state["update"] is None
+    assert state["installs_updates"] is False
     assert engine.settings["update_check"] is True
+
+
+async def test_a_new_hub_installs_updates_by_itself_and_one_saved_before_keeps_installing_them_by_hand() -> None:
+    fresh, _ = _desktop()
+    await fresh.start()
+    saved, _ = _desktop(settings={"theme": "dark"})
+    await saved.start()
+    try:
+        assert fresh.settings["auto_update"] is True
+        assert saved.settings["auto_update"] is False
+    finally:
+        await fresh.stop()
+        await saved.stop()
+
+
+async def test_a_newer_release_is_downloaded_after_the_check_and_offered_to_restart_into() -> None:
+    engine, platform = _desktop(releases=[_release("v2.3.0")])
+    await engine.start()
+    try:
+        await asyncio.sleep(0.05)
+        state = engine.state_event()
+        assert platform.updater.downloads == 1
+        assert state["installs_updates"] is True
+        assert state["update"]["ready"] == "2.3.0"
+    finally:
+        await engine.stop()
+
+
+@pytest.mark.parametrize("settings", [{"auto_update": False}, {"auto_update": True, "skipped_version": "2.3.0"}])
+async def test_nothing_is_downloaded_with_automatic_installs_off_or_the_release_skipped(settings: dict) -> None:
+    engine, platform = _desktop(releases=[_release("v2.3.0")], settings=settings)
+    await engine.start()
+    try:
+        await asyncio.sleep(0.05)
+        assert platform.updater.downloads == 0
+        assert engine.state_event()["update"]["ready"] is None
+    finally:
+        await engine.stop()
+
+
+async def test_skipping_a_downloaded_release_withdraws_it() -> None:
+    engine, _ = _desktop(releases=[_release("v2.3.0")])
+    await engine.start()
+    try:
+        await asyncio.sleep(0.05)
+        await engine.request({"cmd": "settings.update", "patch": {"skipped_version": "2.3.0"}})
+        assert engine.state_event()["update"]["ready"] is None
+    finally:
+        await engine.stop()
+
+
+async def test_a_download_that_fails_is_warned_of() -> None:
+    engine, platform = _desktop(releases=[_release("v2.3.0")])
+    platform.updater.failing = True
+    events: list[dict] = []
+    engine.add_sink(events.append)
+    await engine.start()
+    try:
+        await asyncio.sleep(0.05)
+        assert any(e["event"] == "warning" and "v2.3.0 could not be downloaded" in e["message"] for e in events)
+        assert engine.state_event()["update"]["ready"] is None
+    finally:
+        await engine.stop()
+
+
+async def test_a_downloaded_release_installs_once_by_itself_when_no_monitor_is_watching(monkeypatch) -> None:
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.01)
+    monkeypatch.setattr(engine_module, "UPDATE_INSTALL_GRACE_S", 0.2)
+    engine, platform = _desktop(releases=[_release("v2.3.0")])
+    await engine.start()
+    try:
+        await engine.handle({"cmd": "camera.add", "name": "cam", "source": {"kind": "fake", "fps": 5}})
+        camera_id = engine.cameras.values()[0].id
+        await engine.handle({"cmd": "monitor.add", "monitor": {"name": "m", "camera_id": camera_id}})
+        await asyncio.sleep(0.4)
+        assert platform.updater.installs == 0, "a monitor with no printer linked is always watching"
+
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": {"enabled": False}})
+        await asyncio.sleep(0.1)
+        assert platform.updater.installs == 1
+    finally:
+        await engine.stop()
+
+
+async def test_a_downloaded_release_waits_for_the_user_before_installing_by_itself(monkeypatch) -> None:
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.01)
+    engine, platform = _desktop(releases=[_release("v2.3.0")])
+    await engine.start()
+    try:
+        await asyncio.sleep(0.1)
+        assert engine.state_event()["update"]["ready"] == "2.3.0"
+        assert platform.updater.installs == 0
+    finally:
+        await engine.stop()
+
+
+async def test_installing_now_downloads_the_release_first_when_the_background_has_not() -> None:
+    engine, platform = _desktop(settings={"auto_update": False})
+    await engine.request({"cmd": "update.install"})
+    assert (platform.updater.downloads, platform.updater.installs) == (1, 1)
+
+
+async def test_installing_is_refused_where_the_app_cannot_or_with_nothing_newer() -> None:
+    container, _ = _engine()
+    with pytest.raises(RuntimeError, match="updated outside the app"):
+        await container.request({"cmd": "update.install"})
+    desktop, platform = _desktop()
+    platform.updater.version = None
+    with pytest.raises(RuntimeError, match="no newer release"):
+        await desktop.request({"cmd": "update.install"})
+    assert platform.updater.installs == 0
+
+
+async def test_turning_automatic_installs_on_downloads_a_release_already_found() -> None:
+    engine, platform = _desktop(releases=[_release("v2.3.0")], settings={"auto_update": False})
+    await engine.start()
+    try:
+        await asyncio.sleep(0.05)
+        assert platform.updater.downloads == 0
+        await engine.request({"cmd": "settings.update", "patch": {"auto_update": True}})
+        await asyncio.sleep(0.05)
+        assert platform.updater.downloads == 1
+        assert engine.state_event()["update"]["ready"] == "2.3.0"
+    finally:
+        await engine.stop()
