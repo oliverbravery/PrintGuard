@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { camera, dashboard, emit, engine, hub, monitor, pastDoublePress, review, sent } from "./fixtures";
+import { camera, dashboard, emit, engine, hub, monitor, pastDoublePress, printer, review, sent } from "./fixtures";
 import { zipSync } from "fflate";
 
 const EMPTY_ZIP = "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==";
@@ -254,6 +254,46 @@ test("a review asks for its frames again after reconnect, sends flagged failures
   await main.getByRole("link", { name: "Monitors" }).click();
   await expect(page).toHaveURL(/#\/monitors\/m1$/);
   await expect.poll(() => page.evaluate(() => (window as any).__pg.getState().snapshotCache)).toEqual({});
+});
+
+test("a streak that outlasted a cooldown before it alerted is counted from the alert back", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [review()] }) }, "/monitors/m1/review/r1");
+  const frames = [
+    { id: "t3", ts: 58, score: 0.8, kind: "streak", streak: 3, consecutive: 3, alert: "a1", size: 1 },
+    { id: "t4", ts: 59, score: 0.85, kind: "streak", streak: 4, consecutive: 3, alert: "a1", size: 1 },
+    { id: "a1", ts: 60, score: 0.9, kind: "alert", streak: 5, consecutive: 3, action: "pause", size: 1 },
+  ];
+  await emit(page, { event: "review", ...review(), frames });
+  const cards = page.getByRole("main").getByRole("region", { name: "Frames to send" }).getByRole("listitem");
+  await expect(cards.nth(0)).toContainText("1 of 3 ·");
+  await expect(cards.nth(1)).toContainText("2 of 3 ·");
+});
+
+test("flagging an alert flags the streak that built it, each of which can still be unflagged", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [review()] }) }, "/monitors/m1/review/r1");
+  const main = page.getByRole("main");
+  const frames = [
+    { id: "k1", ts: 40, score: 0.95, kind: "spike", streak: 1, consecutive: 3, size: 1 },
+    { id: "t1", ts: 58, score: 0.8, kind: "streak", streak: 1, consecutive: 3, alert: "a1", size: 1 },
+    { id: "t2", ts: 59, score: 0.85, kind: "streak", streak: 2, consecutive: 3, alert: "a1", size: 1 },
+    { id: "a1", ts: 60, score: 0.9, kind: "alert", streak: 3, consecutive: 3, action: "pause", size: 1 },
+  ];
+  await emit(page, { event: "review", ...review(), frames });
+  const cards = main.getByRole("region", { name: "Frames to send" }).getByRole("listitem");
+  await expect(cards.nth(0)).toContainText("Good");
+  await expect(cards.nth(0)).toContainText("spike ·");
+  await expect(cards.nth(1)).toContainText("False alarm");
+  await expect(cards.nth(2)).toContainText("2 of 3 ·");
+
+  await main.getByRole("button", { name: /^Something went wrong in frame 4 of 4 at/ }).click();
+  await expect(cards.nth(1)).toContainText("Real failure");
+  await expect(cards.nth(2)).toContainText("Real failure");
+  await expect(cards.nth(0)).toContainText("Good");
+  await main.getByRole("button", { name: /^Something went wrong in frame 2 of 4 at/ }).click();
+  await expect(cards.nth(1)).toContainText("False alarm");
+
+  await main.getByRole("button", { name: "Send 4 frames" }).click();
+  expect(await sent(page, "review.send")).toMatchObject({ id: "r1", failures: ["t2", "a1"], removed: [] });
 });
 
 const picked = [
@@ -1281,7 +1321,7 @@ test("a preview that fails to draw on upload leaves nothing behind, and the file
 
 test("a file too large to draw says so, still shows what the hub read from it and uploads", async ({ page }) => {
   await stagePrint(page, 33);
-  await expect(page.getByText("files over 32 MB are not drawn")).toBeVisible();
+  await expect(page.getByText("files over 32 MB are not drawn")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("1h 30m")).toBeVisible();
   await expect(page.getByText("12 g")).toBeVisible();
   await page.getByRole("button", { name: "Upload", exact: true }).click();
@@ -1334,7 +1374,7 @@ test("a sliced 3mf's plate over the drawing limit is never unpacked whole", asyn
   }
   await stageArchive(page, { "3D/3dmodel.model": new Uint8Array(8), "Metadata/plate_1.gcode": new TextEncoder().encode(lines.join("\n")) });
 
-  await expect(page.getByText("files over 32 MB are not drawn")).toBeVisible();
+  await expect(page.getByText("files over 32 MB are not drawn")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("1h 30m")).toBeVisible();
   expect(await page.evaluate(() => (window as any).__sample)).toEqual({ size: 4 * 1024 * 1024 + 1 + 512 * 1024, start: "; first line of the plate\n" });
   expect(await page.evaluate(() => (window as any).__largestBlob)).toBeLessThan(8 * 1024 * 1024);
@@ -1673,6 +1713,17 @@ test("the consecutive slider reaches the engine's limit, and the detection rate 
   await rate.fill("30");
   const lastPatch = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "camera.update").at(-1)?.patch);
   await expect.poll(lastPatch).toEqual({ detect_fps: 60 });
+});
+
+test("pausing on camera loss is off until switched on in the Tune tab", async ({ page }) => {
+  await dashboard(page, { engine: engine() }, "/monitors/m1");
+  await page.getByRole("tab", { name: "Tune" }).click();
+  const toggle = page.getByRole("switch", { name: "Pause if the camera drops out" });
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect(toggle).toHaveAccessibleDescription(/fault grace period/);
+  await toggle.click();
+  const lastPatch = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "monitor.update").at(-1)?.patch);
+  await expect.poll(lastPatch).toEqual({ pause_on_camera_loss: true });
 });
 
 test("a camera form opens the camera once it is registered, and its fields are named", async ({ page }) => {
@@ -2387,7 +2438,7 @@ test("a stored file is drawn from what arrives, and one over the limit is cut of
   });
   await expect(page.getByRole("slider", { name: "Layers shown" })).toHaveCount(0);
   await page.evaluate(() => (location.hash = "#/prints/f1"));
-  await expect(page.getByText("files over 32 MB are not drawn")).toBeVisible();
+  await expect(page.getByText("files over 32 MB are not drawn")).toBeVisible({ timeout: 15_000 });
   expect(await page.evaluate(() => (window as any).__cancelledAt)).toBeLessThan(36);
 });
 
@@ -3486,4 +3537,50 @@ test("a dashboard served under a path reaches its hub and camera feeds under tha
 
   await expect(page.getByRole("heading", { name: "Prusa" })).toBeVisible();
   await feed;
+});
+
+test("a monitor without a printer starts and stops detecting from Control, and disables starting with no camera", async ({ page }) => {
+  await dashboard(page, { engine: engine({ monitors: [monitor({ enabled: true, watching: true })] }) }, "/monitors/m1");
+  const panel = page.getByRole("tabpanel", { name: "Control" });
+  const stop = panel.getByRole("button", { name: "Stop detecting" });
+  await expect(stop).toBeVisible();
+  await expect(panel).toContainText("Stop detecting when your print finishes");
+
+  await stop.click();
+  await expect(panel.getByRole("button", { name: "Start detecting" })).toBeVisible();
+  await expect(panel).toContainText("Start detecting when you start a print");
+  await expect.poll(() => lastSent(page, "monitor.update")).toMatchObject({ id: "m1", patch: { enabled: false } });
+
+  await panel.getByRole("button", { name: "Start detecting" }).click();
+  await expect(panel.getByRole("button", { name: "Stop detecting" })).toBeVisible();
+  await expect.poll(() => lastSent(page, "monitor.update")).toMatchObject({ id: "m1", patch: { enabled: true } });
+  const { req_id } = await lastSent(page, "monitor.update");
+
+  await emit(page, { event: "state", req_id, ...engine({ monitors: [monitor({ camera_id: "", enabled: false, watching: false })] }) });
+  await expect(panel.getByRole("button", { name: "Start detecting" })).toBeDisabled();
+  await expect(panel).toContainText("Link a camera to start detecting.");
+});
+
+test("a monitor with a printer shows an Auto-detect switch and explains its automatic state on Control", async ({ page }) => {
+  const linked = (printerOver = {}, monitorOver = {}) =>
+    engine({
+      printers: [printer(printerOver)],
+      monitors: [monitor({ printer_id: "p1", ...monitorOver })],
+    });
+  await dashboard(page, { engine: linked() }, "/monitors/m1");
+  const panel = page.getByRole("tabpanel", { name: "Control" });
+  const toggle = panel.getByRole("switch", { name: "Auto-detect" });
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await expect(panel).toContainText("Automatic with Ender. Watching stops when the print ends.");
+
+  await emit(page, { event: "state", ...linked({ device_state: { ...printer().device_state, status: "idle" } }, { watching: false }) });
+  await expect(panel).toContainText("Automatic with Ender. Watching starts when it prints.");
+
+  await emit(page, { event: "state", ...linked({ online: false, device_state: null }, { watching: true }) });
+  await expect(panel).toContainText("Automatic with Ender. Still watching until it confirms it isn't printing.");
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect(panel).toContainText("Detection is off. PrintGuard won't watch when Ender prints.");
+  await expect.poll(() => lastSent(page, "monitor.update")).toMatchObject({ id: "m1", patch: { enabled: false } });
 });

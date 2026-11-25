@@ -10,6 +10,7 @@ const SETTLE_MS = 80;
 
 function markStyle(frame: ReviewFrame): string {
   if (frame.kind === "alert") return "h-2 w-1.5 bg-bad";
+  if (frame.kind === "spike") return "h-2 w-px bg-warn";
   return frame.kind === "added" ? "top-0.5 size-1.5 bg-accent" : "h-2 w-px bg-text-2";
 }
 

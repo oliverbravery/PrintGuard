@@ -775,6 +775,7 @@ class ServerPlatform:
         self._inference: Inference | None = None
         self.workers = 1
         self.inference_device = "Initialising"
+        self.inference_runtime = "Initialising"
         self._client = httpx.AsyncClient(follow_redirects=True)
         self._public_client = httpx.AsyncClient(transport=PublicOnlyTransport())
         self._mediamtx_client = httpx.AsyncClient(trust_env=False)
@@ -803,6 +804,7 @@ class ServerPlatform:
         self._inference = inference
         self.workers = inference.workers
         self.inference_device = inference.device
+        self.inference_runtime = inference.runtime
         if previous is not None:
             await previous.drained()
             previous.close()
@@ -811,7 +813,7 @@ class ServerPlatform:
             "inference ready: the %s model on %s via %s (%d workers, %.0f fps)",
             inference.assets.name,
             self.inference_device,
-            inference.runtime if runtime == "auto" else runtime,
+            self.inference_runtime,
             self.workers,
             inference.capacity_fps,
         )

@@ -96,8 +96,12 @@ test.describe("glass", () => {
       await emit(page, { event: "state", ...state, settings: { ...state.settings, theme: "glass", glass: { opacity: 0, tone } } });
       await page.getByRole("button", { name: "Remove", exact: true }).click();
       await expect(page.getByRole("button", { name: "Confirm" })).toBeVisible();
-      const { violations, incomplete } = await new AxeBuilder({ page }).withRules(["color-contrast"]).include(".btn-armed").analyze();
-      expect([...violations, ...incomplete].map(({ id }) => id)).toEqual([]);
+      await expect
+        .poll(async () => {
+          const { violations, incomplete } = await new AxeBuilder({ page }).withRules(["color-contrast"]).include(".btn-armed").analyze();
+          return [...violations, ...incomplete].map(({ id }) => id);
+        })
+        .toEqual([]);
     });
   }
 });

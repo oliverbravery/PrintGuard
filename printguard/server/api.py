@@ -131,6 +131,7 @@ class MonitorFields(_FiniteNumbers):
     notify: bool | None = None
     on_defect: Literal["none", "pause", "cancel"] | None = None
     cooldown_s: int | None = None
+    pause_on_camera_loss: bool | None = None
 
 
 class CameraSource(BaseModel):
@@ -266,6 +267,7 @@ class MonitorOut(_ReadModel):
     notify: bool | None = None
     on_defect: Literal["none", "pause", "cancel"] | None = None
     cooldown_s: int | None = None
+    pause_on_camera_loss: bool | None = None
     watching: bool | None = None
     result: MonitorResult | None = None
     alert: MonitorAlert | None = None

@@ -8,7 +8,7 @@ export const camera = (over = {}) => ({
 
 export const monitor = (over = {}) => ({
   id: "m1", name: "Prusa", camera_id: "c1", printer_id: "", enabled: true, threshold: 0.6, consecutive: 3,
-  notify: true, on_defect: "pause", cooldown_s: 90, watching: true, alert: null, ...over,
+  notify: true, on_defect: "pause", cooldown_s: 90, pause_on_camera_loss: false, watching: true, alert: null, ...over,
 });
 
 export const printer = (over = {}) => ({

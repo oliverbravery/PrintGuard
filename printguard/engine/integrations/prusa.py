@@ -29,7 +29,7 @@ from pyprusalink.client import DigestAuthWorkaround
 from pyprusalink.types import Conflict, InvalidAuth, NotFound
 
 from ..adapters import redirect_message
-from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, require_reply
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, PrintOutcome, require_reply
 
 _USERNAME = "maker"
 _TIMEOUT_S = 10.0
@@ -58,6 +58,7 @@ _STATUS_MAP = {
 
 Buddy firmware shows a warning dialog over a print that keeps running and reports it as ATTENTION, or as a PAUSED
 job, so neither says the print stopped."""
+_OUTCOMES = {"FINISHED": PrintOutcome.FINISHED, "STOPPED": PrintOutcome.CANCELLED}
 
 
 def _username(config: dict[str, Any]) -> str:
@@ -127,10 +128,12 @@ class PrusaAdapter(IntegrationAdapter):
             "bed": Heater.reported(printer.get("temp_bed"), printer.get("target_bed")),
         }
         if not job:
-            return DeviceState(_STATUS_MAP.get(str(printer.get("state", "")).upper(), DeviceStatus.UNKNOWN), **heaters)
+            state = str(printer.get("state", "")).upper()
+            return DeviceState(_STATUS_MAP.get(state, DeviceStatus.UNKNOWN), **heaters, outcome=_OUTCOMES.get(state))
         file = job.get("file") or {}
         remaining = job.get("time_remaining")
-        job_status = _STATUS_MAP.get(str(job.get("state", "")).upper(), DeviceStatus.UNKNOWN)
+        state = str(job.get("state", "")).upper()
+        job_status = _STATUS_MAP.get(state, DeviceStatus.UNKNOWN)
         if job_status is DeviceStatus.PAUSED and str(printer.get("state", "")).upper() == "ATTENTION":
             job_status = DeviceStatus.UNKNOWN
         return DeviceState(
@@ -139,6 +142,7 @@ class PrusaAdapter(IntegrationAdapter):
             file.get("display_name") or file.get("name"),
             remaining_s=int(remaining) if remaining is not None else None,
             **heaters,
+            outcome=_OUTCOMES.get(state),
         )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:

@@ -12,7 +12,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from ..adapters import multipart_form
 from ..cameras import webrtc_endpoint, whep_endpoint
-from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, require_reply, webcam_url
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, PrintOutcome, require_reply, webcam_url
 
 _UPLOAD_TIMEOUT_S = 180.0
 _API_PORTS = range(7125, 7200)
@@ -27,6 +27,7 @@ _STATUS_MAP = {
     "cancelled": DeviceStatus.IDLE,
     "error": DeviceStatus.ERROR,
 }
+_OUTCOMES = {"complete": PrintOutcome.FINISHED, "cancelled": PrintOutcome.CANCELLED}
 
 
 class KlipperAdapter(IntegrationAdapter):
@@ -65,6 +66,9 @@ class KlipperAdapter(IntegrationAdapter):
 
         Klipper keeps no estimate of its own, so the time left is projected
         from how long the print has run against how far through the file it is.
+        Its print duration only starts at the first extrusion, so the print
+        reads as 0% through while the printer heats and levels, where the file
+        position alone would already count the start code and thumbnails.
 
         Raises:
             PermissionError: If Moonraker rejects the API key, or wants one.
@@ -78,17 +82,18 @@ class KlipperAdapter(IntegrationAdapter):
             raise RuntimeError(f"Moonraker did not answer like its API: HTTP {status}")
         objects = (body.get("result") or {}).get("status") or {}
         stats = objects.get("print_stats") or {}
-        matched = _STATUS_MAP.get(str(stats.get("state", "")).lower(), DeviceStatus.UNKNOWN)
-        fraction = float((objects.get("virtual_sdcard") or {}).get("progress") or 0.0)
+        state = str(stats.get("state", "")).lower()
         duration = float(stats.get("print_duration") or 0.0)
+        fraction = float((objects.get("virtual_sdcard") or {}).get("progress") or 0.0) if duration > 0.0 else 0.0
         extruder, bed = objects.get("extruder") or {}, objects.get("heater_bed") or {}
         return DeviceState(
-            matched,
+            _STATUS_MAP.get(state, DeviceStatus.UNKNOWN),
             fraction * 100.0,
             stats.get("filename") or None,
-            remaining_s=int(duration * (1.0 - fraction) / fraction) if fraction > 0.0 and duration > 0.0 else None,
+            remaining_s=int(duration * (1.0 - fraction) / fraction) if fraction > 0.0 else None,
             nozzle=Heater.reported(extruder.get("temperature"), extruder.get("target")),
             bed=Heater.reported(bed.get("temperature"), bed.get("target")),
+            outcome=_OUTCOMES.get(state),
         )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:

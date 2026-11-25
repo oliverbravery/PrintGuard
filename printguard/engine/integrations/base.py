@@ -35,6 +35,14 @@ class DeviceStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
+class PrintOutcome(str, Enum):
+    """How a print ended, as far as its service says."""
+
+    FINISHED = "finished"
+    CANCELLED = "cancelled"
+    ERROR = "error"
+
+
 class DeviceAction(str, Enum):
     """Commands a printer service must support."""
 
@@ -95,6 +103,8 @@ class DeviceState:
             or None where it does not say.
         nozzle: The hotend, or None where the service reports none.
         bed: The heated bed, or None where the service reports none.
+        outcome: How the last print ended while the service still says so,
+            which a service in error always has, or None where it does not say.
     """
 
     status: DeviceStatus
@@ -103,9 +113,12 @@ class DeviceState:
     remaining_s: int | None = None
     nozzle: Heater | None = None
     bed: Heater | None = None
+    outcome: PrintOutcome | None = None
 
     def __post_init__(self) -> None:
         self.progress = clamp("progress", self.progress, 0.0, 100.0)
+        if self.status is DeviceStatus.ERROR:
+            self.outcome = PrintOutcome.ERROR
 
     def public(self) -> dict[str, Any]:
         """Serialises the state for the event protocol."""
@@ -116,6 +129,7 @@ class DeviceState:
             "remaining_s": self.remaining_s,
             "nozzle": self.nozzle.public() if self.nozzle else None,
             "bed": self.bed.public() if self.bed else None,
+            "outcome": self.outcome.value if self.outcome else None,
         }
 
 

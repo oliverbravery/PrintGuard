@@ -120,6 +120,12 @@ declare global {
     /** Null where the printer has no such heater, or is not reporting it. */
     nozzle: PluginHeater | null;
     bed: PluginHeater | null;
+    /**
+     * How the last print ended, while the service still says so: `finished`,
+     * `cancelled` or `error`. A printer in error always has `error`, and the
+     * value is null where the service does not say.
+     */
+    outcome: "finished" | "cancelled" | "error" | null;
   }
 
   /**
