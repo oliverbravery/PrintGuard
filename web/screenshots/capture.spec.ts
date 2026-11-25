@@ -59,7 +59,7 @@ const history: Record<string, ScorePoint[]> = {
 
 function engine(): EngineState {
   return {
-    host: "docker", version: VERSION, update: null,
+    host: "docker", version: VERSION, update: null, installs_updates: false,
     cameras: [
       camera("c1", "Workshop · Prusa", { kind: "rtsp", url: "rtsp://10.0.0.21:8554/prusa" }, true),
       camera("c2", "Garage · Ender", { kind: "rtsp", url: "rtsp://10.0.0.22:8554/ender" }),
@@ -80,7 +80,7 @@ function engine(): EngineState {
       monitor("m2", "Ender 3 V3", "c2", "p2", true),
       monitor("m3", "Bambu X1C", "c3", ""),
     ],
-    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], glass: { opacity: 0, tone: 0 }, model: "standard", inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT, feedback: "ask", recording_days: 7 },
+    settings: { notifiers: {}, update_check: true, auto_update: false, skipped_version: "", theme: "dark", themes: [], glass: { opacity: 0, tone: 0 }, model: "standard", inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT, feedback: "ask", recording_days: 7 },
     tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: INTEGRATIONS, notifiers: [],
     plugins: [], plugin_permissions: PERMISSIONS, plugin_events: {}, plugin_platforms: PLATFORMS,
     plugin_event_permissions: { state: "state:read", frame: "camera:frames", history: "history:read" },

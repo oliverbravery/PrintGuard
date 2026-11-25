@@ -1,5 +1,6 @@
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
+import { AutoUpdateToggle } from "./AutoUpdateToggle";
 import { SaveStatus } from "./SaveStatus";
 import { Toggle } from "./Toggle";
 
@@ -27,6 +28,7 @@ export function UpdatesTab() {
       <span className="block text-sm text-text-2">
         Checks GitHub releases once a day straight from your hub, with no telemetry.
       </span>
+      {engine?.installs_updates && <AutoUpdateToggle />}
       <div className="flex flex-wrap items-center gap-2">
         <button className="btn" disabled={checking} onClick={() => send({ cmd: "update.check" })}>
           {checking ? "Checking…" : "Check now"}

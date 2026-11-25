@@ -1887,6 +1887,75 @@ test("a settings tab shows saved only for what it saved itself", async ({ page }
   await expect(page.getByText(/saved ✓/)).toBeHidden();
 });
 
+const downloaded = {
+  current: "1.0.0",
+  latest: "2.0.0",
+  available: true,
+  download: null,
+  checked_at: 0,
+  releases_url: "https://github.com/o/r/releases",
+  ready: "2.0.0",
+};
+
+test("a downloaded update opens its dialog once, and restarts into it, waits or skips it from there", async ({ page }) => {
+  await dashboard(page);
+  await emit(page, { event: "state", ...engine({ installs_updates: true, update: downloaded }) });
+  const dialog = page.getByRole("dialog", { name: "Update available" });
+  await expect(dialog.getByText("v2.0.0 is downloaded")).toBeVisible();
+  expect(await dialog.innerText()).not.toMatch(/[—→←↗]/);
+
+  await dialog.getByRole("button", { name: "Restart now" }).click();
+  await expect.poll(() => sent(page, "update.install")).toBeTruthy();
+  await dialog.getByRole("button", { name: "Later" }).click();
+  await expect(dialog).toBeHidden();
+  await emit(page, { event: "state", ...engine({ installs_updates: true, update: downloaded }) });
+  await expect(dialog).toBeHidden();
+
+  await page.evaluate(() => (window as any).__pg.getState().openDialog("update"));
+  await dialog.getByRole("button", { name: "Skip this version" }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(() => lastSent(page, "settings.update")).toMatchObject({ patch: { skipped_version: "2.0.0" } });
+});
+
+test("a hub that updates outside the app never opens the update dialog by itself", async ({ page }) => {
+  await dashboard(page);
+  await emit(page, { event: "state", ...engine({ update: downloaded }) });
+  await expect(page.getByRole("button", { name: /Update v2\.0\.0/ }).first()).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__pg.getState().dialog)).toBeNull();
+});
+
+test("an update not downloaded yet installs from the dialog where the hub installs its own", async ({ page }) => {
+  await dashboard(page, { engine: engine({ installs_updates: true, update: { ...downloaded, ready: null } }), dialog: "update" });
+  await page.getByRole("button", { name: "Update to v2.0.0" }).click();
+  await expect.poll(() => sent(page, "update.install")).toBeTruthy();
+});
+
+test("the introduction offers automatic updates only where the hub installs its own, switched on for a new hub", async ({ page }) => {
+  await dashboard(page, { dialog: "intro" });
+  await expect(page.getByRole("dialog").getByText("Stay up to date")).toHaveCount(0);
+
+  await dashboard(page, { dialog: "intro", engine: engine({ installs_updates: true, settings: { ...engine().settings, auto_update: true } }) });
+  const dialog = page.getByRole("dialog", { name: "How PrintGuard works" });
+  while (!(await dialog.getByRole("heading", { name: "Stay up to date" }).isVisible())) {
+    await dialog.getByRole("button", { name: "Next", exact: true }).click();
+  }
+  expect(await dialog.innerText()).not.toMatch(/[—→←↗]/);
+  const toggle = dialog.getByRole("switch", { name: "Install updates automatically" });
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect.poll(() => lastSent(page, "settings.update")).toMatchObject({ patch: { auto_update: false } });
+});
+
+test("automatic installs switch on from the updates section, with the daily check they need", async ({ page }) => {
+  await dashboard(page, {}, "/settings/updates");
+  await expect(page.getByRole("switch", { name: "Install updates automatically" })).toHaveCount(0);
+
+  await dashboard(page, { engine: engine({ installs_updates: true, settings: { ...engine().settings, update_check: false } }) }, "/settings/updates");
+  await page.getByRole("switch", { name: "Install updates automatically" }).click();
+  await expect.poll(() => lastSent(page, "settings.update")).toMatchObject({ patch: { auto_update: true, update_check: true } });
+});
+
 test("the updates section opens the release notes whether or not an update is waiting", async ({ page }) => {
   await dashboard(page, {}, "/settings/updates");
   await page.getByRole("button", { name: "Release notes" }).click();

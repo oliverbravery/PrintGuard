@@ -6,7 +6,9 @@ const WCAG_22_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
 const base = engine();
 const state = engine({
-  settings: { ...base.settings, theme: "system" },
+  settings: { ...base.settings, theme: "system", auto_update: true },
+  installs_updates: true,
+  update: { current: "1.0.0", latest: "2.0.0", available: true, download: null, checked_at: 0, releases_url: "https://github.com/o/r/releases", ready: "2.0.0" },
   cameras: [camera(), camera({ id: "c2", name: "Garage", online: false, reason: "no frames for 30s" })],
   printers: [printer(), printer({ id: "p2", name: "MK4", device_state: { status: "paused", progress: 62, job: "bracket.gcode", remaining_s: 900, nozzle: { actual: 215, target: 215 }, bed: { actual: 60, target: 60 } } })],
   monitors: [

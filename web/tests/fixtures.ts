@@ -22,10 +22,10 @@ export const review = (over = {}) => ({
 });
 
 export const engine = (over = {}) => ({
-  version: "test", update: null, cameras: [camera()], printers: [], prints: [], reviews: [], monitors: [monitor()],
+  version: "test", update: null, installs_updates: false, cameras: [camera()], printers: [], prints: [], reviews: [], monitors: [monitor()],
   tokens: [], notifiers: [],
   integrations: [{ id: "octoprint", label: "OctoPrint", docs_url: "", formats: [], heater_control: true, schema: { properties: {} } }],
-  settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, preheat: [] },
+  settings: { notifiers: {}, update_check: true, auto_update: false, skipped_version: "", theme: "dark", themes: [], layout: {}, preheat: [] },
   stats: { inference_device: "CPU", infer_ms: 1, capacity_fps: 1 },
   plugins: [], plugin_permissions: [], plugin_events: {}, plugin_assets: {}, ...over,
 });

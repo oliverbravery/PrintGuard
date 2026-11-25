@@ -1,10 +1,13 @@
 import { Bug } from "lucide-react";
 import type { ReactNode } from "react";
+import { AutoUpdateToggle } from "./components/AutoUpdateToggle";
 import { ModelPicker } from "./components/ModelPicker";
 import { NewTab } from "./components/NewTab";
 import type { Target } from "./components/Page";
 import { ReviewOptIn } from "./components/ReviewOptIn";
+import { SaveStatus } from "./components/SaveStatus";
 import type { SHOT_SIZES } from "./guideShots";
+import type { EngineState } from "./types";
 
 const REPO = "https://github.com/oliverbravery/PrintGuard";
 const docs = (page: string) => `${REPO}/blob/main/docs/${page}`;
@@ -18,6 +21,7 @@ export interface GuideSection {
   shot?: keyof typeof SHOT_SIZES;
   visual?: ReactNode;
   action?: Target & { label: string };
+  shownWhen?: (engine: EngineState) => boolean;
 }
 
 const WATCH_STATES: { led: string; when: string; then: string }[] = [
@@ -116,6 +120,26 @@ export const INTRO: GuideSection[] = [
       </>
     ),
     visual: <ReviewOptIn />,
+  },
+  {
+    id: "updates",
+    led: "led-on",
+    title: "Stay up to date",
+    shownWhen: (engine) => engine.installs_updates,
+    body: (
+      <>
+        New releases bring fixes and better detection, and PrintGuard can install them for you. You can change this any
+        time under Settings, in Updates.
+      </>
+    ),
+    visual: (
+      <div className="space-y-2 border border-line-0 px-3.5 py-3">
+        <AutoUpdateToggle />
+        <div className="flex justify-end empty:hidden">
+          <SaveStatus scope="settings:updates" />
+        </div>
+      </div>
+    ),
   },
   {
     id: "start",
