@@ -41,7 +41,7 @@ Select any monitor on the dashboard and open its **Tune** or **Configure** tab. 
 
 | Setting | Default | Range | What it does |
 |---|---|---|---|
-| **Watch this monitor** | On | | Pauses monitoring without deleting the monitor. Switched-off monitors show as **off** in the fleet list |
+| **Watch this monitor** | On | | Pauses monitoring without deleting the monitor. Switched-off monitors show as **off** in the fleet list. Also available on the **Control** tab as **Start / Stop detecting** (without a printer) or **Auto-detect** (with a printer) |
 | **Camera** | Chosen at creation | Any registered camera, or none | The camera feed this monitor scores. With no camera linked, it won't watch |
 | **Printer** | Chosen at creation | Any registered printer, or none | The printer to track and pause/cancel. Without one, the monitor only alerts |
 | **Alert threshold** | 0.75 | 0.05 to 0.95 | How high a frame's risk score needs to get to count as a defect |
@@ -54,11 +54,11 @@ Select any monitor on the dashboard and open its **Tune** or **Configure** tab. 
 > [!IMPORTANT]
 > Brand-new monitors only flag defects on the dashboard by default. Switch on **Push notifications** if you want alerts on your phone, and change **On sustained defect** to Pause or Cancel if you want PrintGuard to stop the printer automatically.
 
-From the monitor's **Control** and **Preheat** tabs you can also pause, resume or cancel manually and set [heater temperatures](printers.md#temperatures-and-preheat). Pause is available while printing, Resume while paused, and Cancel while printing or paused.
+From the monitor's **Control** and **Preheat** tabs you can start or stop detection (or toggle **Auto-detect** when a printer is linked), pause, resume or cancel manually, and set [heater temperatures](printers.md#temperatures-and-preheat). Pause is available while printing, Resume while paused, and Cancel while printing or paused.
 
 ## When a monitor watches
 
-If a monitor has a camera and no linked printer, it watches continuously. If a printer is linked, it watches unless the printer explicitly reports that it is idle, paused or in an error state (so it also watches before the printer has first responded). A monitor with no camera, or one you've switched off, doesn't watch.
+If a monitor has a camera and no linked printer, it watches continuously while enabled. Use **Start detecting** and **Stop detecting** on its **Control** tab to watch only while a print is running (stopping detection also closes that print's review). If a printer is linked, **Auto-detect** watches whenever the printer is printing and stands down when it explicitly reports idle, paused or in an error state (it also watches before the printer has first responded). A monitor with no camera, or one you've switched off, doesn't watch.
 
 If the printer drops off the network or returns an unrecognised state, PrintGuard sticks with whatever it last reported. That way a printer disconnecting mid-print keeps getting watched, while a printer you power off after a finished job stays quietly on standby. See [failing safely](architecture.md#failing-safely) for the full design.
 
