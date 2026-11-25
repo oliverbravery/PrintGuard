@@ -96,6 +96,7 @@ class Watchdog:
         self._answered: dict[str, int] = {}
         self._online_since: dict[str, float] = {}
         self._coverage: dict[str, deque[bool]] = {}
+        self._camera_back_since: dict[str, float | None] = {}
         self._tasks: set[asyncio.Task[None]] = set()
         self._polls: dict[str, asyncio.Task[None]] = {}
 
@@ -247,7 +248,7 @@ class Watchdog:
 
     def forget(self, monitor_id: str) -> None:
         """Drops everything the watchdog holds for a monitor that was removed."""
-        for held in (self._streaks, self._cooldown_until, self._online_since, self._coverage):
+        for held in (self._streaks, self._cooldown_until, self._online_since, self._coverage, self._camera_back_since):
             held.pop(monitor_id, None)
         for fault in ("device", "offline", "stalled", "unstable"):
             self._forget(f"{fault}:{monitor_id}")
@@ -293,7 +294,8 @@ class Watchdog:
 
         A monitor set to pause on camera loss pauses its printer when its
         camera's outage or stall, or its missing camera, is first announced,
-        so the grace period is all a print is left unwatched for.
+        so the grace period is all a print is left unwatched for. One paused
+        for an outage or a missing camera says when the camera is back.
 
         Each monitor is read when its turn comes, and re-attaching its camera
         is the last thing done for it, since that is awaited and a monitor
@@ -324,6 +326,7 @@ class Watchdog:
                     f"Printer for '{monitor['name']}' is reporting its state again",
                 )
             camera = self._engine.cameras.get(monitor["camera_id"])
+            self._offer_resume(monitor, camera, watching, now)
             offline_key = f"offline:{mid}"
             stall_key = f"stalled:{mid}"
             if not watching or camera is None:
@@ -342,7 +345,7 @@ class Watchdog:
                         f"'{monitor['name']}' has no camera, so it is NOT being monitored",
                         "",
                     )
-                    self._pause_for_lost_camera(monitor, lost)
+                    self._pause_for_lost_camera(monitor, offline=lost, stalled=False)
                 else:
                     self._forget(offline_key)
                 continue
@@ -350,7 +353,7 @@ class Watchdog:
                 self._online_since.setdefault(mid, now)
             else:
                 self._online_since.pop(mid, None)
-            lost = await self._edge(
+            offline = await self._edge(
                 offline_key,
                 camera.online,
                 now,
@@ -367,8 +370,9 @@ class Watchdog:
                 if stall_key in self._down_since
                 else not camera.online or now - max(camera.last_done, self._online_since.get(mid, now)) < STALL_GRACE_S
             )
+            stalled = False
             if camera.online or stall_key in self._warned:
-                lost = await self._edge(
+                stalled = await self._edge(
                     stall_key,
                     progressing,
                     now,
@@ -376,8 +380,8 @@ class Watchdog:
                     monitor,
                     f"Camera '{camera.name}' feed has stalled, so '{monitor['name']}' is NOT being monitored",
                     f"Camera '{camera.name}' feed recovered, so '{monitor['name']}' is monitored again",
-                ) or lost
-            self._pause_for_lost_camera(monitor, lost)
+                )
+            self._pause_for_lost_camera(monitor, offline=offline, stalled=stalled)
             restart = restart or (camera.online and not progressing and self._due_restart(stall_key, camera, now))
             if not (camera.online and progressing):
                 self.drop_streak(mid)
@@ -598,21 +602,24 @@ class Watchdog:
             if self._engine.settle_reviews():
                 self._save()
 
-    def _pause_for_lost_camera(self, monitor: dict[str, Any], lost: bool) -> None:
+    def _pause_for_lost_camera(self, monitor: dict[str, Any], offline: bool, stalled: bool) -> None:
         """Pauses a monitor's printer once losing its camera has been announced, when the monitor is set to.
 
         A pause that fails is pushed, since the error event only reaches the
         dashboard. A pause already in flight is the only one sent, and the
         printer is read again once it has answered, so the paused print stands
         its monitor down and a print resumed with the camera still gone gets a
-        full grace period before it is paused again.
+        full grace period before it is paused again. A print paused for an
+        outage is watched for its camera coming back, which a stall cannot
+        be, since a paused monitor scores no frames to show its feed moving.
 
         Args:
             monitor: The monitor that lost its camera.
-            lost: Whether its camera's outage, stall or absence was just announced.
+            offline: Whether its camera's outage or absence was just announced.
+            stalled: Whether its camera's stall was just announced.
         """
         printer = self._engine.printers.get(monitor["printer_id"])
-        if not (lost and monitor["pause_on_camera_loss"] and printer) or monitor["id"] in self.responding:
+        if not ((offline or stalled) and monitor["pause_on_camera_loss"] and printer) or monitor["id"] in self.responding:
             return
         self.responding.add(monitor["id"])
 
@@ -623,6 +630,8 @@ class Watchdog:
                         await self._engine.send_alerts("PrintGuard warning", f"AUTOMATIC PAUSE FAILED for '{monitor['name']}' after losing its camera, check the printer", None)
                     return
                 self._announce(monitor, f"Paused '{printer.name}' since '{monitor['name']}' can't see its print")
+                if offline:
+                    self._camera_back_since[monitor["id"]] = None
                 await self.refresh(printer, after_command=True)
             finally:
                 self.responding.discard(monitor["id"])
@@ -630,6 +639,37 @@ class Watchdog:
                     self._save()
 
         self._schedule(f"the camera loss pause for '{monitor['name']}'", pause())
+
+    def _offer_resume(self, monitor: dict[str, Any], camera: "Camera | None", watching: bool, now: float) -> None:
+        """Says a print paused for losing its camera can be resumed, once the camera has held online for RECOVER_HOLD_S.
+
+        The print is left paused, since one stood for a while needs checking
+        before it carries on. Nothing is said once the print has ended, or
+        once it was resumed with the camera back.
+
+        Args:
+            monitor: The monitor whose print may have been paused.
+            camera: The camera the monitor is bound to now, if any.
+            watching: Whether the monitor is watching.
+            now: Current monotonic time.
+        """
+        mid = monitor["id"]
+        if mid not in self._camera_back_since:
+            return
+        printer = self._engine.printers.get(monitor["printer_id"])
+        online = camera is not None and camera.online
+        if printer is None or printer.reported_status in ENDED_STATUSES or (online and watching):
+            del self._camera_back_since[mid]
+            return
+        if not online or printer.reported_status != DeviceStatus.PAUSED.value:
+            self._camera_back_since[mid] = None
+            return
+        since = self._camera_back_since[mid]
+        if since is None:
+            self._camera_back_since[mid] = now
+        elif now - since >= RECOVER_HOLD_S:
+            del self._camera_back_since[mid]
+            self._announce(monitor, f"Camera '{camera.name}' is back, so you can resume '{printer.name}' when you're ready", recovered=True)
 
     async def _act(self, monitor: dict[str, Any], wanted: str) -> str:
         """Sends an action to a monitor's printer, trying again when it is not taken.
