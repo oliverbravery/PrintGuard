@@ -393,7 +393,7 @@
           },
           {
             "const": "device",
-            "description": "Carries printer_id, status, progress, job, remaining_s, nozzle, bed."
+            "description": "Carries printer_id, status, progress, job, remaining_s, nozzle, bed, outcome."
           },
           {
             "const": "error",

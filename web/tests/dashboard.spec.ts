@@ -256,6 +256,46 @@ test("a review asks for its frames again after reconnect, sends flagged failures
   await expect.poll(() => page.evaluate(() => (window as any).__pg.getState().snapshotCache)).toEqual({});
 });
 
+test("a streak that outlasted a cooldown before it alerted is counted from the alert back", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [review()] }) }, "/monitors/m1/review/r1");
+  const frames = [
+    { id: "t3", ts: 58, score: 0.8, kind: "streak", streak: 3, consecutive: 3, alert: "a1", size: 1 },
+    { id: "t4", ts: 59, score: 0.85, kind: "streak", streak: 4, consecutive: 3, alert: "a1", size: 1 },
+    { id: "a1", ts: 60, score: 0.9, kind: "alert", streak: 5, consecutive: 3, action: "pause", size: 1 },
+  ];
+  await emit(page, { event: "review", ...review(), frames });
+  const cards = page.getByRole("main").getByRole("region", { name: "Frames to send" }).getByRole("listitem");
+  await expect(cards.nth(0)).toContainText("1 of 3 ·");
+  await expect(cards.nth(1)).toContainText("2 of 3 ·");
+});
+
+test("flagging an alert flags the streak that built it, each of which can still be unflagged", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [review()] }) }, "/monitors/m1/review/r1");
+  const main = page.getByRole("main");
+  const frames = [
+    { id: "k1", ts: 40, score: 0.95, kind: "spike", streak: 1, consecutive: 3, size: 1 },
+    { id: "t1", ts: 58, score: 0.8, kind: "streak", streak: 1, consecutive: 3, alert: "a1", size: 1 },
+    { id: "t2", ts: 59, score: 0.85, kind: "streak", streak: 2, consecutive: 3, alert: "a1", size: 1 },
+    { id: "a1", ts: 60, score: 0.9, kind: "alert", streak: 3, consecutive: 3, action: "pause", size: 1 },
+  ];
+  await emit(page, { event: "review", ...review(), frames });
+  const cards = main.getByRole("region", { name: "Frames to send" }).getByRole("listitem");
+  await expect(cards.nth(0)).toContainText("Good");
+  await expect(cards.nth(0)).toContainText("spike ·");
+  await expect(cards.nth(1)).toContainText("False alarm");
+  await expect(cards.nth(2)).toContainText("2 of 3 ·");
+
+  await main.getByRole("button", { name: /^Something went wrong in frame 4 of 4 at/ }).click();
+  await expect(cards.nth(1)).toContainText("Real failure");
+  await expect(cards.nth(2)).toContainText("Real failure");
+  await expect(cards.nth(0)).toContainText("Good");
+  await main.getByRole("button", { name: /^Something went wrong in frame 2 of 4 at/ }).click();
+  await expect(cards.nth(1)).toContainText("False alarm");
+
+  await main.getByRole("button", { name: "Send 4 frames" }).click();
+  expect(await sent(page, "review.send")).toMatchObject({ id: "r1", failures: ["t2", "a1"], removed: [] });
+});
+
 const picked = [
   { id: "a1", ts: 60, score: 0.9, kind: "alert", action: "pause", size: 1 },
   { id: "s1", ts: 120, score: 0.1, kind: "spaced", size: 1 },

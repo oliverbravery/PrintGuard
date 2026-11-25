@@ -20,8 +20,12 @@ PrintGuard keeps a handful of frames locally on your hub from each print. Once a
 | Frame type | Kept per print |
 |---|---|
 | Frames that triggered a defect alert | Up to the last 40 |
-| Highest-scoring frames that stayed below the alert threshold (at least a minute apart) | Up to 5 |
+| The frames in a row that built up to an alert | All of them for the first alert of each streak, up to 60, dropping the oldest alert's first |
+| Spikes, the highest-scoring frames at or over the alert threshold that didn't trigger an alert (at least a minute apart) | Up to 5 |
+| Near misses, the highest-scoring frames that stayed below the alert threshold (at least a minute apart) | Up to 5 |
 | Regular frames spread evenly across the print | Up to 19, starting at one per minute |
+
+Regular frames and near misses start once a linked printer reports it's printing and past 0%, so the empty bed while it heats and levels isn't kept. Monitors without a printer, or whose printer hasn't answered yet, start straight away. Each kept frame also notes what was true when it was scored, which is listed under [What's sent](#whats-sent).
 
 Frames are saved exactly as the model saw them (after rotation, crop and brightness/contrast/sharpness adjustments), and anything larger than 512px on its shorter side is scaled down to 512px. Everything is stored inside the hub's data directory, so it survives restarts. Across all monitors, the hub keeps the last 20 prints or 200 MB (whichever hits first), pruning the oldest finished prints first. Any print currently queued to send is kept until it finishes uploading or you cancel it, and doesn't count against the 20-print cap. Alert frames are the same snapshots shown under **Risky moments** on the history page. Deleting a monitor removes all saved prints belonging to it, including any waiting to be reviewed or sent.
 
@@ -35,7 +39,7 @@ Open a monitor's **Review** tab to see its finished prints, newest first, with u
 
 ![The review page with a failed print's frames labelled good, failure and real failure beside the recording](assets/review.png)
 
-1. Click the flag icon on any frame where something went wrong. On an alert frame, flagging marks it as a **Real failure** and leaving it unflagged marks it as a **False alarm**; on any other frame, flagging marks it as a **Failure**.
+1. Click the flag icon on any frame where something went wrong. On an alert frame or one that built up to it (shown as "2 of 3" and so on), flagging marks it as a **Real failure** and leaving it unflagged marks it as a **False alarm**. Flagging an alert flags the frames that built up to it too, and you can unflag any of them on their own. On any other frame, flagging marks it as a **Failure**.
 2. Click `×` on any frame you'd rather not share, or hit **Clear all** if you only want to pick a few specific frames from the recording.
 3. Scrub through the recording on the left and click **Add as good** or **Add as failure** to include frames PrintGuard didn't automatically pick. Tick marks on the slider show where alerts and picked frames sit.
 4. Click **Send**. You can send up to 60 frames a day, and the counter above the grid keeps track of how many you've selected.
@@ -47,14 +51,17 @@ Clicking **Ignore** deletes the print's saved frames and recording from your hub
 When you press **Send**, PrintGuard uploads:
 
 - The frames you chose to keep, along with your labels.
-- Each frame's risk score, timestamp and kind (alert, near miss, regular, or added from the recording).
+- Each frame's risk score, timestamp and kind (alert, built up to an alert, spike, near miss, regular, or added from the recording).
+- The detection model and runtime that scored each frame, how many frames in a row had scored at or over the threshold, the printer's status and progress at the time, and whether the camera has a crop (so the frame was scored square by square).
+- The monitor's alert threshold, frames in a row, cooldown and defect action when each frame was scored. Frames added from the recording only have a score and timestamp, so they go with the monitor's settings at the time of sending and without the rest of the line above.
+- For an alert, what PrintGuard did to the printer and, after a pause, whether the print was resumed. Frames that built up to an alert carry that alert's ID.
+- How the print ended (finished, cancelled or an error), where the printer says. [Printers](printers.md#how-a-print-ended) lists what each one can tell.
 - A random ID for the print and for each frame.
-- The monitor's alert threshold at the time of sending.
 - The printer integration type (e.g. `klipper` or `none`), plus the printer model if you filled it in on the **Printers** page.
 - Your PrintGuard version.
 - A random hub ID generated the first time you send.
 
-No monitor names, camera URLs or credentials are ever sent. Uploads go to a private Cloudflare R2 bucket in the EU through a small [Cloudflare Worker](../feedback-worker) whose code is right here in the repo for anyone to inspect. I download the frames, re-encode them so nothing but the raw pixels remains (discarding anything over 4096×4096 pixels) and delete them from the bucket. I keep the frame labels and upload timestamps, and anything I haven't pulled down is automatically deleted after 30 days. Everything sent is used purely to train PrintGuard's detection models.
+Anything PrintGuard doesn't know, such as the printer's status on a monitor without one, is left out. No monitor names, camera URLs or credentials are ever sent. Uploads go to a private Cloudflare R2 bucket in the EU through a small [Cloudflare Worker](../feedback-worker) whose code is right here in the repo for anyone to inspect. I download the frames, re-encode them so nothing but the raw pixels remains (discarding anything over 4096×4096 pixels) and delete them from the bucket. I keep the frame labels and upload timestamps, and anything I haven't pulled down is automatically deleted after 30 days. Everything sent is used purely to train PrintGuard's detection models.
 
 Your hub doesn't include your IP in the payload, though the Worker sees your public IP on the incoming HTTP request like any web server does. It only uses it to enforce the per-network daily limit below:
 

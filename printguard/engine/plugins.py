@@ -271,7 +271,7 @@ EVENTS: dict[str, list[str]] = {
     "result": ["monitor_id", "camera_id", "score", "prediction", "ms", "ts"],
     "alert": ["monitor_id", "score", "action", "ts"],
     "warning": ["monitor_id", "message", "recovered"],
-    "device": ["printer_id", "status", "progress", "job", "remaining_s", "nozzle", "bed"],
+    "device": ["printer_id", "status", "progress", "job", "remaining_s", "nozzle", "bed", "outcome"],
     "error": ["message"],
     "state": [],
 }

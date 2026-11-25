@@ -3336,6 +3336,11 @@ async def _review(engine: Engine, review_id: str) -> dict:
     return next(e for e in await engine.request({"cmd": "review.get", "id": review_id}) if e["event"] == "review")
 
 
+def _scoring(streak: int = 0) -> reviews.Scoring:
+    """What a frame scored by a monitor with the default alert rule and no printer is kept with."""
+    return reviews.Scoring(model="standard", runtime="onnx", tiled=False, streak=streak, status=None, progress=None, threshold=0.75, consecutive=3, cooldown_s=60, on_defect="none")
+
+
 def _recording_files(platform: FakePlatform) -> list[str]:
     return sorted(key for key in platform.files.blobs if key.startswith("recording-"))
 
@@ -3363,7 +3368,7 @@ async def test_alert_snapshots_survive_a_restart() -> None:
 
 async def test_a_print_keeps_a_thinned_spread_of_frames_and_its_near_misses(monkeypatch) -> None:
     monkeypatch.setattr(reviews, "SPACED_START_S", 0.01)
-    monkeypatch.setattr(reviews, "NEAR_APART_S", 0.3)
+    monkeypatch.setattr(reviews, "HIGHEST_APART_S", 0.3)
     platform = FakePlatform(infer_s=0.01)
     async with running_engine(platform, camera_fps=[30.0]) as (engine, _):
         await asyncio.sleep(2.0)
@@ -3377,7 +3382,7 @@ async def test_a_print_keeps_a_thinned_spread_of_frames_and_its_near_misses(monk
     assert 3 <= len(spaced) < reviews.SPACED_MAX, "the spread is thinned once it reaches its cap"
     gaps = [later["ts"] - earlier["ts"] for earlier, later in zip(spaced[:-2], spaced[1:-1])]
     assert min(gaps) > 0.05, "thinning should have widened the gap between spaced frames"
-    assert 1 <= len(near) <= reviews.NEAR_MAX and all(frame["score"] < 0.5 for frame in near), "near misses score under the threshold"
+    assert 1 <= len(near) <= reviews.HIGHEST_MAX and all(frame["score"] < 0.5 for frame in near), "near misses score under the threshold"
     assert not [frame for frame in frames if frame["kind"] == "alert"], "a clean print has no alert frames"
     assert len(_kept_files(platform)) == len(frames), "every kept frame has its JPEG stored, and thinned ones are deleted"
 
@@ -3450,12 +3455,12 @@ async def test_prints_queued_to_send_do_not_push_out_the_print_that_just_ended(m
     frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
     monitor = {"id": "m", "threshold": 0.75, "printer_id": "", "enabled": False}
     for started in (0.0, 100.0, 200.0):
-        await library.sample(monitor, frame, 0.1, started, recording=False, answered=True)
+        await library.sample(monitor, frame, 0.1, started, _scoring(), False, recording=False, answered=True)
         library.settle({"m": monitor}, {}, set(), True)
         if started < 200.0:
             library.submit(library.public(0)[-1]["id"], set(), set(), "")
 
-    await library.sample(monitor, frame, 0.1, 300.0, recording=False, answered=True)
+    await library.sample(monitor, frame, 0.1, 300.0, _scoring(), False, recording=False, answered=True)
 
     assert [review["status"] for review in library.public(0)] == ["queued", "queued", "ready", "running"], "the print waiting for its review was deleted"
 
@@ -3468,7 +3473,7 @@ async def test_a_print_left_with_no_frames_is_dropped_before_one_with_alert_fram
     await library.keep_alert("m", {"ts": 0.0, "score": 0.9, "action": "none"}, frame)
     library.settle({"m": monitor}, {}, set(), True)
     for started in (100.0, 200.0):
-        await library.sample(monitor, frame, 0.1, started, recording=False, answered=True)
+        await library.sample(monitor, frame, 0.1, started, _scoring(), False, recording=False, answered=True)
         library.settle({"m": monitor}, {}, set(), True)
     await library.stop_asking()
 
@@ -3484,7 +3489,7 @@ async def test_removing_a_monitor_forgets_every_print_even_when_a_frame_cannot_b
     frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
     monitor = {"id": "m", "threshold": 0.75, "printer_id": "", "enabled": False}
     for started in (0.0, 100.0, 200.0):
-        await library.sample(monitor, frame, 0.1, started, recording=False, answered=True)
+        await library.sample(monitor, frame, 0.1, started, _scoring(), False, recording=False, answered=True)
         library.settle({"m": monitor}, {}, set(), True)
     remove = platform.files.remove
     stuck = next(iter(platform.files.blobs))
@@ -3509,10 +3514,10 @@ async def test_two_prints_beginning_at_the_cap_do_not_evict_the_same_review(monk
     frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
     first, second = ({"id": name, "threshold": 0.75, "printer_id": "", "enabled": False} for name in ("first", "second"))
     for monitor in (first, second):
-        await library.sample(monitor, frame, 0.1, 0.0, recording=False, answered=True)
+        await library.sample(monitor, frame, 0.1, 0.0, _scoring(), False, recording=False, answered=True)
     library.settle({"first": first, "second": second}, {}, set(), True)
 
-    kept = await asyncio.gather(library.sample(first, frame, 0.1, 10.0, recording=False, answered=True), library.sample(second, frame, 0.1, 10.0, recording=False, answered=True), return_exceptions=True)
+    kept = await asyncio.gather(library.sample(first, frame, 0.1, 10.0, _scoring(), False, recording=False, answered=True), library.sample(second, frame, 0.1, 10.0, _scoring(), False, recording=False, answered=True), return_exceptions=True)
 
     assert kept == [True, True], "one of the two prints lost its frame"
     running = [review["frames"] for review in library.public(0) if review["status"] == "running"]
@@ -3526,7 +3531,7 @@ async def test_a_print_beginning_while_the_review_is_switched_off_keeps_no_frame
     library = reviews.ReviewLibrary(platform)
     frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
     monitor = {"id": "m", "threshold": 0.75, "printer_id": "", "enabled": False}
-    await library.sample(monitor, frame, 0.1, 0.0, recording=False, answered=True)
+    await library.sample(monitor, frame, 0.1, 0.0, _scoring(), False, recording=False, answered=True)
     library.settle({"m": monitor}, {}, set(), True)
     remove = platform.files.remove
     evicting = asyncio.Event()
@@ -3537,7 +3542,7 @@ async def test_a_print_beginning_while_the_review_is_switched_off_keeps_no_frame
         await remove(key)
 
     monkeypatch.setattr(platform.files, "remove", slow_remove)
-    sampling = asyncio.create_task(library.sample(monitor, frame, 0.1, 100.0, recording=False, answered=True))
+    sampling = asyncio.create_task(library.sample(monitor, frame, 0.1, 100.0, _scoring(), False, recording=False, answered=True))
     await evicting.wait()
     await library.stop_asking()
     await sampling
@@ -3640,6 +3645,195 @@ async def test_a_reviewed_print_is_sent_with_its_labels(monkeypatch) -> None:
     assert state["feedback_hub"] == "a" * 32 and TOKEN not in json.dumps(state), "the state names the hub and never carries its token"
     assert platform.state["feedback_token"] == TOKEN, "the token is kept so the hub registers once"
     assert platform.http_calls.count(("POST", f"{feedback.ENDPOINT}/register")) == 1
+
+
+def _scripted(platform: FakePlatform, scores: list[float]) -> None:
+    """Has the platform score the frames it is given next in this order, and 0 from then on."""
+    upcoming = iter(scores)
+
+    async def infer(rgb: np.ndarray) -> dict:
+        await asyncio.sleep(platform.infer_s)
+        score = next(upcoming, 0.0)
+        return {"prediction": "failure" if score >= 0.5 else "success", "defect_score": score}
+
+    platform.infer = infer
+
+
+def _of_kind(review: dict, kind: str) -> list[dict]:
+    return [frame for frame in review["frames"] if frame["kind"] == kind]
+
+
+async def test_an_alert_keeps_the_streak_behind_it_and_a_streak_that_breaks_keeps_its_spikes(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "HIGHEST_APART_S", 0.0)
+    platform = FakePlatform(infer_s=0.01)
+    uploads = _inbox(platform, monkeypatch)
+    async with running_engine(platform, camera_fps=[30.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"cooldown_s": 600}})
+        await asyncio.sleep(0.3)
+        _scripted(platform, [0.9, 0.95, 0.1, 0.8, 0.85, 0.9, 0.97, 0.99])
+        review = await _finished_review(engine, wait_s=1.0)
+        await engine.request({"cmd": "review.add", "id": review["id"], "index": 0, "label": "good"})
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"threshold": 0.9}})
+        review = await _review(engine, review["id"])
+        await engine.handle({"cmd": "review.send", "id": review["id"], "failures": [], "removed": []})
+        await _sent(events)
+
+    [alert] = _of_kind(review, "alert")
+    streak, spikes = _of_kind(review, "streak"), _of_kind(review, "spike")
+    assert [(frame["score"], frame["streak"]) for frame in spikes] == [(0.9, 1), (0.95, 2)], "a streak that breaks before it fires keeps its frames as spikes"
+    assert [(frame["score"], frame["streak"], frame["alert"]) for frame in streak] == [(0.8, 1, alert["id"]), (0.85, 2, alert["id"])], "the frames that built the alert name it"
+    assert (alert["score"], alert["streak"], alert["action"]) == (0.9, 3, "none")
+    assert not [frame for frame in review["frames"] if frame["score"] in (0.97, 0.99)], "a streak that already fired keeps nothing more of a lasting defect"
+    assert review["frames"] == sorted(review["frames"], key=lambda frame: frame["ts"]), "frames are kept in capture order"
+
+    by_frame = {upload["frame"]: upload for upload in uploads}
+    sent = by_frame[streak[0]["id"]]
+    assert (sent["kind"], sent["streak"], sent["alert"], sent["model"], sent["runtime"], sent["tiled"]) == ("streak", 1, alert["id"], "standard", "onnx", False)
+    assert (sent["threshold"], sent["consecutive"], sent["cooldown_s"], sent["on_defect"]) == (0.75, 3, 600, "none"), "the rule is the one the frame was scored under"
+    assert not {"status", "progress", "outcome", "resumed"} & set(sent), "what a monitor with no printer cannot know is left out"
+    assert (by_frame[alert["id"]]["action"], "alert" in by_frame[alert["id"]]) == ("none", False)
+    added = next(upload for upload in uploads if upload["kind"] == "added")
+    assert added["threshold"] == 0.9 and "model" not in added and "streak" not in added, "a frame added from the recording has only the rule as it is now"
+
+
+async def test_a_streak_too_long_for_its_window_lets_its_oldest_go_as_spikes(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "HIGHEST_APART_S", 0.0)
+    platform = FakePlatform(infer_s=0.01)
+    async with running_engine(platform, camera_fps=[30.0]) as (engine, _):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"consecutive": 2, "cooldown_s": 600}})
+        await asyncio.sleep(0.3)
+        _scripted(platform, [0.81, 0.82, 0.1, 0.91, 0.92, 0.93])
+        review = await _finished_review(engine, wait_s=1.0)
+
+    assert [frame["score"] for frame in _of_kind(review, "streak")] == [0.81]
+    assert [frame["score"] for frame in _of_kind(review, "alert")] == [0.82]
+    assert [frame["score"] for frame in _of_kind(review, "spike")] == [0.91, 0.92, 0.93], "a streak held back by the cooldown never fires, so all of it is spikes"
+
+
+async def test_a_thirty_frame_streak_is_kept_whole_and_the_oldest_streak_goes_first(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "STREAK_MAX", 40)
+    platform = FakePlatform(infer_s=0.005)
+    async with running_engine(platform, camera_fps=[60.0]) as (engine, _):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"consecutive": 30, "cooldown_s": 0}})
+        await asyncio.sleep(0.3)
+        _scripted(platform, ([0.9] * 30 + [0.0]) * 2)
+        review = await _finished_review(engine, wait_s=2.5)
+
+    first, second = _of_kind(review, "alert")
+    streak = _of_kind(review, "streak")
+    assert (first["streak"], second["streak"]) == (30, 30)
+    assert [frame["streak"] for frame in streak] == list(range(1, 30)), "the whole streak behind an alert is kept"
+    assert {frame["alert"] for frame in streak} == {second["id"]}, "over the cap the oldest alert loses its whole streak, not part of each"
+
+
+async def test_spaced_frames_and_near_misses_wait_until_the_printer_is_past_0_percent(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.15)
+    platform = FakePlatform(infer_s=0.02)
+    platform.device_status, platform.device_progress = "Operational", 0.0
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        monitor_id = next(iter(engine.monitors))
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id}})
+        await asyncio.sleep(0.3)
+        platform.device_status = "Printing"
+        await asyncio.sleep(0.5)
+        heating = next(review for review in engine.state_event()["reviews"] if review["ended"] is None)
+        platform.device_progress = 1.0
+        await asyncio.sleep(0.5)
+        review = await _review(engine, heating["id"])
+
+    assert heating["frames"] == 0, "a printer heating and levelling at 0% shows an empty bed"
+    spaced = _of_kind(review, "spaced")
+    assert spaced and _of_kind(review, "near"), "the print is kept once the printer is past 0%"
+    assert {(frame["status"], frame["progress"]) for frame in spaced} == {("printing", 1.0)}
+
+
+async def test_a_streak_frame_thinned_out_of_spaced_is_still_kept_with_its_alert(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.0)
+    monkeypatch.setattr(reviews, "SPACED_MAX", 2)
+    platform = FakePlatform(infer_s=0.01)
+    async with running_engine(platform, camera_fps=[30.0]) as (engine, _):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"consecutive": 3, "cooldown_s": 600}})
+        await asyncio.sleep(0.1)
+        _scripted(platform, [0.1, 0.81, 0.85, 0.9])
+        review = await _finished_review(engine, wait_s=0.6)
+
+    [alert] = _of_kind(review, "alert")
+    assert [(frame["score"], frame["streak"], frame["alert"]) for frame in _of_kind(review, "streak")] == [
+        (0.81, 1, alert["id"]),
+        (0.85, 2, alert["id"]),
+    ], "a streak frame dropped by spaced thinning is still kept as part of the alert's streak"
+
+
+async def test_a_print_ending_mid_streak_keeps_its_held_frames_as_spikes(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
+    monkeypatch.setattr(reviews, "HIGHEST_APART_S", 0.0)
+    platform = FakePlatform(infer_s=0.01)
+    platform.device_status, platform.device_progress = "Operational", 0.0
+    two_scored, block = asyncio.Event(), asyncio.Event()
+    scores = iter([0.91, 0.92])
+
+    async def infer(rgb: np.ndarray) -> dict:
+        await asyncio.sleep(platform.infer_s)
+        score = next(scores, None)
+        if score is None:
+            two_scored.set()
+            await block.wait()
+            return {"prediction": "success", "defect_score": 0.0}
+        return {"prediction": "failure", "defect_score": score}
+
+    async with running_engine(platform, camera_fps=[30.0]) as (engine, _):
+        monitor_id = next(iter(engine.monitors))
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id}})
+        await asyncio.sleep(0.15)
+        platform.infer = infer
+        platform.device_status = "Printing"
+        await asyncio.wait_for(two_scored.wait(), timeout=2.0)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": False}})
+        block.set()
+        await asyncio.sleep(0.1)
+        review = await _review(engine, engine.state_event()["reviews"][0]["id"])
+
+    assert review["status"] == "ready"
+    assert [(frame["score"], frame["streak"]) for frame in _of_kind(review, "spike")] == [(0.91, 1), (0.92, 2)]
+    assert len(review["frames"]) == 2
+
+
+async def test_a_pause_counts_as_resumed_only_once_the_printer_was_seen_paused_and_the_print_keeps_how_it_ended(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
+    platform = FakePlatform(infer_s=0.02)
+    uploads = _inbox(platform, monkeypatch)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id, "on_defect": "pause", "consecutive": 1, "cooldown_s": 600}})
+        await asyncio.sleep(0.3)
+        platform.failing = True
+        await asyncio.sleep(0.5)
+        platform.failing = False
+        review_id = next(review["id"] for review in engine.state_event()["reviews"] if review["ended"] is None)
+        pauses = []
+        for status in ("Printing", "Paused", "Printing"):
+            platform.device_status = status
+            await asyncio.sleep(0.3)
+            pauses.append(_of_kind(await _review(engine, review_id), "alert")[0]["pause"])
+        platform.device_status = "Error"
+        await asyncio.sleep(0.3)
+        review = await _review(engine, review_id)
+        await engine.handle({"cmd": "review.send", "id": review_id, "failures": [], "removed": []})
+        await _sent(events)
+
+    assert pauses == ["sent", "held", "resumed"], "a read from before the pause took effect still shows the print running, which is no resume"
+    [alert] = _of_kind(review, "alert")
+    sent = next(upload for upload in uploads if upload["frame"] == alert["id"])
+    assert (sent["action"], sent["resumed"], sent["status"], sent["progress"]) == ("pause", True, "printing", 40.0)
+    assert {upload["outcome"] for upload in uploads} == {"error"}, "every frame carries how the print ended"
 
 
 async def test_an_ignored_print_is_deleted_with_its_frames_and_recording(monkeypatch) -> None:
@@ -6522,6 +6716,10 @@ _FAKE_TOKEN = {"id": "t1", "name": "t", "scope": "read", "hash": "0" * 64, "hint
         {"reviews": [{**_QUEUED_REVIEW, "frames": [{key: value for key, value in _FAKE_FRAME.items() if key != "action"}]}]},
         *({"reviews": [{**_QUEUED_REVIEW, "frames": [{**_FAKE_FRAME, "ts": junk}]}]} for junk in (None, "x", [], {}, True)),
         {"reviews": [{**_QUEUED_REVIEW, "frames": [{**_FAKE_FRAME, "kind": "other"}]}]},
+        {"reviews": [{**_QUEUED_REVIEW, "frames": [{**_FAKE_FRAME, "kind": "streak"}]}]},
+        {"reviews": [{**_QUEUED_REVIEW, "frames": [{**_FAKE_FRAME, "pause": "maybe"}]}]},
+        {"reviews": [{**_QUEUED_REVIEW, "outcome": "abandoned"}]},
+        {"reviews": [{**_QUEUED_REVIEW, "underway": "yes"}]},
         *({"tokens": [{**_FAKE_TOKEN, "hash": junk}]} for junk in ([], {}, None, 5)),
         {"tokens": [{**_FAKE_TOKEN, "scope": "root"}]},
         {"tokens": [{**_FAKE_TOKEN, "created": "now"}]},
@@ -7181,11 +7379,11 @@ async def test_a_monitor_edited_while_another_keeps_its_frame_is_scored_as_it_no
         await asyncio.sleep(0.3)
         sample, keeping, edited = engine.reviews.sample, asyncio.Event(), asyncio.Event()
 
-        async def slow_sample(monitor, frame, score, ts, recording, answered):
+        async def slow_sample(monitor, frame, score, ts, scoring, fired, recording, answered):
             if monitor["id"] == first and platform.failing and not edited.is_set():
                 keeping.set()
                 await edited.wait()
-            return await sample(monitor, frame, score, ts, recording, answered)
+            return await sample(monitor, frame, score, ts, scoring, fired, recording, answered)
 
         engine.reviews.sample = slow_sample
         platform.failing = True

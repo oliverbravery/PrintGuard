@@ -28,6 +28,8 @@ MONITOR_DEFAULTS: dict[str, Any] = {
 
 STANDBY_STATUSES = ("idle", "paused", "error")
 ON_DEFECT = ("none", "pause", "cancel")
+ALERT_RULE = ("threshold", "consecutive", "cooldown_s", "on_defect")
+"""The fields of a monitor that decide when it alerts and what it does then."""
 
 # A score only approaches 1, and on failing frames from hubs it was never
 # trained on, Light passes 0.95 on one in twelve and never reaches 0.99, so a

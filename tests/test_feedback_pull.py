@@ -111,6 +111,16 @@ def test_a_frame_sent_again_after_a_pull_leaves_one_row(pull: types.ModuleType, 
 
     assert [json.loads(row)["label"] for row in (tmp_path / "frames.jsonl").read_text().splitlines()] == ["failure"]
 
+def test_what_was_true_when_a_frame_was_scored_reaches_its_row_and_an_older_frame_has_none_of_it(pull: types.ModuleType, tmp_path: Path) -> None:
+    scored = labels(kind="streak", model="standard", runtime="onnx", tiled="false", streak="2", status="printing", progress="41.5", consecutive="3", cooldown_s="60", on_defect="pause", outcome="cancelled", alert="c" * 12)
+    pull.pull(Bucket({key(1): (jpeg(), scored), key(2): (jpeg(), labels())}), tmp_path)
+
+    rows = {row["file"]: row for row in map(json.loads, (tmp_path / "frames.jsonl").read_text().splitlines())}
+
+    assert {name: rows[key(1)][name] for name in scored} == scored
+    assert set(rows[key(2)]) == {*labels(), "hub", "print", "file", "uploaded"}
+
+
 def test_a_frame_over_the_pixel_cap_is_discarded_before_it_is_decoded(pull: types.ModuleType) -> None:
     assert pull.sanitised(jpeg((5780, 5780), quality=10)) is None
     assert pull.sanitised(jpeg((4096, 4096), quality=10)) is not None

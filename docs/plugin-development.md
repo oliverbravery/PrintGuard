@@ -393,7 +393,7 @@ Register listeners with `plugin.on(name, handler)` (or `pg.on(name, handler)` in
 | `result` | Inference result (up to 5 Hz per monitor) | `monitor_id`, `camera_id`, `score`, `prediction`, `ms`, `ts` | `state:read` |
 | `alert` | Sustained defect triggered | `monitor_id`, `score`, `action`, `ts` | `state:read` |
 | `warning` | Watchdog fault or recovery | `monitor_id`, `message`, `recovered` | `state:read` |
-| `device` | Printer status/temp/progress changed | `printer_id`, `status`, `progress`, `job`, `remaining_s`, `nozzle`, `bed` | `state:read` |
+| `device` | Printer status/temp/progress changed | `printer_id`, `status`, `progress`, `job`, `remaining_s`, `nozzle`, `bed`, `outcome` | `state:read` |
 | `error` | Hub-level error (command errors go only to their caller) | `message` | `state:read` |
 | `state` | Periodic state snapshot (1 Hz; UI halves also receive post-command snapshots) | Permission-filtered state | `state:read` |
 | `tick` | Worker timer fired | None | `tick_s` set |

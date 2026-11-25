@@ -204,6 +204,10 @@ class Platform(Protocol):
 
     workers: int
     inference_device: str
+    inference_runtime: str
+    """The runtime the detection model runs on, ``onnx`` or ``litert``, which
+    an ``auto`` setting leaves to the platform."""
+
     version: str
     update_repo: str
     """GitHub ``owner/name`` whose releases are checked for updates."""

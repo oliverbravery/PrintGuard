@@ -178,6 +178,21 @@ Linked printers show their progress in the fleet list, and live nozzle and bed t
 
 Targets above 350°C (nozzle) or 150°C (bed) or non-numeric values are rejected by the engine; the UI clamps inputs and presets to those caps, and your printer's firmware still enforces its own safety limits on top. Temperatures poll every ~5 seconds alongside printer status, independently per printer so one offline machine never slows the others down.
 
+Klipper reads as 0% through until the first extrusion, since its file position already counts the start code and thumbnails while the printer heats and levels.
+
+## How a print ended
+
+Each print's [review](feedback.md) keeps how it ended, as far as the printer says, and the API and plugins see it as `outcome` on the printer's state. A printer that reports an error always reads as having ended in error.
+
+| Service | What it can say |
+|---|---|
+| Klipper (Moonraker), and Elegoo on Moonraker | Finished or cancelled |
+| Prusa (PrusaLink) | Finished, or stopped (read as cancelled) |
+| Creality | Finished, failed (read as an error) or aborted (read as cancelled) |
+| Elegoo Centauri | Complete, or stopped (read as cancelled) |
+| Bambu Lab | Finished, or cancelled when a failed job carries the cancellation code (HMS 0300-400C) |
+| OctoPrint, Ultimaker | Only an error |
+
 ## Networking caveats
 
 The hub itself connects to your printers, never your browser. That means the address you enter must be reachable from the hub machine, and you can safely connect `http://` printers even if you access the PrintGuard dashboard over HTTPS.
