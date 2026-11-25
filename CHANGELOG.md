@@ -9,6 +9,17 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [3.0.2] - 2026-11-24
 
+### Added
+
+- Prints kept for review keep every frame of the streak that set off an alert, and up to five spikes that scored over the alert threshold without setting one off. Flagging an alert on the review page flags the frames that built up to it too.
+- Frames sent for training note what was true when they were scored, such as the model, the alert settings and the printer's progress, along with how the print ended and whether a print PrintGuard paused was resumed. [docs/feedback.md](docs/feedback.md#whats-sent) lists all of it.
+- The printer state in the API and plugins has an `outcome` saying how the last print ended (finished, cancelled or error) where the printer says.
+
+### Changed
+
+- Regular frames and near misses wait until a linked printer reports it's past 0%, so the empty bed while it heats and levels isn't kept.
+- Klipper reads as 0% through a print until the first extrusion, where it used to count the start code and thumbnails.
+
 ## [3.0.1] - 2026-11-23
 
 ### Changed
