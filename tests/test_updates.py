@@ -8,6 +8,7 @@ import pytest
 from fakes import FakePlatform, FakeUpdater
 
 from printguard.engine import engine as engine_module
+from printguard.engine import watchdog
 from printguard.engine.engine import Engine
 
 
@@ -294,3 +295,50 @@ async def test_installing_now_fetches_a_release_newer_than_the_one_downloaded() 
     await engine.request({"cmd": "update.install"})
     assert (platform.updater.downloads, platform.updater.installs) == (2, 1)
     assert engine.state_event()["update"]["ready"] == "2.3.0"
+
+
+async def test_switching_automatic_installs_off_stops_a_downloaded_release_installing_by_itself(monkeypatch) -> None:
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.01)
+    monkeypatch.setattr(engine_module, "UPDATE_INSTALL_GRACE_S", 0.1)
+    engine, platform = _desktop(releases=[_release("v2.3.0")])
+    await engine.start()
+    try:
+        await asyncio.sleep(0.05)
+        await engine.request({"cmd": "settings.update", "patch": {"auto_update": False}})
+        await asyncio.sleep(0.2)
+        assert platform.updater.installs == 0
+        assert engine.state_event()["update"]["ready"] == "2.3.0", "the download is still there to install by hand"
+    finally:
+        await engine.stop()
+
+
+async def test_a_print_paused_under_a_monitor_holds_the_install_back(monkeypatch) -> None:
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.01)
+    monkeypatch.setattr(engine_module, "UPDATE_INSTALL_GRACE_S", 0.0)
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
+    engine, platform = _desktop()
+    platform.device_status = "Paused"
+    await engine.start()
+    try:
+        await engine.handle({"cmd": "camera.add", "name": "cam", "source": {"kind": "fake", "fps": 5}})
+        await engine.handle({"cmd": "printer.add", "printer": {"name": "P", "provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}})
+        printer_id = next(iter(engine.printers.items))
+        await engine.handle({"cmd": "monitor.add", "monitor": {"name": "m", "camera_id": engine.cameras.values()[0].id, "printer_id": printer_id}})
+        platform.releases = [_release("v2.3.0")]
+        await engine.request({"cmd": "update.check"})
+        await asyncio.sleep(0.3)
+        assert engine.state_event()["update"]["ready"] == "2.3.0"
+        assert platform.updater.installs == 0
+
+        platform.device_status = "Operational"
+        await asyncio.sleep(0.3)
+        assert platform.updater.installs == 1
+    finally:
+        await engine.stop()
+
+
+async def test_an_update_asked_for_twice_installs_once() -> None:
+    engine, platform = _desktop()
+    await engine.request({"cmd": "update.install"})
+    await engine.request({"cmd": "update.install"})
+    assert platform.updater.installs == 1

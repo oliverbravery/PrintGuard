@@ -189,6 +189,7 @@ class Engine:
         self.downloaded_update: str | None = None
         self._update_download = asyncio.Lock()
         self._install_update_after = 0.0
+        self._installing_update = False
         self.releases: list[dict[str, Any]] = []
         self.scheduler = Scheduler(platform, self.cameras, self._on_result, self._on_pipeline_error)
         self.watchdog = Watchdog(self)
@@ -968,17 +969,30 @@ class Engine:
         """Whether a monitor is scoring frames right now."""
         return monitor_watching(monitor, self.printers) and self.cameras.get(monitor["camera_id"]) is not None
 
+    def _holds_a_print(self, monitor: dict[str, Any]) -> bool:
+        """Whether a monitor is watching a print, or its printer holds one paused, perhaps by this hub after a defect."""
+        printer = self.printers.get(monitor["printer_id"] or "")
+        return self._watching(monitor) or (monitor["enabled"] and printer is not None and printer.reported_status == "paused")
+
     async def _install_update_when_idle(self) -> None:
-        """Restarts into a downloaded update once no monitor is watching a print.
+        """Restarts into a downloaded update while the hub installs its own, once no monitor holds a print.
 
         The user gets a while to restart into it themselves first, so an idle
         hub does not restart the moment the download lands under someone
         reading the dashboard.
         """
-        if self._ready_update() and time.time() >= self._install_update_after and not any(map(self._watching, self.monitors.values())):
-            logger.info("installing PrintGuard v%s while no monitor is watching", self.downloaded_update)
-            self._install_update_after = math.inf
-            await self.platform.updater.install()
+        if not self.settings["auto_update"] or not self._ready_update() or time.time() < self._install_update_after:
+            return
+        if not any(map(self._holds_a_print, self.monitors.values())):
+            logger.info("installing PrintGuard v%s while no monitor holds a print", self.downloaded_update)
+            await self._install_update()
+
+    async def _install_update(self) -> None:
+        """Hands the downloaded update to the platform to install, once, however many ask."""
+        if self._installing_update:
+            return
+        self._installing_update = True
+        await self.platform.updater.install()
 
     async def _update_now(self) -> None:
         """Checks for an update without being asked to, tells every client what it found and downloads it if the hub installs its own."""
@@ -2096,7 +2110,7 @@ class Engine:
         if self.downloaded_update is None:
             raise ValueError("there is no newer release to install")
         logger.info("installing PrintGuard v%s", self.downloaded_update)
-        await updater.install()
+        await self._install_update()
 
     async def _cmd_update_releases(self, message: dict[str, Any]) -> None:
         if self.update is None and self.settings.get("update_check", True):
