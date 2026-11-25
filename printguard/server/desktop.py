@@ -416,10 +416,8 @@ class _Updater:
     signal does.
     """
 
-    def __init__(self, quit_app: Callable[[], None]) -> None:
-        import velopack
-
-        self._manager = velopack.UpdateManager(velopack.GithubSource(RELEASES_REPO))
+    def __init__(self, manager: Any, quit_app: Callable[[], None]) -> None:
+        self._manager = manager
         self._quit_app = quit_app
         self._downloaded: Any = None
 
@@ -444,6 +442,31 @@ class _Updater:
         """
         self._manager.wait_exit_then_apply_updates(self._downloaded, silent=True, restart=True)
         threading.Thread(target=self._quit_app, daemon=True).start()
+
+
+def _updater(quit_app: Callable[[], None]) -> _Updater | None:
+    """Builds the updater for a copy that can install its own updates.
+
+    A copy run from source or a disk image has nowhere to put them, and
+    Velopack refuses a PyInstaller build that vpk never packed as not
+    installed, so those run without one.
+
+    Args:
+        quit_app: Ends the app once an update is handed to Velopack.
+
+    Returns:
+        The updater, or None for a copy that cannot install updates.
+    """
+    if not _installed():
+        return None
+    import velopack
+
+    try:
+        manager = velopack.UpdateManager(velopack.GithubSource(RELEASES_REPO))
+    except RuntimeError as exc:
+        logger.info("this copy does not install its own updates: %s", exc)
+        return None
+    return _Updater(manager, quit_app)
 
 
 def _installed() -> bool:
@@ -631,8 +654,8 @@ def main() -> None:
     server running so the printer stays watched, and the tray's Quit exits. Opened while
     another copy is already running or still starting, it shows that copy's dashboard in the
     browser and exits. On macOS, opening the running app again opens its window. Only the
-    installed app installs its own updates, since a copy run from source or a disk image
-    has nowhere to put them.
+    installed app installs its own updates, since a copy run from source, a disk image or
+    a build vpk never packed has nowhere to put them.
     """
     _configure_environment()
     _set_windows_app_id()
@@ -642,7 +665,7 @@ def main() -> None:
     if _hub_running(port):
         _show_running_copy(port)
         return
-    updater = _Updater(lambda: _shut_down(window, server)) if _installed() else None
+    updater = _updater(lambda: _shut_down(window, server))
     server = _Server(port, updater)
     started = server.start()
     if server.port_held and _wait_until_answering(port, threading.Event(), READY_TIMEOUT_S):

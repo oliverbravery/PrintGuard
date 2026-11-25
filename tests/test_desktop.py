@@ -131,6 +131,29 @@ def test_only_the_installed_app_takes_over_the_login_entry(
     assert writes == ([True] if rewritten else [])
 
 
+@pytest.mark.parametrize(
+    ("executable", "packed", "updates"),
+    [
+        ("/Applications/PrintGuard.app/Contents/MacOS/PrintGuard", True, True),
+        ("/Users/me/printguard/dist/PrintGuard.app/Contents/MacOS/PrintGuard", False, False),
+        ("/Volumes/PrintGuard/PrintGuard.app/Contents/MacOS/PrintGuard", True, False),
+    ],
+)
+def test_only_a_copy_vpk_packed_and_run_from_where_it_stays_installs_updates(
+    monkeypatch: pytest.MonkeyPatch, executable: str, packed: bool, updates: bool
+) -> None:
+    def manager(source: object) -> object:
+        if not packed:
+            raise RuntimeError("This application is not properly installed: UpdateMac does not exist in the expected path")
+        return source
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", executable)
+    monkeypatch.setitem(sys.modules, "velopack", SimpleNamespace(UpdateManager=manager, GithubSource=lambda url: url))
+
+    assert (desktop._updater(lambda: None) is not None) == updates
+
+
 def test_reopening_the_running_app_opens_its_window(monkeypatch: pytest.MonkeyPatch) -> None:
     """macOS sends a reopen request to a running app instead of starting a second copy."""
 

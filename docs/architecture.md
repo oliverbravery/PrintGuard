@@ -81,7 +81,7 @@ All routes enforce [host and origin checking](deployment.md#host-and-origin-chec
 | `inference_runtime` | The runtime the model actually runs on (`onnx` or `litert`), which `auto` leaves to `configure`. Kept beside every review frame |
 | `version` | Installed package version from `pyproject.toml` |
 | `update_repo`, `update_asset` | GitHub repo and platform desktop installer asset name |
-| `updater` | The desktop app's Velopack `Updater` (`download()`, `install()`), or `None` in the container and in a copy run from source or a disk image |
+| `updater` | The desktop app's Velopack `Updater` (`download()`, `install()`), or `None` in the container and in a copy run from source, a disk image or PyInstaller's `dist/` before vpk packs it |
 | `plugin_runtime` | `PluginRuntime` instance, or `None` when `PRINTGUARD_PLUGINS=off` |
 | `secrets` | Deployment-level secrets outside `state.json` (like `MEDIAMTX_API` credentials) to scrub from logs and reports |
 | `files` | `FileStore` implementation |
