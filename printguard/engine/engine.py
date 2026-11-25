@@ -2091,7 +2091,7 @@ class Engine:
         if updater is None:
             raise ValueError("this hub is updated outside the app")
         async with self._update_download:
-            if self.downloaded_update is None:
+            if self.downloaded_update is None or (self.update and self.downloaded_update != self.update["latest"]):
                 self.downloaded_update = await updater.download()
         if self.downloaded_update is None:
             raise ValueError("there is no newer release to install")

@@ -278,3 +278,19 @@ async def test_turning_automatic_installs_on_downloads_a_release_already_found()
         assert engine.state_event()["update"]["ready"] == "2.3.0"
     finally:
         await engine.stop()
+
+
+async def test_installing_now_fetches_a_release_newer_than_the_one_downloaded() -> None:
+    engine, platform = _desktop(releases=[_release("v2.2.0")])
+    platform.updater.version = "2.2.0"
+    await engine.request({"cmd": "settings.update", "patch": {"auto_update": True}})
+    await asyncio.sleep(0.05)
+    assert engine.state_event()["update"]["ready"] == "2.2.0"
+
+    await engine.request({"cmd": "settings.update", "patch": {"auto_update": False}})
+    platform.releases = [_release("v2.3.0")]
+    platform.updater.version = "2.3.0"
+    await engine.request({"cmd": "update.check"})
+    await engine.request({"cmd": "update.install"})
+    assert (platform.updater.downloads, platform.updater.installs) == (2, 1)
+    assert engine.state_event()["update"]["ready"] == "2.3.0"
