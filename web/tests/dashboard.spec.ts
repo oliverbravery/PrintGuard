@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { camera, dashboard, emit, engine, hub, monitor, pastDoublePress, review, sent } from "./fixtures";
+import { camera, dashboard, emit, engine, hub, monitor, pastDoublePress, printer, review, sent } from "./fixtures";
 import { zipSync } from "fflate";
 
 const EMPTY_ZIP = "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==";
@@ -3417,4 +3417,53 @@ test("a dashboard served under a path reaches its hub and camera feeds under tha
 
   await expect(page.getByRole("heading", { name: "Prusa" })).toBeVisible();
   await feed;
+});
+
+test("a monitor without a printer starts and stops detecting from Control, and disables starting with no camera", async ({ page }) => {
+  await dashboard(page, { engine: engine({ monitors: [monitor({ enabled: true, watching: true })] }) }, "/monitors/m1");
+  const panel = page.getByRole("tabpanel", { name: "Control" });
+  const stop = panel.getByRole("button", { name: "Stop detecting" });
+  await expect(stop).toBeVisible();
+  await expect(panel).toContainText("Stop detecting when your print finishes");
+
+  await stop.click();
+  await expect(panel.getByRole("button", { name: "Start detecting" })).toBeVisible();
+  await expect(panel).toContainText("Start detecting when you start a print");
+  await expect.poll(() => lastSent(page, "monitor.update")).toMatchObject({ id: "m1", patch: { enabled: false } });
+
+  await panel.getByRole("button", { name: "Start detecting" }).click();
+  await expect(panel.getByRole("button", { name: "Stop detecting" })).toBeVisible();
+  await expect.poll(() => lastSent(page, "monitor.update")).toMatchObject({ id: "m1", patch: { enabled: true } });
+  const { req_id } = await lastSent(page, "monitor.update");
+
+  await emit(page, { event: "state", req_id, ...engine({ monitors: [monitor({ camera_id: "", enabled: false, watching: false })] }) });
+  await expect(panel.getByRole("button", { name: "Start detecting" })).toBeDisabled();
+  await expect(panel).toContainText("Link a camera to start detecting.");
+});
+
+test("a monitor with a printer shows an Auto-detect switch and explains its automatic state on Control", async ({ page }) => {
+  const linked = (printerOver = {}, monitorOver = {}) =>
+    engine({
+      printers: [printer(printerOver)],
+      monitors: [monitor({ printer_id: "p1", ...monitorOver })],
+    });
+  await dashboard(page, { engine: linked() }, "/monitors/m1");
+  const panel = page.getByRole("tabpanel", { name: "Control" });
+  const toggle = panel.getByRole("switch", { name: "Auto-detect" });
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await expect(panel).toContainText("Automatic with Ender. Watching stops when the print ends.");
+
+  await emit(page, { event: "state", ...linked({ device_state: { ...printer().device_state, status: "idle" } }, { watching: false }) });
+  await expect(panel).toContainText("Automatic with Ender. Watching starts when a print begins.");
+
+  await emit(page, { event: "state", ...linked({ device_state: { ...printer().device_state, status: "paused" } }, { watching: false }) });
+  await expect(panel).toContainText("Automatic with Ender. Watching resumes when the print continues.");
+
+  await emit(page, { event: "state", ...linked({ online: false, device_state: null }, { watching: true }) });
+  await expect(panel).toContainText("Automatic with Ender. Still watching until it confirms it isn't printing.");
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect(panel).toContainText("Detection is off. PrintGuard won't watch when Ender prints.");
+  await expect.poll(() => lastSent(page, "monitor.update")).toMatchObject({ id: "m1", patch: { enabled: false } });
 });
