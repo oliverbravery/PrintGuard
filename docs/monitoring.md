@@ -48,7 +48,7 @@ Select any monitor on the dashboard and open its **Tune** or **Configure** tab. 
 | **Consecutive detections to alert** | 3 | 1 to 30 | How many flagged frames in a row it takes to trigger. A camera disconnect or frozen feed resets the streak |
 | **On sustained defect** | Alert only | | Choose between alerting only, pausing the print or cancelling the print. Without a linked printer, pause and cancel fall back to alert only |
 | **Cooldown (seconds)** | 60 | 0 to 600 | Quiet period after an alert before the monitor can trigger again. At 0, the next flagged frame acts as soon as the previous action finishes. Cooldown resets when the print ends; if a pause or cancel failed (or couldn't be confirmed as stopped), PrintGuard retries after 30 seconds regardless of cooldown |
-| **Pause if the camera drops out** | Off | | Pauses the linked printer once the camera has been offline, frozen or unlinked for longer than the [fault grace period](notifications.md#faults-and-the-grace-period). Resume it from the printer once the camera is back |
+| **Pause if the camera drops out** | Off | | Pauses the linked printer once the camera has been offline, frozen or unlinked for longer than the [fault grace period](notifications.md#faults-and-the-grace-period). The print stays paused until you resume it |
 | **Push notifications** | Off | | Sends alerts and fault warnings from this monitor to your configured [alert channels](notifications.md) |
 
 > [!IMPORTANT]

@@ -11,7 +11,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Added
 
-- Monitors can pause their printer when the camera has been offline or frozen for longer than the fault grace period. It's off by default and switched on in the monitor's Tune tab.
+- Monitors can pause their printer when the camera has been offline or frozen for longer than the fault grace period. It's off by default and switched on in the monitor's Tune tab. The print stays paused until you resume it, and you get a notice once the camera is back.
 
 ## [3.0.1] - 2026-11-23
 
