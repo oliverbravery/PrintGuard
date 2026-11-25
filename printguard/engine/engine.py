@@ -28,7 +28,7 @@ from .adapters import Adapter
 from .cameras import declared_camera_id, same_stream, sanitise_camera, sanitise_source, stored_camera, tidy_stream_url
 from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, integrations_meta
-from .monitors import MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor, stored_monitor
+from .monitors import ALERT_RULE, MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor, stored_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
 from .platform import PLUGIN_HEADER, Frame, FrameSource, Platform, as_chunks, plain_failure
 from .printers import PREHEAT_DEFAULTS, connection_settings, sanitise_printer, sanitise_targets
@@ -45,7 +45,7 @@ from .registry import (
     Token,
     TokenRegistry,
 )
-from .reviews import Review, ReviewLibrary, frame_key, stored_review
+from .reviews import SCORED_KEYS, Review, ReviewLibrary, Scoring, frame_key, stored_review
 from .scheduler import Scheduler, infer_squares
 from .settings import CHECKS, require_broker
 from .sockets import SocketBroker, SocketRefused
@@ -977,12 +977,21 @@ class Engine:
                         "ms": self.scheduler.stats()["infer_ms"],
                     }
                 )
-            await self.watchdog.on_score(monitor, frame, score)
+            streak, fired = await self.watchdog.on_score(monitor, frame, score)
             monitor = self._watching_through(monitor_id, camera)
             if monitor is not None and self.settings["feedback"] == "ask":
                 printer = self.printers.get(monitor["printer_id"])
+                scoring = Scoring(
+                    model=self.settings["model"],
+                    runtime=self.platform.inference_runtime,
+                    tiled=bool(camera.crop),
+                    streak=streak,
+                    status=printer.device_state["status"] if printer and printer.device_state else None,
+                    progress=printer.device_state["progress"] if printer and printer.online else None,
+                    **{key: monitor[key] for key in ALERT_RULE},
+                )
                 try:
-                    if await self.reviews.sample(monitor, frame, score, ts, recording=self.settings["recording_days"] > 0, answered=printer is None or printer.reported_status is not None):
+                    if await self.reviews.sample(monitor, frame, score, ts, scoring, fired, recording=self.settings["recording_days"] > 0, answered=printer is None or printer.reported_status is not None):
                         self.save()
                 except Exception as exc:
                     self.report_failure(f"keeping a frame of '{monitor['name']}' for review", exc)
@@ -1019,11 +1028,11 @@ class Engine:
             return None
 
     def settle_reviews(self) -> bool:
-        """Ends the review of every print that is over, returning whether any did."""
-        ended = self.reviews.settle(self.monitors, self.printers, self.watchdog.responding, self.settings["feedback"] == "ask")
-        if ended:
+        """Follows every running print's printer and ends the review of each that is over, returning whether any review changed."""
+        changed = self.reviews.settle(self.monitors, self.printers, self.watchdog.responding, self.settings["feedback"] == "ask")
+        if changed:
             self._hold("delete the frames kept of what was no print", self.reviews.discard_not_prints())
-        return ended
+        return changed
 
     def _start_send(self, review: Review, req_id: Any = None) -> None:
         """Starts uploading a review, or has the upload already under way answer this request too."""
@@ -1062,6 +1071,11 @@ class Engine:
         monitor's. A print submitted afresh carries over the frames already
         sent that it still keeps, and the upload goes on under the new choices
         and answers every request made for it, so no frame goes twice.
+
+        Each frame goes with what was true when it was scored, and the
+        monitor's alert rule as it stands now for a frame that has none of its
+        own, such as one added from the recording. Anything not known is left
+        out rather than sent empty.
         """
         submission = review.submission or {}
         try:
@@ -1074,15 +1088,27 @@ class Engine:
             printer = self.printers.get(monitor.get("printer_id") or "")
             print_details = {
                 "print": review.id,
-                "threshold": monitor["threshold"],
+                **{key: monitor[key] for key in ALERT_RULE},
                 "version": self.platform.version,
                 "provider": printer.provider if printer else "none",
                 "printer": submission["printer"],
+                "outcome": review.outcome,
             }
             submission["code"] = submission["retry_at"] = None
             for frame in review.unsent():
-                frame_details = {"frame": frame["id"], "label": submission["labels"][frame["id"]], "kind": frame["kind"], "score": frame["score"], "ts": frame["ts"]}
-                taken = await self._send_frame(frame_key(review.id, frame["id"]), {**print_details, **frame_details})
+                frame_details = {
+                    **{key: frame.get(key) for key in SCORED_KEYS},
+                    "frame": frame["id"],
+                    "label": submission["labels"][frame["id"]],
+                    "kind": frame["kind"],
+                    "score": frame["score"],
+                    "ts": frame["ts"],
+                    "alert": frame.get("alert"),
+                    "action": frame.get("action"),
+                    "resumed": frame["pause"] == "resumed" if "pause" in frame else None,
+                }
+                details = {key: value for part in (print_details, frame_details) for key, value in part.items() if value is not None}
+                taken = await self._send_frame(frame_key(review.id, frame["id"]), details)
                 chosen = review.submission
                 if chosen is not None and frame["id"] in chosen["labels"]:
                     if taken:

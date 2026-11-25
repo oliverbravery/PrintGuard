@@ -504,30 +504,36 @@ class Watchdog:
         if monitor.get("notify"):
             self._schedule(f"the warning for '{monitor['name']}'", self._engine.send_alerts(f"PrintGuard {'recovered' if recovered else 'warning'}", message, None, urgent=not recovered))
 
-    async def on_score(self, monitor: dict[str, Any], frame: Frame, score: float) -> None:
+    async def on_score(self, monitor: dict[str, Any], frame: Frame, score: float) -> tuple[int, bool]:
         """Advances the defect streak for a monitor and triggers responses.
 
         A response still in flight is the only one a monitor has, so a defect
         frame that arrives before the printer has answered sends no second
-        command.
+        command. The response is scheduled before this returns and runs once
+        the caller next waits on anything.
 
         Args:
             monitor: The monitor record the score belongs to.
             frame: The frame that produced the score, used for snapshots.
             score: Defect score in [0, 1].
+
+        Returns:
+            The monitor's defect streak with this frame counted, 0 for one under
+            the threshold, and whether this frame fired an alert.
         """
         mid = monitor["id"]
         if score < monitor["threshold"]:
             self._streaks[mid] = 0
             if monitor.get("alert"):
                 monitor["alert"] = None
-            return
-        self._streaks[mid] = self._streaks.get(mid, 0) + 1
-        if self._streaks[mid] < monitor["consecutive"] or mid in self.responding or time.monotonic() < self._cooldown_until.get(mid, 0.0):
-            return
+            return 0, False
+        streak = self._streaks[mid] = self._streaks.get(mid, 0) + 1
+        if streak < monitor["consecutive"] or mid in self.responding or time.monotonic() < self._cooldown_until.get(mid, 0.0):
+            return streak, False
         self._cooldown_until[mid] = time.monotonic() + monitor["cooldown_s"]
         self.responding.add(mid)
         self._schedule(f"the defect response for '{monitor['name']}'", self._respond(monitor, frame, score))
+        return streak, True
 
     async def _respond(self, monitor: dict[str, Any], frame: Frame, score: float) -> None:
         """Acts on the printer, announces the alert, notifies and then records it.
