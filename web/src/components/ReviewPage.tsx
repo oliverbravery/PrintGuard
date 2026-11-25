@@ -36,8 +36,11 @@ function verdict(frame: ReviewFrame, failure: boolean): string {
   return failure ? "Failure" : "Good";
 }
 
-function picked(frame: ReviewFrame): string | null {
-  if (frame.kind === "streak") return `${frame.streak} of ${frame.consecutive}`;
+function pickedAs(frame: ReviewFrame, frames: ReviewFrame[]): string | null {
+  if (frame.kind === "streak") {
+    const lastBeforeAlert = Math.max(...frames.filter((member) => member.alert === frame.alert).map((member) => member.streak!));
+    return `${frame.consecutive! - 1 - lastBeforeAlert + frame.streak!} of ${frame.consecutive}`;
+  }
   return frame.kind === "added" || frame.kind === "spike" ? frame.kind : null;
 }
 
@@ -45,6 +48,7 @@ function FrameCard({
   monitorId,
   frame,
   position,
+  pickedAs,
   failure,
   onFlag,
   onRemove,
@@ -53,6 +57,7 @@ function FrameCard({
   monitorId: string;
   frame: ReviewFrame;
   position: string;
+  pickedAs: string | null;
   failure: boolean;
   onFlag: () => void;
   onRemove: () => void;
@@ -68,7 +73,7 @@ function FrameCard({
       <span className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-3 py-2 pr-12">
         <Status tone={failure ? "bad" : "ok"}>{verdict(frame, failure)}</Status>
         <span className="mono text-xs text-text-2">
-          {[picked(frame), clock(frame.ts), `${(frame.score * 100).toFixed(0)}%`].filter(Boolean).join(" · ")}
+          {[pickedAs, clock(frame.ts), `${(frame.score * 100).toFixed(0)}%`].filter(Boolean).join(" · ")}
         </span>
       </span>
       <button
@@ -213,6 +218,7 @@ function ReviewDetail({ monitor, review }: { monitor: Monitor; review: ReviewSum
             monitorId={monitor.id}
             frame={frame}
             position={`Frame ${index + 1} of ${kept.length}`}
+            pickedAs={pickedAs(frame, frames)}
             failure={showsFailure(frame)}
             onFlag={() => setFlagged((current) => flaggedWithItsStreak(current, frames, frame))}
             onRemove={() => setRemoved((current) => toggled(current, frame.id))}

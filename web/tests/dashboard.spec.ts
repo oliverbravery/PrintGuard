@@ -256,6 +256,19 @@ test("a review asks for its frames again after reconnect, sends flagged failures
   await expect.poll(() => page.evaluate(() => (window as any).__pg.getState().snapshotCache)).toEqual({});
 });
 
+test("a streak that outlasted a cooldown before it alerted is counted from the alert back", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [review()] }) }, "/monitors/m1/review/r1");
+  const frames = [
+    { id: "t3", ts: 58, score: 0.8, kind: "streak", streak: 3, consecutive: 3, alert: "a1", size: 1 },
+    { id: "t4", ts: 59, score: 0.85, kind: "streak", streak: 4, consecutive: 3, alert: "a1", size: 1 },
+    { id: "a1", ts: 60, score: 0.9, kind: "alert", streak: 5, consecutive: 3, action: "pause", size: 1 },
+  ];
+  await emit(page, { event: "review", ...review(), frames });
+  const cards = page.getByRole("main").getByRole("region", { name: "Frames to send" }).getByRole("listitem");
+  await expect(cards.nth(0)).toContainText("1 of 3 ·");
+  await expect(cards.nth(1)).toContainText("2 of 3 ·");
+});
+
 test("flagging an alert flags the streak that built it, each of which can still be unflagged", async ({ page }) => {
   await dashboard(page, { engine: engine({ reviews: [review()] }) }, "/monitors/m1/review/r1");
   const main = page.getByRole("main");
