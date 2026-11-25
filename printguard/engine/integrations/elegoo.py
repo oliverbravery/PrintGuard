@@ -24,7 +24,7 @@ import pycentauri
 from pycentauri.cc2 import CONTROL_TIMEOUT_S
 from pycentauri.client import PrinterError
 
-from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, PrintOutcome
 from .klipper import KlipperAdapter
 
 _CENTAURI = "centauri"
@@ -33,6 +33,8 @@ _PRINTING = {1, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 27, 28, 29}
 _PAUSED = {5, 6}
 _IDLE = {0, 7, 8, 9}
 _ERROR = {14}
+_OUTCOMES = {8: PrintOutcome.CANCELLED, 9: PrintOutcome.FINISHED}
+"""The SDCP print statuses that say how a job ended, stopped and complete."""
 _CC2_JOB_STATES = {1, 2}
 """The Centauri Carbon 2 machine states that say whether a job is running: idle and printing.
 
@@ -124,6 +126,7 @@ class ElegooAdapter(IntegrationAdapter):
             remaining_s=max(0, int(job.total_ticks - (job.current_ticks or 0))) if job and job.total_ticks else None,
             nozzle=Heater.reported(status.temp_nozzle, status.temp_nozzle_target),
             bed=Heater.reported(status.temp_bed, status.temp_bed_target),
+            outcome=_OUTCOMES.get(status.print_status),
         )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:

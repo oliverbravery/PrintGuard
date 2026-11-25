@@ -347,7 +347,7 @@ Every printer integration normalises to the same schema:
 | Field | Values |
 |---|---|
 | **Status** | `printing`, `paused`, `idle`, `error`, `offline`, `unknown` |
-| **State** | `{"status", "progress" (0-100), "job", "remaining_s", "nozzle", "bed"}` under `device_state` (`null` until first read). Heaters are `{"actual", "target"}` in °C or `null`; `remaining_s` is `null` if unavailable. `online` indicates whether the last poll succeeded |
+| **State** | `{"status", "progress" (0-100), "job", "remaining_s", "nozzle", "bed", "outcome"}` under `device_state` (`null` until first read). Heaters are `{"actual", "target"}` in °C or `null`; `remaining_s` is `null` if unavailable. `outcome` is how the last print ended (`finished`, `cancelled` or `error`) while the printer still says so, and `null` where it doesn't. `online` indicates whether the last poll succeeded |
 | **Actions** | `pause`, `resume`, `cancel`, plus heater targets via `/heat` |
 
 ## Reading detection state

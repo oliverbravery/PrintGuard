@@ -50,7 +50,7 @@ from typing import Any, Callable
 import paho.mqtt.client as mqtt
 
 from ..gcode import plate_name
-from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, PrintOutcome
 
 _PORT = 8883
 _FTP_PORT = 990
@@ -75,6 +75,8 @@ _STATUS_MAP = {
     "finish": DeviceStatus.IDLE,
     "failed": DeviceStatus.IDLE,
 }
+_CANCELLED = 0x0300400C
+"""The print_error a FAILED job carries when it was cancelled, the HMS code Bambu names "Printing was cancelled"."""
 
 _COMMANDS = {DeviceAction.PAUSE: "pause", DeviceAction.RESUME: "resume", DeviceAction.CANCEL: "stop"}
 _HEATER_GCODE = {"nozzle": "M104", "bed": "M140"}
@@ -281,23 +283,27 @@ class BambuAdapter(IntegrationAdapter):
         remaining time is in minutes. A printer with no full report on a live
         connection is offline. FAILED is how the printer reports a job that was
         cancelled or gave up, and it holds that until the next job starts while
-        being as ready for one as after FINISH, so both read as idle. A fault
-        the printer stops for mid-job is reported as PAUSE.
+        being as ready for one as after FINISH, so both read as idle. Only its
+        print_error tells the two apart, so a FAILED job reads as cancelled when
+        that is the cancellation code and as nothing otherwise. A fault the
+        printer stops for mid-job is reported as PAUSE.
         """
         report = await asyncio.wait_for(_blocking(self._pull_report, config), _DEADLINE_S)
         if not report:
             return DeviceState(DeviceStatus.OFFLINE)
-        matched = _STATUS_MAP.get(str(report.get("gcode_state", "")).lower(), DeviceStatus.UNKNOWN)
+        state = str(report.get("gcode_state", "")).lower()
         progress = float(report.get("mc_percent") or 0.0)
         job = report.get("subtask_name") or report.get("gcode_file") or None
         remaining = report.get("mc_remaining_time")
+        cancelled = state == "failed" and report.get("print_error") == _CANCELLED
         return DeviceState(
-            matched,
+            _STATUS_MAP.get(state, DeviceStatus.UNKNOWN),
             progress,
             job,
             remaining_s=int(remaining) * 60 if remaining is not None else None,
             nozzle=Heater.reported(report.get("nozzle_temper"), report.get("nozzle_target_temper")),
             bed=Heater.reported(report.get("bed_temper"), report.get("bed_target_temper")),
+            outcome=PrintOutcome.FINISHED if state == "finish" else PrintOutcome.CANCELLED if cancelled else None,
         )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:

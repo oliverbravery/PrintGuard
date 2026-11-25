@@ -31,7 +31,7 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
 from ..adapters import multipart_form
-from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, require_reply
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, PrintOutcome, require_reply
 
 _PORT = 9999
 _CAMERA_PORT = 8080
@@ -62,6 +62,7 @@ Pausing (6), stopping (7), restoring (8) and starting (9) say nothing of where
 the print ends up.
 """
 _IDLE_STATES = {code for code, status in _STATUS.items() if status is DeviceStatus.IDLE}
+_OUTCOMES = {2: PrintOutcome.FINISHED, 3: PrintOutcome.ERROR, 4: PrintOutcome.CANCELLED}
 _ACTIONS = {
     DeviceAction.PAUSE: ({"pause": 1}, {5, 6}),
     DeviceAction.RESUME: ({"pause": 0}, {1, 8}),
@@ -213,8 +214,9 @@ class CrealityAdapter(IntegrationAdapter):
 
         Pausing, stopping, restoring and starting read as unknown, so the last
         answer stands. A failed or aborted job leaves the printer as ready for
-        the next as a finished one, so all three read as idle. The printer's
-        error code is not read, since it can stay set after the fault clears.
+        the next as a finished one, so all three read as idle, each with how the
+        job ended. The printer's error code is not read, since it can stay set
+        after the fault clears.
         """
         session = await self._session(config)
         await session.wake()
@@ -227,6 +229,7 @@ class CrealityAdapter(IntegrationAdapter):
             remaining_s=max(0, round(float(remaining))) if remaining is not None else None,
             nozzle=Heater.reported(report.get("nozzleTemp"), report.get("targetNozzleTemp")),
             bed=Heater.reported(report.get("bedTemp0"), report.get("targetBedTemp0")),
+            outcome=_OUTCOMES.get(report.get("state")),
         )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:
