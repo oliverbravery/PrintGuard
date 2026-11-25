@@ -181,6 +181,14 @@ function TunePane({ monitor }: { monitor: Monitor }) {
           onChange={(v) => updateMonitor(monitor.id, { cooldown_s: v })}
         />
       </Block>
+      <Block>
+        <Toggle
+          label="Pause if the camera drops out"
+          on={monitor.pause_on_camera_loss}
+          hint="Pauses the print once the camera has been offline or frozen for longer than the fault grace period under Alerts in Settings."
+          onChange={(v) => updateMonitor(monitor.id, { pause_on_camera_loss: v })}
+        />
+      </Block>
     </>
   );
 }

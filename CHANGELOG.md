@@ -12,6 +12,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 ### Added
 
 - Each monitor's **Control** tab can start and stop detection, or switch **Auto-detect** on and off when a printer is linked.
+- Monitors can pause their printer when the camera has been offline or frozen for longer than the fault grace period, switched on in the monitor's Tune tab.
 
 ## [3.0.1] - 2026-11-23
 

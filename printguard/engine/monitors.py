@@ -23,6 +23,7 @@ MONITOR_DEFAULTS: dict[str, Any] = {
     "notify": False,
     "on_defect": "none",
     "cooldown_s": 60,
+    "pause_on_camera_loss": False,
 }
 
 STANDBY_STATUSES = ("idle", "paused", "error")
@@ -75,7 +76,7 @@ def sanitise_monitor(monitor_id: str, patch: dict[str, Any], base: dict[str, Any
     for key in ("name", "camera_id", "printer_id"):
         if not isinstance(record[key], str):
             raise ValueError(f"a monitor's {key} is text")
-    for key in ("enabled", "notify"):
+    for key in ("enabled", "notify", "pause_on_camera_loss"):
         if not isinstance(record[key], bool):
             raise ValueError(f"a monitor's {key} is true or false")
     if record["on_defect"] not in ON_DEFECT:

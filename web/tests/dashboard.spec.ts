@@ -1675,6 +1675,17 @@ test("the consecutive slider reaches the engine's limit, and the detection rate 
   await expect.poll(lastPatch).toEqual({ detect_fps: 60 });
 });
 
+test("pausing on camera loss is off until switched on in the Tune tab", async ({ page }) => {
+  await dashboard(page, { engine: engine() }, "/monitors/m1");
+  await page.getByRole("tab", { name: "Tune" }).click();
+  const toggle = page.getByRole("switch", { name: "Pause if the camera drops out" });
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect(toggle).toHaveAccessibleDescription(/fault grace period/);
+  await toggle.click();
+  const lastPatch = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "monitor.update").at(-1)?.patch);
+  await expect.poll(lastPatch).toEqual({ pause_on_camera_loss: true });
+});
+
 test("a camera form opens the camera once it is registered, and its fields are named", async ({ page }) => {
   await dashboard(page, { dialog: "camera" }, "/cameras");
   const dialog = page.getByRole("dialog", { name: "Register a camera" });
