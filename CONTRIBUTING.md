@@ -24,7 +24,7 @@ If you're working on the desktop app, you can run the tray app directly from sou
 
 ```bash
 uv run --extra desktop printguard-desktop   # runs the hub in the system tray / menu bar
-bash packaging/build.sh                      # builds a .dmg (macOS) or .zip (Windows) into dist/
+bash packaging/build.sh                      # builds a .dmg (macOS) or Setup.exe and portable .zip (Windows) into dist/, needs the .NET SDK for Velopack
 ```
 
 Run the test suite before and after your changes:
@@ -209,7 +209,7 @@ Once a release PR merges to `main`, the [release workflow](.github/workflows/rel
 
 1. Builds and pushes multi-arch Docker images (`amd64`/`arm64` plus `-intel` and `-nvidia` for `amd64`) to `ghcr.io/oliverbravery/printguard` under `X.Y.Z`, `X.Y` and `latest`.
 2. Creates a draft GitHub release for `vX.Y.Z` using the changelog section verbatim (only after images succeed; reruns update an unpublished draft and refuse to overwrite a published release).
-3. Builds the macOS (signed and notarised via `APPLE_*` secrets, keeping the notarisation key isolated inside `packaging/notarise.sh`) and Windows desktop installers and attaches both to the draft.
+3. Builds the macOS (signed and notarised via `APPLE_*` secrets, keeping the notarisation key isolated inside `packaging/notarise.sh`) and Windows desktop installers and attaches both to the draft, with the Velopack feed and packages the installed apps update themselves from.
 4. Publishes the release and tags the merge commit so download links and update checks only appear once desktop builds are attached.
 
 Always merge the release PR with a **merge commit** (never squash or rebase), because `plugins/catalogue.json` pins commits on the release branch that must remain reachable on `main`.
