@@ -522,8 +522,8 @@ class ReviewLibrary:
             Whether the kept frames changed.
         """
         monitor_id = monitor["id"]
-        alert_id = uuid.uuid4().hex[:12]
         if fired:
+            alert_id = uuid.uuid4().hex[:12]
             self._firing[monitor_id] = (alert_id, scoring)
         record = {"ts": ts, "score": round(score, 4), **asdict(scoring)}
         stops = self._stops
@@ -784,6 +784,7 @@ class ReviewLibrary:
         """
         self._stops += 1
         self._runs.clear()
+        self._firing.clear()
         reviews = list(self._reviews.values())
         for review in reviews:
             if review.status in ("ready", "queued"):
