@@ -251,8 +251,28 @@ jobs:
         shell: bash
         env:
           APPLE_SIGNING_IDENTITY: Developer ID Application
+        run: bash packaging/build.sh app
+      - uses: ./.github/actions/signpath
+        if: matrix.name == 'Windows'
+        with:
+          directory: dist/PrintGuard
+          file: PrintGuard.exe
+          signing-policy: test-signing
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      - name: Package it
+        if: matrix.name != 'container'
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: Developer ID Application
           GITHUB_TOKEN: ${{ github.token }}
-        run: bash packaging/build.sh
+        run: bash packaging/build.sh pack
+      - uses: ./.github/actions/signpath
+        if: matrix.name == 'Windows'
+        with:
+          directory: dist
+          file: PrintGuard-windows-x64-Setup.exe
+          signing-policy: test-signing
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
       - name: Notarise the disk image, the only step handed the notarisation key
         if: matrix.name == 'macOS'
         env:

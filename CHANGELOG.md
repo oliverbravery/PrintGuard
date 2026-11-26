@@ -21,6 +21,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 ### Changed
 
 - The Windows download is an installer that needs no admin rights, `PrintGuard-windows-x64-Setup.exe`. The portable zip is still on every release.
+- The Windows installer and app are signed by SignPath Foundation, so Windows names a verified publisher when you install PrintGuard.
 - Regular frames and near misses wait until a linked printer reports it's past 0%, so the empty bed while it heats and levels isn't kept.
 - Klipper reads as 0% through a print until the first extrusion, where it used to count the start code and thumbnails.
 

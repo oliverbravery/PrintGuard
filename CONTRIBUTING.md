@@ -24,7 +24,7 @@ If you're working on the desktop app, you can run the tray app directly from sou
 
 ```bash
 uv run --extra desktop printguard-desktop   # runs the hub in the system tray / menu bar
-bash packaging/build.sh                      # builds a .dmg (macOS) or Setup.exe and portable .zip (Windows) into dist/, needs the .NET SDK for Velopack
+bash packaging/build.sh                      # builds a .dmg (macOS) or Setup.exe and portable .zip (Windows) into dist/, needs the .NET SDK for Velopack (`app` or `pack` runs one half)
 ```
 
 Run the test suite before and after your changes:
@@ -171,7 +171,7 @@ When reviewing catalogue PRs, I mainly check that the plugin doesn't ask for unu
 
 ## Release cycle
 
-Merging into `main` triggers a public release, so work collects on a `release/vX.Y.Z` branch first. Open your PR against the current `release/vX.Y.Z` branch (or against `main` if none is open and I'll retarget it). Fork PRs can't run the signed macOS build in **launch**, so they always merge into a release branch first. Don't bump the version in feature/fix PRs; just add a bullet under the release's heading in [CHANGELOG.md](CHANGELOG.md) if the change is user-visible.
+Merging into `main` triggers a public release, so work collects on a `release/vX.Y.Z` branch first. Open your PR against the current `release/vX.Y.Z` branch (or against `main` if none is open and I'll retarget it). Fork PRs can't run the signed desktop builds in **launch**, so they always merge into a release branch first. Don't bump the version in feature/fix PRs; just add a bullet under the release's heading in [CHANGELOG.md](CHANGELOG.md) if the change is user-visible.
 
 The release branch owns the version bump and changelog heading:
 
@@ -209,7 +209,7 @@ Once a release PR merges to `main`, the [release workflow](.github/workflows/rel
 
 1. Builds and pushes multi-arch Docker images (`amd64`/`arm64` plus `-intel` and `-nvidia` for `amd64`) to `ghcr.io/oliverbravery/printguard` under `X.Y.Z`, `X.Y` and `latest`.
 2. Creates a draft GitHub release for `vX.Y.Z` using the changelog section verbatim (only after images succeed; reruns update an unpublished draft and refuse to overwrite a published release).
-3. Builds the macOS (signed and notarised via `APPLE_*` secrets, keeping the notarisation key isolated inside `packaging/notarise.sh`) and Windows desktop installers and attaches both to the draft, with the Velopack feed and packages the installed apps update themselves from.
+3. Builds the macOS (signed and notarised via `APPLE_*` secrets, keeping the notarisation key isolated inside `packaging/notarise.sh`) and Windows desktop installers and attaches both to the draft, with the Velopack feed and packages the installed apps update themselves from. Windows signs through SignPath twice, `PrintGuard.exe` before Velopack packs it and `Setup.exe` after, and each request waits for an approver in SignPath. Release PRs sign the same way with the test certificate, which needs no approval. SignPath keeps the artifact configuration itself, so a change to [`packaging/signpath.xml`](packaging/signpath.xml) has to be pasted into the project's default configuration too.
 4. Publishes the release and tags the merge commit so download links and update checks only appear once desktop builds are attached.
 
 Always merge the release PR with a **merge commit** (never squash or rebase), because `plugins/catalogue.json` pins commits on the release branch that must remain reachable on `main`.
