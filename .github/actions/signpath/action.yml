@@ -30,8 +30,8 @@ runs:
     - uses: signpath/github-action-submit-signing-request@a2c5b60d9c75f073142b653c354b632eedce097b # v3.2
       with:
         api-token: ${{ inputs.api-token }}
-        organization-id: SIGNPATH_ORGANIZATION_ID
-        project-slug: SIGNPATH_PROJECT_SLUG
+        organization-id: 3934dee1-e4d0-4b4f-b93e-0df410f62df0
+        project-slug: PrintGuard
         signing-policy-slug: ${{ inputs.signing-policy }}
         github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
         wait-for-completion-timeout-in-seconds: 3600
