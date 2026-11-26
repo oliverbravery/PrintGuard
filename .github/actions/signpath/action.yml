@@ -1,0 +1,40 @@
+name: Sign with SignPath
+description: Signs a Windows executable through SignPath, against packaging/signpath.xml, in place.
+inputs:
+  directory:
+    description: The folder the executable is in.
+    required: true
+  file:
+    description: The executable's file name.
+    required: true
+  signing-policy:
+    description: test-signing on a release pull request, release-signing for a release, which waits for manual approval.
+    required: true
+  api-token:
+    description: The SignPath CI user's API token.
+    required: true
+runs:
+  using: composite
+  steps:
+    - id: version
+      shell: bash
+      run: echo "version=$(uv version --short)" >> "$GITHUB_OUTPUT"
+    - id: upload
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: unsigned-${{ inputs.file }}
+        path: ${{ inputs.directory }}/${{ inputs.file }}
+        if-no-files-found: error
+        retention-days: 1
+        compression-level: 0
+    - uses: signpath/github-action-submit-signing-request@a2c5b60d9c75f073142b653c354b632eedce097b # v3.2
+      with:
+        api-token: ${{ inputs.api-token }}
+        organization-id: SIGNPATH_ORGANIZATION_ID
+        project-slug: SIGNPATH_PROJECT_SLUG
+        signing-policy-slug: ${{ inputs.signing-policy }}
+        github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+        wait-for-completion-timeout-in-seconds: 3600
+        output-artifact-directory: ${{ inputs.directory }}
+        parameters: |
+          version: ${{ toJSON(steps.version.outputs.version) }}

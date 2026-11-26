@@ -178,7 +178,7 @@ jobs:
       matrix:
         os: [macos-26, windows-2025]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
@@ -187,8 +187,6 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26.10.0
-          cache: npm
-          cache-dependency-path: web/package-lock.json
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: 9.0.321
@@ -201,8 +199,27 @@ jobs:
         shell: bash
         env:
           APPLE_SIGNING_IDENTITY: Developer ID Application
+        run: bash packaging/build.sh app
+      - uses: ./.github/actions/signpath
+        if: runner.os == 'Windows'
+        with:
+          directory: dist/PrintGuard
+          file: PrintGuard.exe
+          signing-policy: release-signing
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      - name: Package it
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: Developer ID Application
           GITHUB_TOKEN: ${{ github.token }}
-        run: bash packaging/build.sh
+        run: bash packaging/build.sh pack
+      - uses: ./.github/actions/signpath
+        if: runner.os == 'Windows'
+        with:
+          directory: dist
+          file: PrintGuard-windows-x64-Setup.exe
+          signing-policy: release-signing
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
       - name: Notarise the disk image, the only step handed the notarisation key
         if: runner.os == 'macOS'
         env:
