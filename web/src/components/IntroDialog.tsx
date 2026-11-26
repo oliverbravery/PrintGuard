@@ -9,14 +9,16 @@ import { Progress } from "./Progress";
 export function IntroDialog() {
   const [page, setPage] = useState(0);
   const openDialog = useStore((s) => s.openDialog);
+  const engine = useStore((s) => s.engine);
+  const pages = INTRO.filter((entry) => !entry.shownWhen || (engine && entry.shownWhen(engine)));
   const close = () => openDialog(null);
-  const last = page === INTRO.length - 1;
+  const last = page === pages.length - 1;
   const footer = useFocusKept<HTMLElement>();
   return (
     <Dialog title="How PrintGuard works" onClose={close} fixed>
       <div className="flex h-full flex-col gap-4">
         <div aria-live="polite" className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]">
-          {INTRO.map((entry, i) => (
+          {pages.map((entry, i) => (
             <div
               key={entry.id}
               tabIndex={i === page ? 0 : undefined}
@@ -30,7 +32,7 @@ export function IntroDialog() {
           ))}
         </div>
         <footer ref={footer} className="hairline flex shrink-0 items-center gap-2 pt-4">
-          <Progress label="Introduction progress" value={page + 1} total={INTRO.length} className="flex-1" />
+          <Progress label="Introduction progress" value={page + 1} total={pages.length} className="flex-1" />
           {page > 0 && (
             <button className="btn" onClick={() => setPage(page - 1)}>
               Back

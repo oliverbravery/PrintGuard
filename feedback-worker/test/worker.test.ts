@@ -169,6 +169,72 @@ describe("uploading a frame", () => {
     expect(stored!.customMetadata).toMatchObject({ label: "failure", kind: "alert", score: "0.12", printer: "Prusa MK4", version: "2.6.0" });
   });
 
+  it("stores what was true when the frame was scored, and still takes a frame from a hub that sends none of it", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    const hub = token.split(".")[0];
+    const scored = {
+      kind: "streak",
+      model: "standard",
+      runtime: "onnx",
+      tiled: true,
+      streak: 2,
+      status: "printing",
+      progress: 41.5,
+      consecutive: 3,
+      cooldown_s: 60,
+      on_defect: "pause",
+      outcome: "cancelled",
+      alert: frameId(8402),
+    };
+    expect((await upload(token, "203.0.113.18", frameId(8400), JPEG, scored)).status).toBe(201);
+    expect((await env.FRAMES.head(`${hub}/aaaaaaaaaaaa/${frameId(8400)}.jpg`))!.customMetadata).toMatchObject({
+      kind: "streak",
+      model: "standard",
+      runtime: "onnx",
+      tiled: "true",
+      streak: "2",
+      status: "printing",
+      progress: "41.5",
+      consecutive: "3",
+      cooldown_s: "60",
+      on_defect: "pause",
+      outcome: "cancelled",
+      alert: frameId(8402),
+    });
+    expect((await upload(token, "203.0.113.18", frameId(8401), JPEG, { kind: "spike" })).status).toBe(201);
+    expect((await upload(token, "203.0.113.18", frameId(8402), JPEG, { kind: "alert", action: "pause", resumed: false })).status).toBe(201);
+    expect((await env.FRAMES.head(`${hub}/aaaaaaaaaaaa/${frameId(8402)}.jpg`))!.customMetadata).toMatchObject({ action: "pause", resumed: "false" });
+
+    expect((await upload(token, "203.0.113.18", frameId(8403))).status).toBe(201);
+    expect(Object.keys((await env.FRAMES.head(`${hub}/aaaaaaaaaaaa/${frameId(8403)}.jpg`))!.customMetadata!).sort()).toEqual(
+      ["kind", "label", "printer", "provider", "score", "threshold", "ts", "version"],
+    );
+  });
+
+  it("turns away scoring context that is not of its kind", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    const bad = [
+      { streak: -1 },
+      { streak: 1.5 },
+      { tiled: "yes" },
+      { status: "melting" },
+      { progress: 101 },
+      { consecutive: 31 },
+      { cooldown_s: -1 },
+      { on_defect: "explode" },
+      { outcome: "abandoned" },
+      { alert: "../escape" },
+      { action: "paused" },
+      { resumed: "true" },
+      { model: "x".repeat(21) },
+      { runtime: "onnx\r\nx-amz-meta-label: failure" },
+    ];
+    const refusals = [];
+    for (const [index, changes] of bad.entries()) refusals.push(await upload(token, "203.0.113.19", frameId(8500 + index), JPEG, changes));
+    expect(refusals.map((response) => response.status)).toEqual(Array(bad.length).fill(400));
+    expect(await hubCount(token.split(".")[0])).toBeUndefined();
+  });
+
   it("takes a frame the reviewer added from the print's recording", async () => {
     const token = await issueToken(env.TOKEN_SECRET);
     expect((await upload(token, "203.0.113.16", frameId(9), JPEG, { label: "failure", kind: "added" })).status).toBe(201);

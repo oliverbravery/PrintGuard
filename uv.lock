@@ -1224,7 +1224,7 @@ wheels = [
 
 [[package]]
 name = "printguard"
-version = "3.0.1"
+version = "3.0.2"
 source = { editable = "." }
 dependencies = [
     { name = "ai-edge-litert" },
@@ -1263,6 +1263,7 @@ desktop = [
     { name = "platformdirs" },
     { name = "pystray" },
     { name = "pywebview" },
+    { name = "velopack" },
 ]
 nvidia = [
     { name = "nvidia-cuda-runtime-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -1310,6 +1311,7 @@ requires-dist = [
     { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=312" },
     { name = "starlette", specifier = ">=1.3.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.49.0" },
+    { name = "velopack", marker = "extra == 'desktop'", specifier = ">=1.2.161" },
     { name = "wasdk-microsoft-windows-ai-machinelearning", marker = "sys_platform == 'win32'", specifier = ">=2.1.3" },
     { name = "wasdk-microsoft-windows-applicationmodel-dynamicdependency-bootstrap", marker = "sys_platform == 'win32'" },
     { name = "wasmtime", specifier = ">=47.0" },
@@ -2222,6 +2224,29 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c1/37/945b4ca0ac27e3dc4952642d4c900edd030b3da6c9634875af6e13ae80e5/uvloop-0.22.1-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b91328c72635f6f9e0282e4a57da7470c7350ab1c9f48546c0f2866205349d21", size = 4467065, upload-time = "2025-10-16T22:16:58.206Z" },
     { url = "https://files.pythonhosted.org/packages/97/cc/48d232f33d60e2e2e0b42f4e73455b146b76ebe216487e862700457fbf3c/uvloop-0.22.1-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:daf620c2995d193449393d6c62131b3fbd40a63bf7b307a1527856ace637fe88", size = 4328384, upload-time = "2025-10-16T22:16:59.36Z" },
     { url = "https://files.pythonhosted.org/packages/e4/16/c1fd27e9549f3c4baf1dc9c20c456cd2f822dbf8de9f463824b0c0357e06/uvloop-0.22.1-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:6cde23eeda1a25c75b2e07d39970f3374105d5eafbaab2a4482be82f272d5a5e", size = 4296730, upload-time = "2025-10-16T22:17:00.744Z" },
+]
+
+[[package]]
+name = "velopack"
+version = "1.2.161"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/aa/bf2bcea59cc586c9fdd079640f8534d78f36d59e5bfb6395fb5746d0d786/velopack-1.2.161.tar.gz", hash = "sha256:beb7655e1ad42f1fe3d9dcbf2694fb255b13d0131ea03579bbe55ba3accd9b85", size = 129748, upload-time = "2026-09-29T11:41:11.76Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/82/e2/51d271329937e136ce9530efa49521f3f82c9a15fc4d340cd0976bdb90f5/velopack-1.2.161-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:7a9603a68ad0a1e401aec0a3393ed745f6f2bacd6fff0cac778a5a445435fe15", size = 1503952, upload-time = "2026-09-29T11:40:49.304Z" },
+    { url = "https://files.pythonhosted.org/packages/82/c9/0c3ce212a78a603ba3eb2b4973b4d6dcdc242c9c0d12c969677e970338a9/velopack-1.2.161-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:c2e2e16cda8fb2d17ce8a054c179013eb7f8a26146fc8eed43316d053e8398e0", size = 1484324, upload-time = "2026-09-29T11:40:51.004Z" },
+    { url = "https://files.pythonhosted.org/packages/42/da/3f0c8082ad897a0f4654eaedf2725c63db5a52a6cec525a95bccb1597c66/velopack-1.2.161-cp38-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:2b47a7a44148903df93cb7bb8daab132c56e885f666e7ad922c65bac6f2ec878", size = 1637814, upload-time = "2026-09-29T11:40:52.459Z" },
+    { url = "https://files.pythonhosted.org/packages/29/58/9cd5d3f5322b4ee92b244e927e0bfb9f930e31dcd0438664e488db2fa8dc/velopack-1.2.161-cp38-abi3-manylinux_2_28_armv7l.whl", hash = "sha256:282daa783ed832a6be5924371f705bb5a8e0073b54927010c47c75b5771d93dd", size = 1326265, upload-time = "2026-09-29T11:40:54.03Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/b2/6867707600d2f20bc07a1ed39224deb2beb0c457d79f675be9f5e5578f60/velopack-1.2.161-cp38-abi3-manylinux_2_28_i686.whl", hash = "sha256:65aed6c86886836bb569f75cf15560ca2276f636860b426cc255480a39a150c4", size = 1425329, upload-time = "2026-09-29T11:40:55.634Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/67/9278c827312d2de06ed1e6376c4ac3c9062d2805c1344abeb63249608ca3/velopack-1.2.161-cp38-abi3-manylinux_2_28_ppc64le.whl", hash = "sha256:7202b9542e0844f64266d657652ba6fdfc85d5ba6aa1486877fac32d8fe3f585", size = 1420272, upload-time = "2026-09-29T11:40:56.912Z" },
+    { url = "https://files.pythonhosted.org/packages/49/34/d28487b85be2c6eff449060de7941acd7de39379e60a68f2345cbb602f0c/velopack-1.2.161-cp38-abi3-manylinux_2_28_s390x.whl", hash = "sha256:29c578e85bd9610ba34bd700d7c92f5d334affa7e1fd8c9a0f62b8397f473fbb", size = 1331535, upload-time = "2026-09-29T11:40:58.293Z" },
+    { url = "https://files.pythonhosted.org/packages/33/df/70435739460cf633ccd0c541a3cc60962e3687b9851496b9f26eed8bfd9b/velopack-1.2.161-cp38-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:07d52ce91d04162f0a573c61937ed568c2df688d85e385f697c939131fabfd21", size = 1577971, upload-time = "2026-09-29T11:40:59.693Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/51/44c6281276958081c58440f8516d8f4811cc133459c348a8804fad4a8c25/velopack-1.2.161-cp38-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:214109df03fc516260c8bda891b9c5b21d9afa7415474098ac1f3e1388c3eb97", size = 1810266, upload-time = "2026-09-29T11:41:01.361Z" },
+    { url = "https://files.pythonhosted.org/packages/23/cd/63c642dc503b69fcb1da5af5edd158f14f6036147cbb862091847abbdc7c/velopack-1.2.161-cp38-abi3-musllinux_1_2_armv7l.whl", hash = "sha256:42037d40744b18e9c56dbc0ea9eb9ae03840cdbcff9b4d2e2a323ff65f5dd531", size = 1597554, upload-time = "2026-09-29T11:41:02.708Z" },
+    { url = "https://files.pythonhosted.org/packages/47/82/589438566362768080d57021798eacb71c1a447d96e1c6a0e42f5b78e09a/velopack-1.2.161-cp38-abi3-musllinux_1_2_i686.whl", hash = "sha256:cb5b4a0333d446fb8307bf650ca0da982926ff9f78aa85b7dd68668982379c6f", size = 1601943, upload-time = "2026-09-29T11:41:04.139Z" },
+    { url = "https://files.pythonhosted.org/packages/02/ce/0a5dcc140e5980aa1e0531dff608674ba062e1028894a2f826ff5a804b03/velopack-1.2.161-cp38-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:f9b5232918ef4057ad360668f5c2d4a6117a29c9d23dddf9735319f32e7715c6", size = 1794872, upload-time = "2026-09-29T11:41:05.449Z" },
+    { url = "https://files.pythonhosted.org/packages/24/c8/38b2243592aa69b3aba5fd01caaa7fc67d1f483b79e9d8b7f0e009afc5ea/velopack-1.2.161-cp38-abi3-win32.whl", hash = "sha256:c42ceb4ded31edc94dee92d80e6298e3e8af5100d5c28f49938bdb550d947011", size = 1083500, upload-time = "2026-09-29T11:41:07.211Z" },
+    { url = "https://files.pythonhosted.org/packages/ce/4a/1906caadfbada25e987f8f20ec61667221e73ab0d01c1164bbcb33b10e44/velopack-1.2.161-cp38-abi3-win_amd64.whl", hash = "sha256:3a85b4a39c7644d06dafa44bd197d1e88d429f3f05ead57031552cf17ffcf36e", size = 1363140, upload-time = "2026-09-29T11:41:08.642Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/2c/5b3dff114b232c89770fad264d7db66657654479ca8ecae7a76d7cf36f6f/velopack-1.2.161-cp38-abi3-win_arm64.whl", hash = "sha256:5d410ff340fb1346a38a96a7617633983be1bbefbdba9def0b8c1545dec06856", size = 1296839, upload-time = "2026-09-29T11:41:10.348Z" },
 ]
 
 [[package]]

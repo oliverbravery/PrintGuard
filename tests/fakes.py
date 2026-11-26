@@ -31,8 +31,9 @@ class FakeSource:
         return Frame(rgb=rgb, seq=float(seq), ts=time.time())
 
     def set_monitoring(self, active: bool) -> None:
+        if self.standby == active:
+            self.online = active
         self.standby = not active
-        self.online = active
 
     def close(self) -> None:
         self.online = False
@@ -108,6 +109,25 @@ class FakeFileStore:
         self.blobs.pop(key, None)
 
 
+class FakeUpdater:
+    """Stands in for the desktop app's Velopack updater, counting what it was asked to do."""
+
+    def __init__(self, version: str | None = "2.3.0") -> None:
+        self.version = version
+        self.failing = False
+        self.downloads = 0
+        self.installs = 0
+
+    async def download(self) -> str | None:
+        self.downloads += 1
+        if self.failing:
+            raise RuntimeError("the release feed is unreachable")
+        return self.version
+
+    async def install(self) -> None:
+        self.installs += 1
+
+
 class FakePluginRuntime:
     """A plugin runtime that runs nothing, so an engine counts as running plugins."""
 
@@ -164,6 +184,7 @@ class FakePlatform:
     version = "2.1.0"
     update_repo = "o/r"
     update_asset: str | None = None
+    updater: Any = None
     secrets: frozenset[str] = frozenset()
 
     def __init__(self, infer_s: float = 0.05, failing: bool = False) -> None:
@@ -171,6 +192,7 @@ class FakePlatform:
         self.infer_s = infer_s
         self.failing = failing
         self.device_status = "Printing"
+        self.device_progress = 40.0
         self.reject_actions = False
         self.action_delay_s = 0.0
         self.action_started = asyncio.Event()
@@ -185,15 +207,15 @@ class FakePlatform:
         self.released_cameras: list[str] = []
         self.devices: list[dict[str, Any]] = []
         self.state: dict[str, Any] = {}
-        self.inference_runtime = "auto"
+        self.inference_runtime = "onnx"
         self.model = "standard"
         self.files = FakeFileStore()
         self.notices: list[Notice] = []
 
     async def configure(self, settings: dict[str, Any]) -> None:
-        """Records the selected model and inference runtime."""
+        """Records the selected model and the runtime it runs on, ONNX for ``auto``."""
         self.model = settings["model"]
-        self.inference_runtime = settings["inference_runtime"]
+        self.inference_runtime = "onnx" if settings["inference_runtime"] == "auto" else settings["inference_runtime"]
 
     def take_notices(self) -> list[Notice]:
         notices, self.notices = self.notices, []
@@ -264,7 +286,7 @@ class FakePlatform:
             return 204, ""
         if method == "POST" and url.endswith("/api/files/local"):
             return 201, {"files": {}, "done": True, "effectiveSelect": True, "effectivePrint": True}
-        return 200, {"state": self.device_status, "progress": {"completion": 40.0}, "job": {"file": {"name": "benchy.gcode"}}}
+        return 200, {"state": self.device_status, "progress": {"completion": self.device_progress}, "job": {"file": {"name": "benchy.gcode"}}}
 
     async def encode_jpeg(self, rgb: np.ndarray) -> bytes | None:
         return b"\xff\xd8fake"

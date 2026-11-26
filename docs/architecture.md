@@ -78,8 +78,10 @@ All routes enforce [host and origin checking](deployment.md#host-and-origin-chec
 | `host` | Platform string (`macos`, `windows`, or `docker` + image variant) |
 | `workers` | Concurrent inference worker count measured at model load |
 | `inference_device` | Human-readable compute label displayed in the UI |
+| `inference_runtime` | The runtime the model actually runs on (`onnx` or `litert`), which `auto` leaves to `configure`. Kept beside every review frame |
 | `version` | Installed package version from `pyproject.toml` |
 | `update_repo`, `update_asset` | GitHub repo and platform desktop installer asset name |
+| `updater` | The desktop app's Velopack `Updater` (`download()`, `install()`), or `None` in the container and in a copy run from source, a disk image or PyInstaller's `dist/` before vpk packs it |
 | `plugin_runtime` | `PluginRuntime` instance, or `None` when `PRINTGUARD_PLUGINS=off` |
 | `secrets` | Deployment-level secrets outside `state.json` (like `MEDIAMTX_API` credentials) to scrub from logs and reports |
 | `files` | `FileStore` implementation |
@@ -137,11 +139,11 @@ Every command accepted by `Engine._handlers`:
 | Monitors | `monitor.add`, `monitor.update`, `monitor.remove` |
 | History | `history.get`, `snapshot.get`, `review.get`, `review.add`, `review.send`, `review.retry`, `review.dismiss`, `review.delete`, `recording.frame`, `recording.delete` |
 | Plugins | `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.code`, `plugin.catalogue`, `plugin.page`, `plugin.http`, `plugin.socket`, `plugin.call`, `plugin.answer`, `plugin.publish`, `plugin.secrets`, `plugin.oauth`, `plugin.effect` |
-| System | `settings.update`, `notify.test`, `notify.send`, `token.create`, `token.remove`, `update.check`, `update.releases`, `report.send`, `report.bundle` |
+| System | `settings.update`, `notify.test`, `notify.send`, `token.create`, `token.remove`, `update.check`, `update.releases`, `update.install`, `report.send`, `report.bundle` |
 
 Commands may pass a `req_id` echoed on the reply. Successful commands broadcast a `state` event (or their dedicated response event for read-only queries); failures return `error`. `FINISHING_COMMANDS` (`camera.remove`, `printer.update`, `printer.remove`, `printer.cameras.refresh`, `monitor.remove`, `print.remove`, `settings.update`, `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.secrets`) run under `Engine._background` so they complete cleanly even if the calling WebSocket closes or times out.
 
-Unknown IDs fail on both update and remove, unknown keys/bad values fail (with numeric monitor/camera bounds clamped, except `printer.heat` which rejects out-of-range targets), `camera.add` requires string device/path/url values, and `settings.update` accepts only `notifiers`, `update_check`, `mqtt`, `theme`, `themes`, `glass`, `layout`, `model`, `inference_runtime`, `catalogue_url`, `fault_grace_s`, `preheat`, `feedback` and `recording_days` (`0`, `3`, `7` or `14`). Adapter configs and `mqtt` validate declared field types (and `mqtt` rejects unknown fields). Empty-message exceptions report their class name.
+Unknown IDs fail on both update and remove, unknown keys/bad values fail (with numeric monitor/camera bounds clamped, except `printer.heat` which rejects out-of-range targets), `camera.add` requires string device/path/url values, and `settings.update` accepts only `notifiers`, `update_check`, `auto_update`, `skipped_version`, `mqtt`, `theme`, `themes`, `glass`, `layout`, `model`, `inference_runtime`, `catalogue_url`, `fault_grace_s`, `preheat`, `feedback` and `recording_days` (`0`, `3`, `7` or `14`). Adapter configs and `mqtt` validate declared field types (and `mqtt` rejects unknown fields). Empty-message exceptions report their class name.
 
 `printer.test`, `notify.test` and `report.send` succeed as commands and carry `ok` inside their own events. `review.send` and `review.retry` kick off background uploads (refused when `settings.feedback == "off"`), emitting `review_sent` after the closing `state` under the same `req_id`. Re-submitting an uploading print updates its selections without re-sending already-uploaded frames.
 
@@ -172,12 +174,12 @@ Fields inside `state_event()` ([`engine/engine.py`](../printguard/engine/engine.
 
 | Field | Contents |
 |---|---|
-| `host`, `version`, `update` | Deployment target, package version and release check status (`null` until checked) |
+| `host`, `version`, `update`, `installs_updates` | Deployment target, package version, release check status (`null` until checked, with `ready` naming a downloaded release) and whether the hub installs its own updates |
 | `cameras`, `printers`, `prints`, `tokens`, `plugins` | Public registry views (no token hashes, no plugin code/secret values, no adapter secrets, no Bambu access codes, URLs redacted) |
 | `monitors` | Monitor configs plus `watching`, latest `result` and active `alert` |
 | `reviews`, `feedback_hub` | Per-print frame/recording summaries and review statuses, plus the public half of the hub's training token |
 | `startup_warnings` | Boot-time warnings (skipped GPU, reset setting, dropped record) retained until restart and toasted once per page load |
-| `settings` | Public settings (notifier configs without secrets, MQTT without password, theme/custom themes/glass/layout, model, runtime, catalogue URL, grace period, preheat presets, update check, feedback/recording settings) |
+| `settings` | Public settings (notifier configs without secrets, MQTT without password, theme/custom themes/glass/layout, model, runtime, catalogue URL, grace period, preheat presets, update check and automatic installs, skipped release, feedback/recording settings) |
 | `secrets_set` | Map of stored secret field names for notifiers and MQTT (`{"notifiers": {...}, "mqtt": [...]}`) |
 | `stats` | `inference_device`, `infer_ms` and `capacity_fps` |
 | `integrations`, `notifiers` | Adapter schemas driving UI forms |
@@ -203,6 +205,7 @@ Cameras and printers are independent registries; monitors bind one camera and an
 | `cooldown_s` | `60` | `0` to `600` |
 | `on_defect` | `"none"` | `"none"`, `"pause"`, `"cancel"` |
 | `notify` | `false` | |
+| `pause_on_camera_loss` | `false` | |
 
 Camera `detect_fps` defaults to `60` and clamps to `0.1` to `60`.
 
@@ -262,7 +265,7 @@ sequenceDiagram
     P-->>S: classification result
     S->>E: _on_result(camera, frame, result)
     E-->>E: defect_score, record in history, emit result (up to 5 Hz)
-    E->>W: on_score(monitor, frame, score)
+    E->>W: on_score(monitor, frame, score), answering the streak and whether it fired
     alt score ≥ threshold for N consecutive frames, outside the cooldown
         W-->>W: start the cooldown
         W->>I: pause / cancel the linked printer (retried on failure)
@@ -274,7 +277,7 @@ sequenceDiagram
     else score below threshold
         W-->>W: streak and alert reset
     end
-    E-->>E: consider the frame for the print's review
+    E-->>E: consider the frame for the print's review, with its Scoring
 ```
 
 [`engine/vision.py`](../printguard/engine/vision.py) handles all image processing: `transform` applies rotation, crop (in rotated coordinates) and brightness/contrast/sharpness. `preprocess` replicates the exact torchvision eval pipeline each model trained with (bilinear shortest-edge resize, luminance conversion for Legacy, centre crop and normalisation using `metadata.json`: 256 -> 224 for Standard/Legacy, 293 -> 256 for Light). `squares` tiles wide crops into overlapping squares (`SQUARE_OVERLAP = 0.2`, up to `LONGEST_RATIO = 4`) and `scheduler.infer_squares` takes the highest risk score (uncropped cameras score the centre square once; `/classify` tiles the full image). Non-finite model outputs raise an inference error rather than polluting scores.
@@ -298,20 +301,28 @@ Disk writes always run *after* print protection: inference and watchdog alerts h
 
 ### Print reviews
 
-[`engine/reviews.py`](../printguard/engine/reviews.py) saves selected frames per print (scaled to 512px) in `platform.files`, surviving restarts. With `settings.feedback == "off"`, only alert snapshots are kept (switching it off dismisses `ready`/`queued` prints and deletes non-alert frames). A print spans from first watched frame until the printer reports idle/error or the monitor is disabled (pauses keep it open; active alert responses hold closure until their alert frame is saved; printerless monitors roll over every 24 hours; monitors waiting on an initial printer poll skip `near`/`spaced` captures).
+[`engine/reviews.py`](../printguard/engine/reviews.py) saves selected frames per print (scaled to 512px) in `platform.files`, surviving restarts. With `settings.feedback == "off"`, only alert snapshots are kept (switching it off dismisses `ready`/`queued` prints and deletes non-alert frames). A print spans from first watched frame until the printer reports idle/error or the monitor is disabled (pauses keep it open; active alert responses hold closure until their alert frame is saved; printerless monitors roll over every 24 hours).
 
 | Kind | Limit | Selection rule |
 |---|---|---|
-| `alert` | Last 40 | Alert trigger frames (also shown in risk history) |
-| `near` | Top 5 | Highest sub-threshold scores spaced at least 1 minute apart |
+| `alert` | Last 40 | Alert trigger frames (also shown in risk history). Dropping one drops its streak |
+| `streak` | 60 | The `consecutive - 1` frames behind the first alert of a streak, naming it in `alert`. Over the cap the oldest alert's whole streak goes |
+| `spike` | Top 5 | Frames at or over the threshold that fired nothing, at least 1 minute apart |
+| `near` | Top 5 | Highest sub-threshold scores at least 1 minute apart |
 | `spaced` | Up to 19 | Reservoir-style thinning (halves and doubles interval at 20) |
 | `added` | Up to 60 | Manually added from the print recording |
+
+`sample` holds frames over the threshold in memory as JPEGs, at most `consecutive - 1` per monitor. When `on_score` says a frame fired, the held frames are kept as `streak` and the alert frame's id is reserved before anything is awaited, since `keep_alert` runs in the already scheduled response. A held frame that falls out of the window, or whose streak breaks first, competes as a `spike`. A streak that has fired holds nothing more, so an alert-only monitor re-alerting on a lasting defect keeps only the alert frames. A spaced frame that turns out to be in a streak stays `spaced` and gains the `alert` link, and the frame that fires is never also kept as spaced.
+
+`spaced` and `near` wait until `Review.underway`, set once the printer reports printing past 0%, so heating and levelling (an empty bed) aren't kept. A monitor with no printer, or one whose printer hasn't answered, can't tell and starts at once.
+
+Every frame kept by `sample` or `keep_alert` carries its `Scoring`: `model`, `runtime`, `tiled` (the camera has a crop), `streak`, the printer's `status` and `progress`, and the monitor's `threshold`, `consecutive`, `cooldown_s` and `on_defect` at that moment. Frames added from the recording have none of it, since the index holds only time and score. An alert whose action is `pause` follows `pause` from `sent` to `held` once `settle` sees the printer paused, then `resumed` once it prints again, so a poll landing before the pause takes effect never reads as a resume. `settle` also records `Review.outcome` from the printer's `device_state.outcome` on the read that ends the print.
 
 Storage caps at 20 prints or 200 MB across monitors (pruning oldest finished prints first, excluding `queued` prints; empty prints end `dismissed` and prune first).
 
 When `settings.recording_days > 0`, prints also record one frame every 5 seconds into two files: appended JPEGs plus a 24-byte-per-frame binary index (time, score, offset, size) read via `read_range`, so abrupt shutdowns at worst drop the trailing entry. Recordings prune on send/ignore, after `recording_days`, on `recording.delete` or over the 2 GB total cap.
 
-[`engine/feedback.py`](../printguard/engine/feedback.py) uploads reviewed prints one frame per HTTP request to [`feedback-worker/`](../feedback-worker) as a background task. Review uploads are intentionally excluded from REST, MCP and plugin permissions so training frames only leave when a human clicks **Send** in the dashboard.
+[`engine/feedback.py`](../printguard/engine/feedback.py) uploads reviewed prints one frame per HTTP request to [`feedback-worker/`](../feedback-worker) as a background task. Review uploads are intentionally excluded from REST, MCP and plugin permissions so training frames only leave when a human clicks **Send** in the dashboard. Each frame's `X-Frame` details are its `Scoring`, over the monitor's current rule for a frame without one, plus `outcome`, `alert`, `action` and `resumed`, with unknown values left out. The Worker takes every field after the original ten as optional, so older hubs keep uploading, and stores them as R2 custom metadata, which `pull.py` writes into `frames.jsonl` as it does the rest.
 
 | `status` | Meaning |
 |---|---|
@@ -357,7 +368,7 @@ stateDiagram-v2
     end note
 ```
 
-The watchdog monitors four conditions: missing/offline watched camera, stalled camera (online with no completed inference for `STALL_GRACE_S` = 30 s), low coverage (<90% frame delivery over the last 10 minutes), and unreadable printer state while watching. Standby monitors forget prior camera faults so the next print gets a fresh grace period.
+The watchdog monitors four conditions: missing/offline watched camera, stalled camera (online with no completed inference for `STALL_GRACE_S` = 30 s), low coverage (<90% frame delivery over the last 10 minutes), and unreadable printer state while watching. Standby monitors forget prior camera faults so the next print gets a fresh grace period. A monitor with `pause_on_camera_loss` pauses its printer when an offline, stalled or missing camera is first announced, through the same retries as a defect pause. It never resumes the print, and after an outage it keeps the camera capturing, though nothing is inferred on it, and sends a recovery once the camera has held online for `RECOVER_HOLD_S`.
 
 Fault warnings (both dashboard toasts and push notifications) wait for `settings.fault_grace_s` (default 120 s, clamped 30 to 900 s), repeat every 30 minutes while unresolved, and suppress flapping by doubling recovery hold times from 1 minute up to 15 minutes. Camera re-attach runs on its own timer so longer grace periods never slow down recovery. A stall that transitions into a disconnect consolidates into one fault. Nothing in the alert path uses silent `except: pass`.
 
@@ -447,7 +458,9 @@ Plugin store writes use key-level diffs (`{"written": {...}, "removed": [...]}`)
 
 ## Updates and bug reports
 
-[`engine/updates.py`](../printguard/engine/updates.py) checks GitHub releases on boot and every 24 hours (retrying after 15 minutes on failure) while `settings.update_check` is on. Only the lightweight `update` summary (`current`, `latest`, `available`, `download`, `checked_at`, `releases_url`) rides in `state`; full release notes fetch on demand via `update.releases` (with `files_url` to resolve relative links).
+[`engine/updates.py`](../printguard/engine/updates.py) checks GitHub releases on boot and every 24 hours (retrying after 15 minutes on failure) while `settings.update_check` is on. Only the lightweight `update` summary (`current`, `latest`, `available`, `download`, `checked_at`, `releases_url`, `ready`) rides in `state`; full release notes fetch on demand via `update.releases` (with `files_url` to resolve relative links).
+
+The desktop app installs its own updates through `platform.updater`, which wraps [Velopack](https://velopack.io) in [`server/desktop.py`](../printguard/server/desktop.py) and reads the `releases.osx.json` or `releases.win.json` feed attached to each GitHub release. While `settings.auto_update` is on (the default for a hub with no saved state), each check downloads a newer release, as a delta when the last one is installed, unless it is `settings.skipped_version`. The downloaded version appears as `update.ready`, which the dashboard offers once per version. While `auto_update` stays on, the engine ticker installs it once `UPDATE_INSTALL_GRACE_S` (1 hour) has passed and no monitor is `watching` or has its printer paused, and `update.install` installs straight away, downloading first if it has to. Velopack never installs a download at launch by itself, so a skipped release stays skipped. Installing hands the release to Velopack, shuts the app down the same way a termination signal does, and Velopack swaps the bundle and opens it again.
 
 [`engine/reports.py`](../printguard/engine/reports.py) sends anonymous, user-initiated bug reports as a single Sentry feedback envelope over `platform.http` (no Sentry SDK, zero automatic telemetry). Reports carry the description, optional email, user attachments, dashboard URL/UA/viewport, scrubbed config/diagnostics (omitting MQTT address/login, theme, layout and active print filename) and both engine/UI log tails. `report.bundle` zips the exact same scrubbed files for local inspection or GitHub issues.
 
@@ -537,11 +550,12 @@ feedback-worker/     Cloudflare Worker + R2 training inbox and pull script
 plugins/             official plugins, catalogue.json, plugin.d.ts, schema.py and pin.py
 models/              legacy/, light/ and standard/ TFLite + ONNX models and metadata
 tests/               pytest suite (engine simulation, adapters, hub, plugin sandbox)
-packaging/           PyInstaller spec, build.sh, notarise.sh, macOS entitlements and Windows config
+packaging/           PyInstaller spec, build.sh (PyInstaller, then Velopack's vpk), notarise.sh, macOS entitlements, Windows config and the SignPath artifact configuration
 templates/           Unraid Community Applications template
 ca_profile.xml       Unraid Community Applications maintainer profile
 docs/                documentation pages and generated screenshots
 .github/workflows/   CI, release automation and issue lifecycle workflows
+.github/actions/     SignPath signing, shared by CI and the release
 Dockerfile           multi-stage production image with MediaMTX and built UI
 docker-compose.yaml  default Docker Compose setup
 mediamtx.yml         bundled MediaMTX config

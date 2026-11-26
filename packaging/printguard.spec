@@ -15,9 +15,11 @@ from importlib.metadata import requires, version
 from pathlib import Path
 
 from packaging.requirements import Requirement
+from packaging.version import Version
 from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs, collect_submodules, copy_metadata
 
 ROOT = Path(SPECPATH).parent
+VERSION = version("printguard")
 ICON = os.environ.get("PRINTGUARD_ICON") or None
 MEDIAMTX = os.environ.get("MEDIAMTX_BUNDLE")
 
@@ -67,6 +69,37 @@ if sys.platform == "win32":
     binaries += winrt_binaries + collect_dynamic_libs("winui3")
     hiddenimports += winrt_hidden + collect_submodules("winui3") + ["win32api", "win32con", "win32job"]
 
+    from PyInstaller.utils.win32.versioninfo import (
+        FixedFileInfo,
+        StringFileInfo,
+        StringStruct,
+        StringTable,
+        VarFileInfo,
+        VarStruct,
+        VSVersionInfo,
+    )
+
+    numeric_version = (*Version(VERSION).release, 0)
+    # SignPath signs only an exe whose ProductName and ProductVersion match the artifact configuration.
+    version_resource = VSVersionInfo(
+        ffi=FixedFileInfo(filevers=numeric_version, prodvers=numeric_version),
+        kids=[
+            StringFileInfo([
+                StringTable("040904B0", [
+                    StringStruct("CompanyName", "Oliver Bravery"),
+                    StringStruct("FileDescription", "PrintGuard"),
+                    StringStruct("FileVersion", VERSION),
+                    StringStruct("OriginalFilename", "PrintGuard.exe"),
+                    StringStruct("ProductName", "PrintGuard"),
+                    StringStruct("ProductVersion", VERSION),
+                ])
+            ]),
+            VarFileInfo([VarStruct("Translation", [0x0409, 0x04B0])]),
+        ],
+    )
+else:
+    version_resource = None
+
 a = Analysis(
     [str(Path(SPECPATH) / "desktop_entry.py")],
     pathex=[str(ROOT)],
@@ -82,8 +115,9 @@ exe = EXE(
     name="PrintGuard",
     console=False,
     icon=ICON,
+    version=version_resource,
     codesign_identity=os.environ.get("APPLE_SIGNING_IDENTITY"),
-    entitlements_file=str(Path(SPECPATH) / "entitlements.plist"),
+    entitlements_file=str(Path(SPECPATH) / "PrintGuard.entitlements"),
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="PrintGuard")
 
@@ -95,7 +129,7 @@ if sys.platform == "darwin":
         bundle_identifier="io.printguard.desktop",
         info_plist={
             "CFBundleName": "PrintGuard",
-            "CFBundleShortVersionString": version("printguard"),
+            "CFBundleShortVersionString": VERSION,
             "NSHighResolutionCapable": True,
             "LSUIElement": True,
             "NSCameraUsageDescription": "PrintGuard watches this device's camera for print defects.",

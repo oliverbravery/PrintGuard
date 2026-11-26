@@ -87,7 +87,7 @@ class FrameSource(Protocol):
         ...
 
     def set_monitoring(self, active: bool) -> None:
-        """Starts or stops capture needed by inference."""
+        """Starts or stops capture needed by inference or to see a camera come back."""
         ...
 
     def close(self) -> None:
@@ -195,6 +195,22 @@ class PluginRuntime(Protocol):
         ...
 
 
+class Updater(Protocol):
+    """Installs newer releases of the desktop app over itself."""
+
+    async def download(self) -> str | None:
+        """Downloads the newest release, ready to install.
+
+        Returns:
+            The version downloaded, or None when no newer release is published.
+        """
+        ...
+
+    async def install(self) -> None:
+        """Quits the app, installs the downloaded release and opens it again."""
+        ...
+
+
 class Platform(Protocol):
     """Runtime services the engine needs but cannot implement portably."""
 
@@ -204,6 +220,10 @@ class Platform(Protocol):
 
     workers: int
     inference_device: str
+    inference_runtime: str
+    """The runtime the detection model runs on, ``onnx`` or ``litert``, which
+    an ``auto`` setting leaves to the platform."""
+
     version: str
     update_repo: str
     """GitHub ``owner/name`` whose releases are checked for updates."""
@@ -211,6 +231,10 @@ class Platform(Protocol):
     update_asset: str | None
     """Release asset filename this deployment updates with (the desktop app's
     installer), or None when the deployment updates outside the app."""
+
+    updater: Updater | None
+    """Installs releases of the desktop app in place, or None where updates
+    are installed outside the app, as in the container image."""
 
     plugin_runtime: PluginRuntime | None
     """Sandbox for the background half of plugins, or None when plugins are

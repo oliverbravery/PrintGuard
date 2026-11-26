@@ -22,10 +22,10 @@ const camera = (id: string, name: string, source: Camera["source"], inferring = 
   crop: null, rotation: 0, target_fps: 30, achieved_fps: 29.8, inferring, in_use: true, standby: false, online: true, last_result: null,
 });
 
-const idle: DeviceState = { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: { actual: 24.3, target: 0 }, bed: { actual: 23.1, target: 0 } };
+const idle: DeviceState = { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: { actual: 24.3, target: 0 }, bed: { actual: 23.1, target: 0 }, outcome: null };
 const printer = (id: string, name: string, provider: string, status: string, progress: number, job: string, remaining_s: number, nozzle: number, bed: number): Printer => ({
   id, name, provider, model: "", config: {}, online: true,
-  device_state: { status, progress, job, remaining_s, nozzle: { actual: nozzle - 0.4, target: nozzle }, bed: { actual: bed + 0.2, target: bed } },
+  device_state: { status, progress, job, remaining_s, nozzle: { actual: nozzle - 0.4, target: nozzle }, bed: { actual: bed + 0.2, target: bed }, outcome: null },
 });
 
 const print = (id: string, name: string, ext: string, size: number, printer_ids: string[], meta: PrintFile["meta"]): PrintFile => ({
@@ -47,7 +47,7 @@ const PREHEAT = [
 
 const monitor = (id: string, name: string, camera_id: string, printer_id: string, alerting = false): Monitor => ({
   id, name, camera_id, printer_id, enabled: true, threshold: 0.6, consecutive: 3,
-  notify: true, on_defect: "pause", cooldown_s: 90, watching: true,
+  notify: true, on_defect: "pause", cooldown_s: 90, pause_on_camera_loss: false, watching: true,
   alert: alerting ? { score: 0.86, action: "pause", ts: NOW } : null,
 });
 
@@ -59,7 +59,7 @@ const history: Record<string, ScorePoint[]> = {
 
 function engine(): EngineState {
   return {
-    host: "docker", version: VERSION, update: null,
+    host: "docker", version: VERSION, update: null, installs_updates: false,
     cameras: [
       camera("c1", "Workshop · Prusa", { kind: "rtsp", url: "rtsp://10.0.0.21:8554/prusa" }, true),
       camera("c2", "Garage · Ender", { kind: "rtsp", url: "rtsp://10.0.0.22:8554/ender" }),
@@ -80,7 +80,7 @@ function engine(): EngineState {
       monitor("m2", "Ender 3 V3", "c2", "p2", true),
       monitor("m3", "Bambu X1C", "c3", ""),
     ],
-    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], glass: { opacity: 0, tone: 0 }, model: "standard", inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT, feedback: "ask", recording_days: 7 },
+    settings: { notifiers: {}, update_check: true, auto_update: false, skipped_version: "", theme: "dark", themes: [], glass: { opacity: 0, tone: 0 }, model: "standard", inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT, feedback: "ask", recording_days: 7 },
     tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: INTEGRATIONS, notifiers: [],
     plugins: [], plugin_permissions: PERMISSIONS, plugin_events: {}, plugin_platforms: PLATFORMS,
     plugin_event_permissions: { state: "state:read", frame: "camera:frames", history: "history:read" },

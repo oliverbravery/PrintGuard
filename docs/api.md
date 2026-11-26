@@ -182,7 +182,7 @@ Payload shapes for manage routes (every field is optional on `PATCH`):
 
 | Resource | Fields |
 |---|---|
-| Monitor | `name`, `camera_id`, `printer_id` (send `""` to unlink), `enabled`, `threshold`, `consecutive`, `cooldown_s`, `on_defect`, `notify`. Defaults and ranges in [Monitoring](monitoring.md#monitor-settings) |
+| Monitor | `name`, `camera_id`, `printer_id` (send `""` to unlink), `enabled`, `threshold`, `consecutive`, `cooldown_s`, `on_defect`, `notify`, `pause_on_camera_loss`. Defaults and ranges in [Monitoring](monitoring.md#monitor-settings) |
 | New camera | `name` and `source` (`{"kind": "url", "url"}` for streams, or an object returned by `/cameras/discover`) |
 | Camera update | `name`, `brightness`, `contrast`, `sharpness`, `rotation` (`0`, `90`, `180` or `270`), `detect_fps`, `crop` (`{"x", "y", "w", "h"}` as fractions 0 to 1; full frame clears it) |
 | Printer | `name`, `provider`, `model`, `config` |
@@ -347,7 +347,7 @@ Every printer integration normalises to the same schema:
 | Field | Values |
 |---|---|
 | **Status** | `printing`, `paused`, `idle`, `error`, `offline`, `unknown` |
-| **State** | `{"status", "progress" (0-100), "job", "remaining_s", "nozzle", "bed"}` under `device_state` (`null` until first read). Heaters are `{"actual", "target"}` in °C or `null`; `remaining_s` is `null` if unavailable. `online` indicates whether the last poll succeeded |
+| **State** | `{"status", "progress" (0-100), "job", "remaining_s", "nozzle", "bed", "outcome"}` under `device_state` (`null` until first read). Heaters are `{"actual", "target"}` in °C or `null`; `remaining_s` is `null` if unavailable. `outcome` is how the last print ended (`finished`, `cancelled` or `error`) while the printer still says so, and `null` where it doesn't. `online` indicates whether the last poll succeeded |
 | **Actions** | `pause`, `resume`, `cancel`, plus heater targets via `/heat` |
 
 ## Reading detection state
@@ -390,6 +390,7 @@ Monitor object (`GET /monitors` and `GET /monitors/{id}`):
   "consecutive": 3, "cooldown_s": 60,
   "on_defect": "pause",        // "none" | "pause" | "cancel"
   "notify": true,
+  "pause_on_camera_loss": false, // pause the printer once a camera fault is announced
   "watching": true,            // actively inferring right now
   "result": {                  // latest score, or null before first inference
     "score": 0.42, "ts": 1720000000.0

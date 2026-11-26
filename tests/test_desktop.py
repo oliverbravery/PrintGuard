@@ -131,6 +131,29 @@ def test_only_the_installed_app_takes_over_the_login_entry(
     assert writes == ([True] if rewritten else [])
 
 
+@pytest.mark.parametrize(
+    ("executable", "packed", "updates"),
+    [
+        ("/Applications/PrintGuard.app/Contents/MacOS/PrintGuard", True, True),
+        ("/Users/me/printguard/dist/PrintGuard.app/Contents/MacOS/PrintGuard", False, False),
+        ("/Volumes/PrintGuard/PrintGuard.app/Contents/MacOS/PrintGuard", True, False),
+    ],
+)
+def test_only_a_copy_vpk_packed_and_run_from_where_it_stays_installs_updates(
+    monkeypatch: pytest.MonkeyPatch, executable: str, packed: bool, updates: bool
+) -> None:
+    def manager(source: object) -> object:
+        if not packed:
+            raise RuntimeError("This application is not properly installed: UpdateMac does not exist in the expected path")
+        return source
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", executable)
+    monkeypatch.setitem(sys.modules, "velopack", SimpleNamespace(UpdateManager=manager, GithubSource=lambda url: url))
+
+    assert (desktop._updater(lambda: None) is not None) == updates
+
+
 def test_reopening_the_running_app_opens_its_window(monkeypatch: pytest.MonkeyPatch) -> None:
     """macOS sends a reopen request to a running app instead of starting a second copy."""
 
@@ -197,11 +220,11 @@ def test_stopping_runs_the_hubs_shutdown_while_a_client_holds_a_stream_open(monk
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    monkeypatch.setattr(app_module, "create_app", lambda: hub)
+    monkeypatch.setattr(app_module, "create_app", lambda updater: hub)
     monkeypatch.setattr(app_module, "SHUTDOWN_GRACE_S", 0.3)
     monkeypatch.setattr(desktop, "STOP_TIMEOUT_S", 3.0)
     monkeypatch.setattr(desktop, "_health", lambda port: httpx.get(f"http://127.0.0.1:{port}/api/health").json())
-    server = desktop._Server(port)
+    server = desktop._Server(port, None)
     assert server.start()
 
     with httpx.stream("GET", f"http://127.0.0.1:{port}/stream") as held:

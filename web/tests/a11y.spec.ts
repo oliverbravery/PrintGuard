@@ -17,6 +17,13 @@ const state = engine({
   prints: [{ id: "f1", name: "benchy", filename: "benchy.gcode", ext: "gcode", size: 2_000_000, printer_ids: ["p1"], uploaded: 1, meta: {}, thumbnail: null }],
 });
 
+const downloaded = {
+  ...state,
+  settings: { ...state.settings, auto_update: true },
+  installs_updates: true,
+  update: { current: "1.0.0", latest: "2.0.0", available: true, download: null, checked_at: 0, releases_url: "https://github.com/o/r/releases", ready: "2.0.0" },
+};
+
 const ROUTES = [
   "/",
   "/monitors/m2",
@@ -53,7 +60,7 @@ for (const theme of ["dark", "light"] as const) {
 
       for (const route of ROUTES) {
         test(`${route} meets WCAG 2.2 AA`, async ({ page }) => {
-          await dashboard(page, { engine: state }, route);
+          await dashboard(page, { engine: route === "/settings/updates" ? downloaded : state }, route);
           await expect(page.locator("main h1")).toBeAttached();
           const { violations } = await new AxeBuilder({ page }).withTags(WCAG_22_AA).exclude("video").analyze();
           expect(violations.map(({ id, nodes }) => `${id}: ${nodes.map((node) => node.target.join(" ")).join(", ")}`)).toEqual([]);
@@ -62,7 +69,7 @@ for (const theme of ["dark", "light"] as const) {
 
       for (const dialog of DIALOGS) {
         test(`the ${dialog} dialog meets WCAG 2.2 AA`, async ({ page }) => {
-          await dashboard(page, { engine: state, dialog });
+          await dashboard(page, { engine: dialog === "update" ? downloaded : state, dialog });
           await expect(page.getByRole("dialog")).toBeVisible();
           const { violations } = await new AxeBuilder({ page }).withTags(WCAG_22_AA).include("dialog").analyze();
           expect(violations.map(({ id, nodes }) => `${id}: ${nodes.map((node) => node.target.join(" ")).join(", ")}`)).toEqual([]);
@@ -89,8 +96,12 @@ test.describe("glass", () => {
       await emit(page, { event: "state", ...state, settings: { ...state.settings, theme: "glass", glass: { opacity: 0, tone } } });
       await page.getByRole("button", { name: "Remove", exact: true }).click();
       await expect(page.getByRole("button", { name: "Confirm" })).toBeVisible();
-      const { violations, incomplete } = await new AxeBuilder({ page }).withRules(["color-contrast"]).include(".btn-armed").analyze();
-      expect([...violations, ...incomplete].map(({ id }) => id)).toEqual([]);
+      await expect
+        .poll(async () => {
+          const { violations, incomplete } = await new AxeBuilder({ page }).withRules(["color-contrast"]).include(".btn-armed").analyze();
+          return [...violations, ...incomplete].map(({ id }) => id);
+        })
+        .toEqual([]);
     });
   }
 });

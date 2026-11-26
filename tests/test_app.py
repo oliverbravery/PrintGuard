@@ -1216,7 +1216,7 @@ def test_the_desktop_app_serves_the_same_websocket_limit(monkeypatch) -> None:
     configs: list[dict] = []
     monkeypatch.setattr(desktop.uvicorn, "Config", lambda app, **options: configs.append(options))
     monkeypatch.setattr(desktop.uvicorn, "Server", lambda config: SimpleNamespace())
-    desktop._Server(8000)
+    desktop._Server(8000, None)
 
     assert configs[0]["ws_max_size"] == app_module.WEBSOCKET_MAX_BYTES
 

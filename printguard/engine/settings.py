@@ -24,9 +24,18 @@ def _one_of(label: str, *options: str) -> Callable[[Any], Any]:
     return check
 
 
-def _true_or_false(raw: Any) -> bool:
-    if not isinstance(raw, bool):
-        raise ValueError("update_check is true or false")
+def _true_or_false(label: str) -> Callable[[Any], bool]:
+    def check(raw: Any) -> bool:
+        if not isinstance(raw, bool):
+            raise ValueError(f"{label} is true or false")
+        return raw
+
+    return check
+
+
+def _version(raw: Any) -> str:
+    if not isinstance(raw, str):
+        raise ValueError("skipped_version is a version")
     return raw
 
 
@@ -57,7 +66,9 @@ def _broker(raw: Any) -> dict[str, Any]:
 CHECKS: dict[str, Callable[[Any], Any]] = {
     **appearance.CHECKS,
     "notifiers": _channels,
-    "update_check": _true_or_false,
+    "update_check": _true_or_false("update_check"),
+    "auto_update": _true_or_false("auto_update"),
+    "skipped_version": _version,
     "mqtt": _broker,
     "model": _one_of("model", "legacy", "light", "standard"),
     "inference_runtime": _one_of("inference runtime", "auto", "litert", "onnx"),

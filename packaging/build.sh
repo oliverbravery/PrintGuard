@@ -1,20 +1,27 @@
 #!/usr/bin/env bash
 # Builds the PrintGuard desktop app for the host OS: builds the web UI, fetches
 # MediaMTX, generates a platform icon, runs PyInstaller, and packages the result
-# as a .dmg (macOS) or .zip (Windows) under dist/. The desktop app targets macOS
-# and Windows; Linux is served by the container image. Run after `uv sync`.
+# with Velopack, so it installs its own updates, as a .dmg (macOS) or a Setup.exe and
+# portable .zip (Windows) under dist/, beside the Velopack feed and packages each release
+# carries. The desktop app targets macOS and Windows; Linux is served by the container
+# image. Run after `uv sync`, with the .NET SDK installed for Velopack's vpk tool.
 # On macOS, APPLE_SIGNING_IDENTITY signs the app and disk image, and packaging/notarise.sh
 # then notarises the disk image, so the notarisation key is never in this script's environment.
+# GITHUB_TOKEN, when set, lifts GitHub's rate limit on fetching the last release to diff against.
+# `build.sh app` stops after PyInstaller and `build.sh pack` packages that build, so CI can
+# sign PrintGuard.exe with SignPath in between. With no argument it runs both.
 set -euo pipefail
+
+STAGE="${1:-all}"
+case "$STAGE" in
+  app | pack | all) ;;
+  *) echo "usage: build.sh [app|pack]" >&2; exit 1 ;;
+esac
 
 MEDIAMTX_VERSION=1.21.4
 CREATE_DMG_COMMIT=a2b71d0fda6d0df2a86dc7f67082d4d73e84c59f # v1.3.0
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-rm -rf dist build/desktop build/pyinstaller
-mkdir -p build/desktop
-
-(cd web && npm ci && npm run build)
 
 case "$(uname -m)" in
   arm64 | aarch64) ARCH=arm64 ;;
@@ -26,61 +33,93 @@ case "$(uname -s)" in
   *) echo "the desktop app targets macOS and Windows only; use the Docker image on Linux" >&2; exit 1 ;;
 esac
 
-mtx="mediamtx_v${MEDIAMTX_VERSION}_${OS}_${ARCH}.${MTX_EXT}"
-case "$mtx" in
-  mediamtx_v1.21.4_darwin_arm64.tar.gz) MTX_SHA256=20dfa23c1db149b935c2f23439ffbf0820a0ac1d6979a6eb9b21f74fc8376647 ;;
-  mediamtx_v1.21.4_darwin_amd64.tar.gz) MTX_SHA256=c8e2423944731bfa11f29029786961492639ffbacd30c0013aa0556a37d112b8 ;;
-  mediamtx_v1.21.4_windows_amd64.zip) MTX_SHA256=835645b2700ffce4d2b6cb04bfa0aadce95335da6dfc0d7c2114e6da585734f8 ;;
-  *) echo "no pinned checksum for ${mtx}, add it from the release's checksums.sha256" >&2; exit 1 ;;
-esac
-curl -fsSL -o "build/desktop/${mtx}" \
-  "https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}/${mtx}"
-[ "$(openssl dgst -sha256 -r "build/desktop/${mtx}" | cut -d' ' -f1)" = "$MTX_SHA256" ] \
-  || { echo "${mtx} does not match its pinned checksum" >&2; exit 1; }
-if [ "$MTX_EXT" = zip ]; then
-  powershell -NoProfile -Command "Expand-Archive -Path 'build/desktop/${mtx}' -DestinationPath build/desktop -Force"
-else
-  tar -xzf "build/desktop/${mtx}" -C build/desktop "$MTX_BIN"
-fi
-export MEDIAMTX_BUNDLE="$ROOT/build/desktop/${MTX_BIN}"
+build_app() {
+  rm -rf dist build/desktop build/pyinstaller
+  mkdir -p build/desktop
 
-ICON_SRC="web/public/apple-touch-icon.png"
-if [ "$OS" = darwin ]; then
-  iconset="build/desktop/icon.iconset"; mkdir -p "$iconset"
-  for s in 16 32 64 128 256 512; do sips -z "$s" "$s" "$ICON_SRC" --out "$iconset/icon_${s}x${s}.png" >/dev/null; done
-  iconutil -c icns "$iconset" -o build/desktop/icon.icns
-  export PRINTGUARD_ICON="$ROOT/build/desktop/icon.icns"
-elif [ "$OS" = windows ]; then
-  uv run --locked --extra desktop python -c \
-    "from PIL import Image; Image.open('$ICON_SRC').save('build/desktop/icon.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
-  export PRINTGUARD_ICON="$ROOT/build/desktop/icon.ico"
-fi
+  (cd web && npm ci && npm run build)
 
-uv run --locked --extra desktop pyinstaller packaging/printguard.spec --noconfirm --distpath dist --workpath build/pyinstaller
-
-if [ "$OS" = darwin ]; then
-  out="dist/PrintGuard-${LABEL}.dmg"
-  git clone -q https://github.com/create-dmg/create-dmg "build/desktop/create-dmg"
-  git -C "build/desktop/create-dmg" checkout -q "$CREATE_DMG_COMMIT"
-  staging="build/desktop/dmg"; rm -rf "$staging"; mkdir -p "$staging"
-  cp -R dist/PrintGuard.app "$staging/"
-  "build/desktop/create-dmg/create-dmg" \
-    --volname PrintGuard \
-    --volicon build/desktop/icon.icns \
-    --window-size 600 400 \
-    --icon-size 128 \
-    --icon PrintGuard.app 160 185 \
-    --app-drop-link 440 185 \
-    --hide-extension PrintGuard.app \
-    "$out" "$staging"
-  if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
-    codesign -s "$APPLE_SIGNING_IDENTITY" --timestamp "$out"
+  mtx="mediamtx_v${MEDIAMTX_VERSION}_${OS}_${ARCH}.${MTX_EXT}"
+  case "$mtx" in
+    mediamtx_v1.21.4_darwin_arm64.tar.gz) MTX_SHA256=20dfa23c1db149b935c2f23439ffbf0820a0ac1d6979a6eb9b21f74fc8376647 ;;
+    mediamtx_v1.21.4_darwin_amd64.tar.gz) MTX_SHA256=c8e2423944731bfa11f29029786961492639ffbacd30c0013aa0556a37d112b8 ;;
+    mediamtx_v1.21.4_windows_amd64.zip) MTX_SHA256=835645b2700ffce4d2b6cb04bfa0aadce95335da6dfc0d7c2114e6da585734f8 ;;
+    *) echo "no pinned checksum for ${mtx}, add it from the release's checksums.sha256" >&2; exit 1 ;;
+  esac
+  curl -fsSL -o "build/desktop/${mtx}" \
+    "https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}/${mtx}"
+  [ "$(openssl dgst -sha256 -r "build/desktop/${mtx}" | cut -d' ' -f1)" = "$MTX_SHA256" ] \
+    || { echo "${mtx} does not match its pinned checksum" >&2; exit 1; }
+  if [ "$MTX_EXT" = zip ]; then
+    powershell -NoProfile -Command "Expand-Archive -Path 'build/desktop/${mtx}' -DestinationPath build/desktop -Force"
+  else
+    tar -xzf "build/desktop/${mtx}" -C build/desktop "$MTX_BIN"
   fi
-else
-  out="dist/PrintGuard-${LABEL}.zip"
-  # Explorer marks every file of a downloaded zip as from the internet, and .NET refuses
-  # to load the window's assemblies with that mark unless the exe's config allows it.
-  cp packaging/PrintGuard.exe.config dist/PrintGuard/
-  powershell -NoProfile -Command "Compress-Archive -Path dist/PrintGuard -DestinationPath '$out' -Force"
-fi
-echo "$out"
+  export MEDIAMTX_BUNDLE="$ROOT/build/desktop/${MTX_BIN}"
+
+  ICON_SRC="web/public/apple-touch-icon.png"
+  if [ "$OS" = darwin ]; then
+    iconset="build/desktop/icon.iconset"; mkdir -p "$iconset"
+    for s in 16 32 64 128 256 512; do sips -z "$s" "$s" "$ICON_SRC" --out "$iconset/icon_${s}x${s}.png" >/dev/null; done
+    iconutil -c icns "$iconset" -o build/desktop/icon.icns
+    export PRINTGUARD_ICON="$ROOT/build/desktop/icon.icns"
+  elif [ "$OS" = windows ]; then
+    uv run --locked --extra desktop python -c \
+      "from PIL import Image; Image.open('$ICON_SRC').save('build/desktop/icon.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+    export PRINTGUARD_ICON="$ROOT/build/desktop/icon.ico"
+  fi
+
+  uv run --locked --extra desktop pyinstaller packaging/printguard.spec --noconfirm --distpath dist --workpath build/pyinstaller
+}
+
+pack_app() {
+  VERSION="$(uv version --short)"
+  VELOPACK_VERSION="$(uv run --locked --extra desktop python -c 'from importlib.metadata import version; print(version("velopack"))')"
+  rm -rf build/desktop/vpk build/velopack
+  dotnet tool install vpk --version "$VELOPACK_VERSION" --tool-path build/desktop/vpk
+  VPK=build/desktop/vpk/vpk
+
+  # The last release's package lets vpk add a delta, so an update downloads only what changed.
+  releases=build/velopack
+  "$VPK" download github --repoUrl https://github.com/oliverbravery/PrintGuard --outputDir "$releases" ${GITHUB_TOKEN:+--token "$GITHUB_TOKEN"}
+  pack=("$VPK" pack --packId PrintGuard --packVersion "$VERSION" --packTitle PrintGuard --packAuthors "Oliver Bravery" --outputDir "$releases")
+
+  if [ "$OS" = darwin ]; then
+    signing=()
+    if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+      signing=(--signAppIdentity "$APPLE_SIGNING_IDENTITY" --signEntitlements packaging/PrintGuard.entitlements)
+    fi
+    "${pack[@]}" --packDir dist/PrintGuard.app --mainExe PrintGuard --noInst ${signing[@]+"${signing[@]}"}
+    out="dist/PrintGuard-${LABEL}.dmg"
+    git clone -q https://github.com/create-dmg/create-dmg "build/desktop/create-dmg"
+    git -C "build/desktop/create-dmg" checkout -q "$CREATE_DMG_COMMIT"
+    staging="build/desktop/dmg"; rm -rf "$staging"; mkdir -p "$staging"
+    ditto -x -k "$releases/PrintGuard-osx-Portable.zip" "$staging"
+    "build/desktop/create-dmg/create-dmg" \
+      --volname PrintGuard \
+      --volicon build/desktop/icon.icns \
+      --window-size 600 400 \
+      --icon-size 128 \
+      --icon PrintGuard.app 160 185 \
+      --app-drop-link 440 185 \
+      --hide-extension PrintGuard.app \
+      "$out" "$staging"
+    if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+      codesign -s "$APPLE_SIGNING_IDENTITY" --timestamp "$out"
+    fi
+  else
+    out="dist/PrintGuard-${LABEL}-Setup.exe"
+    # Explorer marks every file of a downloaded zip as from the internet, and .NET refuses
+    # to load the window's assemblies with that mark unless the exe's config allows it.
+    cp packaging/PrintGuard.exe.config dist/PrintGuard/
+    "${pack[@]}" --packDir dist/PrintGuard --mainExe PrintGuard.exe --icon build/desktop/icon.ico
+    mv "$releases/PrintGuard-win-Setup.exe" "$out"
+    mv "$releases/PrintGuard-win-Portable.zip" "dist/PrintGuard-${LABEL}.zip"
+  fi
+  mv "$releases/PrintGuard-${VERSION}"-*.nupkg dist/
+  mv "$releases"/releases.*.json dist/
+  echo "$out"
+}
+
+[ "$STAGE" = pack ] || build_app
+[ "$STAGE" = app ] || pack_app

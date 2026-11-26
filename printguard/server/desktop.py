@@ -11,6 +11,7 @@ lifecycle differ from the container entry point in :mod:`printguard.server.app`.
 
 from __future__ import annotations
 
+import asyncio
 import html
 import io
 import logging
@@ -27,7 +28,7 @@ import webbrowser
 from importlib import metadata
 from pathlib import Path
 from string import Template
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 import platformdirs
@@ -47,6 +48,7 @@ FAILURE_LOG_LINES = 30
 WIN_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 TRANSIENT_LOCATIONS = ("/Volumes/", "/AppTranslocation/")
 WEBVIEW2_DOWNLOAD = "https://developer.microsoft.com/microsoft-edge/webview2/"
+RELEASES_REPO = "https://github.com/oliverbravery/PrintGuard"
 
 FAILURE_PAGE = Template("""<!doctype html>
 <meta charset="utf-8">
@@ -101,7 +103,7 @@ def _configure_environment() -> None:
     os.environ.setdefault("DATA_DIR", str(data_dir))
     os.environ.setdefault("LOG_FILE", str(data_dir / "printguard.log"))
     os.environ.setdefault(
-        "UPDATE_ASSET", "PrintGuard-macos-arm64.dmg" if sys.platform == "darwin" else "PrintGuard-windows-x64.zip"
+        "UPDATE_ASSET", "PrintGuard-macos-arm64.dmg" if sys.platform == "darwin" else "PrintGuard-windows-x64-Setup.exe"
     )
     if not getattr(sys, "frozen", False):
         return
@@ -341,13 +343,13 @@ class _Server:
         port_held: True once another program was found holding the port the server needs.
     """
 
-    def __init__(self, port: int) -> None:
+    def __init__(self, port: int, updater: _Updater | None) -> None:
         from .app import SHUTDOWN_GRACE_S, WEBSOCKET_MAX_BYTES, create_app
 
         self._port = port
         self._server = uvicorn.Server(
             uvicorn.Config(
-                create_app(), log_config=None, access_log=False, ws_max_size=WEBSOCKET_MAX_BYTES, timeout_graceful_shutdown=SHUTDOWN_GRACE_S
+                create_app(updater), log_config=None, access_log=False, ws_max_size=WEBSOCKET_MAX_BYTES, timeout_graceful_shutdown=SHUTDOWN_GRACE_S
             )
         )
         self._thread = threading.Thread(target=self._serve, daemon=True)
@@ -406,6 +408,72 @@ class _Server:
         self._thread.join(timeout=STOP_TIMEOUT_S)
 
 
+class _Updater:
+    """Installs the app's GitHub releases over it with Velopack.
+
+    Velopack swaps the new release in once this process has exited, then opens
+    it again, so installing ends the app the same clean way a termination
+    signal does.
+    """
+
+    def __init__(self, manager: Any, quit_app: Callable[[], None]) -> None:
+        self._manager = manager
+        self._quit_app = quit_app
+        self._downloaded: Any = None
+
+    async def download(self) -> str | None:
+        """Downloads the newest release, as only the files that changed when Velopack can.
+
+        Returns:
+            The version downloaded, or None when no newer release is published.
+        """
+        update = await asyncio.to_thread(self._manager.check_for_updates)
+        if update is None:
+            return None
+        await asyncio.to_thread(self._manager.download_updates, update)
+        self._downloaded = update
+        return update.TargetFullRelease.Version
+
+    async def install(self) -> None:
+        """Hands the downloaded release to Velopack and quits for it to be installed.
+
+        The quit runs on its own thread, since stopping the server waits for the
+        event loop this is called from.
+        """
+        self._manager.wait_exit_then_apply_updates(self._downloaded, silent=True, restart=True)
+        threading.Thread(target=self._quit_app, daemon=True).start()
+
+
+def _updater(quit_app: Callable[[], None]) -> _Updater | None:
+    """Builds the updater for a copy that can install its own updates.
+
+    A copy run from source or a disk image has nowhere to put them, and
+    Velopack refuses a PyInstaller build that vpk never packed as not
+    installed, so those run without one.
+
+    Args:
+        quit_app: Ends the app once an update is handed to Velopack.
+
+    Returns:
+        The updater, or None for a copy that cannot install updates.
+    """
+    if not _installed():
+        return None
+    import velopack
+
+    try:
+        manager = velopack.UpdateManager(velopack.GithubSource(RELEASES_REPO))
+    except RuntimeError as exc:
+        logger.info("this copy does not install its own updates: %s", exc)
+        return None
+    return _Updater(manager, quit_app)
+
+
+def _installed() -> bool:
+    """Whether this is the packaged app run from where it stays, rather than from source or a disk image."""
+    return getattr(sys, "frozen", False) and not any(location in sys.executable for location in TRANSIENT_LOCATIONS)
+
+
 def _autostart_args() -> list[str]:
     """Command that relaunches this app, used by the platform's login service."""
     if getattr(sys, "frozen", False):
@@ -419,8 +487,7 @@ def _refresh_autostart() -> None:
     A copy run from source or from a mounted disk image names a path that will not
     be there at the next login, so only the installed app takes the entry over.
     """
-    stable_location = not any(location in sys.executable for location in TRANSIENT_LOCATIONS)
-    if getattr(sys, "frozen", False) and stable_location and _autostart_enabled():
+    if _installed() and _autostart_enabled():
         _set_autostart(True)
 
 
@@ -473,6 +540,13 @@ def _set_autostart(enabled: bool) -> None:
                     pass
 
 
+def _shut_down(window: _Window, server: _Server) -> None:
+    """Closes the window and stops the hub with its streaming server, then ends the process."""
+    window.close()
+    server.stop()
+    os._exit(0)
+
+
 def _watch_termination(window: _Window, server: _Server) -> None:
     """Turns SIGTERM and Ctrl-C into the same clean shutdown as the tray's Quit.
 
@@ -496,9 +570,7 @@ def _watch_termination(window: _Window, server: _Server) -> None:
             pass
         logger.info("termination signal received, shutting down")
         notify.close()
-        window.close()
-        server.stop()
-        os._exit(0)
+        _shut_down(window, server)
 
     threading.Thread(target=wait, daemon=True).start()
 
@@ -581,7 +653,9 @@ def main() -> None:
     The window runs in a child process; closing it leaves the tray and the hub
     server running so the printer stays watched, and the tray's Quit exits. Opened while
     another copy is already running or still starting, it shows that copy's dashboard in the
-    browser and exits. On macOS, opening the running app again opens its window.
+    browser and exits. On macOS, opening the running app again opens its window. Only the
+    installed app installs its own updates, since a copy run from source, a disk image or
+    a build vpk never packed has nowhere to put them.
     """
     _configure_environment()
     _set_windows_app_id()
@@ -591,7 +665,8 @@ def main() -> None:
     if _hub_running(port):
         _show_running_copy(port)
         return
-    server = _Server(port)
+    updater = _updater(lambda: _shut_down(window, server))
+    server = _Server(port, updater)
     started = server.start()
     if server.port_held and _wait_until_answering(port, threading.Event(), READY_TIMEOUT_S):
         _show_running_copy(port)

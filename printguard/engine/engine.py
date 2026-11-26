@@ -28,7 +28,7 @@ from .adapters import Adapter
 from .cameras import declared_camera_id, same_stream, sanitise_camera, sanitise_source, stored_camera, tidy_stream_url
 from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, integrations_meta
-from .monitors import MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor, stored_monitor
+from .monitors import ALERT_RULE, MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor, stored_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
 from .platform import PLUGIN_HEADER, Frame, FrameSource, Platform, as_chunks, plain_failure
 from .printers import PREHEAT_DEFAULTS, connection_settings, sanitise_printer, sanitise_targets
@@ -45,7 +45,7 @@ from .registry import (
     Token,
     TokenRegistry,
 )
-from .reviews import Review, ReviewLibrary, frame_key, stored_review
+from .reviews import SCORED_KEYS, Review, ReviewLibrary, Scoring, frame_key, stored_review
 from .scheduler import Scheduler, infer_squares
 from .settings import CHECKS, require_broker
 from .sockets import SocketBroker, SocketRefused
@@ -73,6 +73,8 @@ SCRUBBED_EVENT_TYPES = ("warning", "error")
 EVENT_LOG_LEVELS = {"alert": logging.INFO, "warning": logging.WARNING, "error": logging.ERROR, "device": logging.DEBUG}
 UPDATE_CHECK_INTERVAL_S = 86400.0
 UPDATE_RETRY_S = 900.0
+UPDATE_INSTALL_GRACE_S = 3600.0
+"""How long a downloaded update waits for the user to restart into it before installing by itself."""
 RUNTIME_DRAIN_TIMEOUT_S = 10.0
 INFERENCE_SETTINGS = ("model", "inference_runtime")
 """The settings the platform loads detection with, so changing one reloads it."""
@@ -114,6 +116,7 @@ UNSAVED_COMMANDS = frozenset(
         "notify.send",
         "update.check",
         "update.releases",
+        "update.install",
         "report.send",
         "report.bundle",
         "plugin.code",
@@ -131,6 +134,8 @@ FEEDBACK_SMALLER_PX = 384
 SETTINGS_DEFAULTS: dict[str, Any] = {
     "notifiers": {},
     "update_check": True,
+    "auto_update": False,
+    "skipped_version": "",
     "mqtt": {},
     "theme": "system",
     "themes": [],
@@ -181,6 +186,10 @@ class Engine:
         self.catalogue: list[dict[str, Any]] = []
         self.settings: dict[str, Any] = dict(SETTINGS_DEFAULTS)
         self.update: dict[str, Any] | None = None
+        self.downloaded_update: str | None = None
+        self._update_download = asyncio.Lock()
+        self._install_update_after = 0.0
+        self._installing_update = False
         self.releases: list[dict[str, Any]] = []
         self.scheduler = Scheduler(platform, self.cameras, self._on_result, self._on_pipeline_error)
         self.watchdog = Watchdog(self)
@@ -246,6 +255,7 @@ class Engine:
             "token.remove": self._cmd_token_remove,
             "update.check": self._cmd_update_check,
             "update.releases": self._cmd_update_releases,
+            "update.install": self._cmd_update_install,
             "report.send": self._cmd_report_send,
             "report.bundle": self._cmd_report_bundle,
             "plugin.install": self._cmd_plugin_install,
@@ -274,10 +284,13 @@ class Engine:
         bound to a printer that was dropped is unlinked from it. A stored setting
         no command could have written is put back to its default on its own,
         since a theme no dashboard could render leaves nobody a page to fix it
-        from, and any other would refuse every edit after it.
+        from, and any other would refuse every edit after it. A hub with no
+        saved state installs its updates automatically, while one saved before
+        that setting existed keeps installing them by hand until it is turned on.
         """
         persisted = self.platform.load_state() or {}
-        self.settings = {**SETTINGS_DEFAULTS, **{k: v for k, v in persisted.get("settings", {}).items() if k in SETTINGS_DEFAULTS}}
+        self.settings = {**SETTINGS_DEFAULTS, "auto_update": not persisted}
+        self.settings.update({k: v for k, v in persisted.get("settings", {}).items() if k in SETTINGS_DEFAULTS})
         unusable = []
         for key, check in CHECKS.items():
             try:
@@ -329,7 +342,7 @@ class Engine:
         except OSError as exc:
             self._warn_at_start(f"The recordings of prints waiting for review could not be read: {logs.describe(exc)}")
         await self.reconcile_declared_cameras()
-        self.cameras.sync_in_use(self.monitors, self.printers)
+        self.sync_cameras()
         self.watchdog.reconcile_cameras_once_read(self.printers.items)
         self.settle_reviews()
         runtime = self.platform.plugin_runtime
@@ -528,7 +541,8 @@ class Engine:
             "event": "state",
             "host": self.platform.host,
             "version": self.platform.version,
-            "update": self.update,
+            "update": {**self.update, "ready": self._ready_update()} if self.update else None,
+            "installs_updates": self.platform.updater is not None,
             "cameras": [c.public() for c in self.cameras.values()],
             "printers": [p.public() for p in self.printers.values()],
             "prints": [p.public() for p in self.prints.values()],
@@ -538,7 +552,7 @@ class Engine:
             "monitors": [
                 {
                     **monitor,
-                    "watching": monitor_watching(monitor, self.printers) and self.cameras.get(monitor["camera_id"]) is not None,
+                    "watching": self._watching(monitor),
                     "result": self._results.get(monitor["id"]),
                 }
                 for monitor in self.monitors.values()
@@ -787,8 +801,12 @@ class Engine:
             }
         )
 
+    def sync_cameras(self) -> None:
+        """Recomputes which cameras are inferred on and which keep capturing."""
+        self.cameras.sync_in_use(self.monitors, self.printers, self.watchdog.awaited_cameras())
+
     def _sync(self, req_id: Any = None) -> None:
-        self.cameras.sync_in_use(self.monitors, self.printers)
+        self.sync_cameras()
         self.settle_reviews()
         self.save()
         event = self.state_event()
@@ -819,11 +837,10 @@ class Engine:
         self._attach_source(camera, source)
         logger.info("camera '%s' (%s) attached at %.1f fps", camera.name, camera.id, source.fps)
 
-    @staticmethod
-    def _attach_source(camera: Camera, source: FrameSource) -> None:
+    def _attach_source(self, camera: Camera, source: FrameSource) -> None:
         """Hands a camera the frame source that was opened for it."""
         camera.frame_source = source
-        source.set_monitoring(camera.in_use)
+        source.set_monitoring(camera.in_use or camera.id in self.watchdog.awaited_cameras())
         if source.fps > 0:
             camera.max_fps = source.fps
 
@@ -911,6 +928,7 @@ class Engine:
             camera = self.cameras.get(notice.camera_id) if notice.camera_id else None
             subject = f"'{camera.name}' " if camera else ""
             self.emit({"event": "warning", "message": subject + notice.message, "recovered": notice.recovered})
+        await self._install_update_when_idle()
         self._broadcast(self.state_event())
         return STATE_TICK_S
 
@@ -920,16 +938,71 @@ class Engine:
             delay = UPDATE_CHECK_INTERVAL_S
             if self.settings.get("update_check", True):
                 try:
-                    await self._announce_updates()
+                    await self._update_now()
                 except Exception as exc:
                     logger.warning("update check failed: %s", logs.describe(exc))
                     delay = UPDATE_RETRY_S
             await asyncio.sleep(delay)
 
-    async def _announce_updates(self) -> None:
-        """Checks for an update without being asked to, and tells every client what it found."""
+    async def _download_update(self) -> None:
+        """Downloads the newest release while the hub installs its own updates, once, unless the user skipped it.
+
+        A download that fails is warned of and tried again at the next check.
+        """
+        updater = self.platform.updater
+        async with self._update_download:
+            if updater is None or not self.settings["auto_update"] or not (self.update and self.update["available"]):
+                return
+            latest = self.update["latest"]
+            if latest in (self.downloaded_update, self.settings["skipped_version"]):
+                return
+            try:
+                self.downloaded_update = await updater.download()
+            except Exception as exc:
+                self.emit({"event": "warning", "message": f"PrintGuard v{latest} could not be downloaded, so it's tried again at the next update check: {logs.describe(exc)}"})
+                return
+        self._install_update_after = time.time() + UPDATE_INSTALL_GRACE_S
+        self._broadcast(self.state_event())
+
+    def _ready_update(self) -> str | None:
+        """The version downloaded and waiting to be installed, unless the user skipped it."""
+        return self.downloaded_update if self.downloaded_update != self.settings["skipped_version"] else None
+
+    def _watching(self, monitor: dict[str, Any]) -> bool:
+        """Whether a monitor is scoring frames right now."""
+        return monitor_watching(monitor, self.printers) and self.cameras.get(monitor["camera_id"]) is not None
+
+    def _holds_a_print(self, monitor: dict[str, Any]) -> bool:
+        """Whether a monitor is watching a print, or its printer holds one paused, perhaps by this hub after a defect."""
+        printer = self.printers.get(monitor["printer_id"] or "")
+        return self._watching(monitor) or (monitor["enabled"] and printer is not None and printer.reported_status == "paused")
+
+    async def _install_update_when_idle(self) -> None:
+        """Restarts into a downloaded update while the hub installs its own, once no monitor holds a print.
+
+        The user gets a while to restart into it themselves first, so an idle
+        hub does not restart the moment the download lands under someone
+        reading the dashboard. Switching off either automatic installs or the
+        daily check stops it, since the dashboard shows them as one switch.
+        """
+        if not (self.settings["auto_update"] and self.settings["update_check"]) or not self._ready_update() or time.time() < self._install_update_after:
+            return
+        if not any(map(self._holds_a_print, self.monitors.values())):
+            logger.info("installing PrintGuard v%s while no monitor holds a print", self.downloaded_update)
+            await self._install_update()
+
+    async def _install_update(self) -> None:
+        """Hands the downloaded update to the platform to install, once, however many ask."""
+        if self._installing_update:
+            return
+        self._installing_update = True
+        await self.platform.updater.install()
+
+    async def _update_now(self) -> None:
+        """Checks for an update without being asked to, tells every client what it found and downloads it if the hub installs its own."""
         await self._check_updates()
         self._broadcast(self.state_event())
+        await self._download_update()
 
     async def _check_updates(self) -> None:
         """Fetches and stores the update status, raising if it cannot.
@@ -977,12 +1050,21 @@ class Engine:
                         "ms": self.scheduler.stats()["infer_ms"],
                     }
                 )
-            await self.watchdog.on_score(monitor, frame, score)
+            streak, fired = await self.watchdog.on_score(monitor, frame, score)
             monitor = self._watching_through(monitor_id, camera)
             if monitor is not None and self.settings["feedback"] == "ask":
                 printer = self.printers.get(monitor["printer_id"])
+                scoring = Scoring(
+                    model=self.settings["model"],
+                    runtime=self.platform.inference_runtime,
+                    tiled=bool(camera.crop),
+                    streak=streak,
+                    status=printer.device_state["status"] if printer and printer.device_state else None,
+                    progress=printer.device_state["progress"] if printer and printer.online else None,
+                    **{key: monitor[key] for key in ALERT_RULE},
+                )
                 try:
-                    if await self.reviews.sample(monitor, frame, score, ts, recording=self.settings["recording_days"] > 0, answered=printer is None or printer.reported_status is not None):
+                    if await self.reviews.sample(monitor, frame, score, ts, scoring, fired, recording=self.settings["recording_days"] > 0, answered=printer is None or printer.reported_status is not None):
                         self.save()
                 except Exception as exc:
                     self.report_failure(f"keeping a frame of '{monitor['name']}' for review", exc)
@@ -1019,11 +1101,15 @@ class Engine:
             return None
 
     def settle_reviews(self) -> bool:
-        """Ends the review of every print that is over, returning whether any did."""
-        ended = self.reviews.settle(self.monitors, self.printers, self.watchdog.responding, self.settings["feedback"] == "ask")
-        if ended:
-            self._hold("delete the frames kept of what was no print", self.reviews.discard_not_prints())
-        return ended
+        """Follows every running print's printer and ends the review of each that is over, returning whether any review changed."""
+        changed = self.reviews.settle(self.monitors, self.printers, self.watchdog.responding, self.settings["feedback"] == "ask")
+        if changed:
+            self._hold("finish settling ended prints", self._finish_settled_reviews())
+        return changed
+
+    async def _finish_settled_reviews(self) -> None:
+        if await self.reviews.finish_settled():
+            self.save()
 
     def _start_send(self, review: Review, req_id: Any = None) -> None:
         """Starts uploading a review, or has the upload already under way answer this request too."""
@@ -1062,6 +1148,11 @@ class Engine:
         monitor's. A print submitted afresh carries over the frames already
         sent that it still keeps, and the upload goes on under the new choices
         and answers every request made for it, so no frame goes twice.
+
+        Each frame goes with what was true when it was scored, and the
+        monitor's alert rule as it stands now for a frame that has none of its
+        own, such as one added from the recording. Anything not known is left
+        out rather than sent empty.
         """
         submission = review.submission or {}
         try:
@@ -1074,15 +1165,27 @@ class Engine:
             printer = self.printers.get(monitor.get("printer_id") or "")
             print_details = {
                 "print": review.id,
-                "threshold": monitor["threshold"],
+                **{key: monitor[key] for key in ALERT_RULE},
                 "version": self.platform.version,
                 "provider": printer.provider if printer else "none",
                 "printer": submission["printer"],
+                "outcome": review.outcome,
             }
             submission["code"] = submission["retry_at"] = None
             for frame in review.unsent():
-                frame_details = {"frame": frame["id"], "label": submission["labels"][frame["id"]], "kind": frame["kind"], "score": frame["score"], "ts": frame["ts"]}
-                taken = await self._send_frame(frame_key(review.id, frame["id"]), {**print_details, **frame_details})
+                frame_details = {
+                    **{key: frame.get(key) for key in SCORED_KEYS},
+                    "frame": frame["id"],
+                    "label": submission["labels"][frame["id"]],
+                    "kind": frame["kind"],
+                    "score": frame["score"],
+                    "ts": frame["ts"],
+                    "alert": frame.get("alert"),
+                    "action": frame.get("action"),
+                    "resumed": frame["pause"] == "resumed" if "pause" in frame else None,
+                }
+                details = {key: value for part in (print_details, frame_details) for key, value in part.items() if value is not None}
+                taken = await self._send_frame(frame_key(review.id, frame["id"]), details)
                 chosen = review.submission
                 if chosen is not None and frame["id"] in chosen["labels"]:
                     if taken:
@@ -1969,10 +2072,10 @@ class Engine:
             NOTIFIERS[provider].require(config)
         if any(settings[key] != self.settings[key] for key in INFERENCE_SETTINGS):
             await self._switch_inference(settings)
-        switched_on = settings["update_check"] and not self.settings["update_check"]
+        switched_on = any(settings[key] and not self.settings[key] for key in ("update_check", "auto_update"))
         self.settings = {**self.settings, **{key: settings[key] for key in patch}}
-        if switched_on:
-            self._hold("the update check", self._announce_updates())
+        if switched_on and settings["update_check"]:
+            self._hold("the update check", self._update_now())
         if patch.get("feedback") == "off":
             await self._tidy_up("delete the frames kept for review", self.reviews.stop_asking())
         logger.info("settings updated: %s", sorted(patch))
@@ -2020,8 +2123,28 @@ class Engine:
             raise LookupError(f"no token {message['id']}")
 
     async def _cmd_update_check(self, message: dict[str, Any]) -> None:
+        """Checks for an update now, downloading it in the background as the daily check would."""
         await self._check_updates()
+        self._hold("the update download", self._download_update())
         self.emit({"event": "releases", "releases": self.releases, "req_id": message.get("req_id")})
+
+    async def _cmd_update_install(self, message: dict[str, Any]) -> None:
+        """Restarts the app into the newest release, downloading it first if the background has not.
+
+        Raises:
+            ValueError: If this hub is updated outside the app or there is no
+                newer release to install.
+        """
+        updater = self.platform.updater
+        if updater is None:
+            raise ValueError("this hub is updated outside the app")
+        async with self._update_download:
+            if self.downloaded_update is None or (self.update and self.downloaded_update != self.update["latest"]):
+                self.downloaded_update = await updater.download()
+        if self.downloaded_update is None:
+            raise ValueError("there is no newer release to install")
+        logger.info("installing PrintGuard v%s", self.downloaded_update)
+        await self._install_update()
 
     async def _cmd_update_releases(self, message: dict[str, Any]) -> None:
         if self.update is None and self.settings.get("update_check", True):

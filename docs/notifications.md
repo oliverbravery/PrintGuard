@@ -69,6 +69,8 @@ If a camera dies mid-print and nobody tells you, detection is pointless, so Prin
 
 If you have a Wi-Fi camera that occasionally blips offline and reconnects a few seconds later, bump up the grace period. It can't be switched off completely. Dashboard warnings follow the same grace period; until it expires, only the camera's own status badge shows offline.
 
+A monitor with **Pause if the camera drops out** switched on also pauses its printer when the warning goes out, and you get a second notice saying it was paused. If the camera went offline you get a recovery once it's been back for a minute, telling you the print can be resumed. A frozen feed can't be checked while the print is paused, so there's no notice for that one.
+
 What if a camera keeps dropping out and reconnecting just fast enough to reset the grace period every time? PrintGuard catches that too: if a camera has been offline for more than 10% of the last 10 minutes, you get a single unstable-feed warning (skipping the grace period) telling you what percentage of the time it's been dropping, followed by a recovery notice once it settles down. If you see that one, it's usually worth checking the camera's Wi-Fi signal or power supply.
 
 If alerts aren't turning up or are firing too often, check [Troubleshooting](troubleshooting.md#detection-and-alerts).

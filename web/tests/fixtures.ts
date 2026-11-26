@@ -8,7 +8,7 @@ export const camera = (over = {}) => ({
 
 export const monitor = (over = {}) => ({
   id: "m1", name: "Prusa", camera_id: "c1", printer_id: "", enabled: true, threshold: 0.6, consecutive: 3,
-  notify: true, on_defect: "pause", cooldown_s: 90, watching: true, alert: null, ...over,
+  notify: true, on_defect: "pause", cooldown_s: 90, pause_on_camera_loss: false, watching: true, alert: null, ...over,
 });
 
 export const printer = (over = {}) => ({
@@ -22,10 +22,10 @@ export const review = (over = {}) => ({
 });
 
 export const engine = (over = {}) => ({
-  version: "test", update: null, cameras: [camera()], printers: [], prints: [], reviews: [], monitors: [monitor()],
+  version: "test", update: null, installs_updates: false, cameras: [camera()], printers: [], prints: [], reviews: [], monitors: [monitor()],
   tokens: [], notifiers: [],
   integrations: [{ id: "octoprint", label: "OctoPrint", docs_url: "", formats: [], heater_control: true, schema: { properties: {} } }],
-  settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, preheat: [] },
+  settings: { notifiers: {}, update_check: true, auto_update: false, skipped_version: "", theme: "dark", themes: [], layout: {}, preheat: [] },
   stats: { inference_device: "CPU", infer_ms: 1, capacity_fps: 1 },
   plugins: [], plugin_permissions: [], plugin_events: {}, plugin_assets: {}, ...over,
 });

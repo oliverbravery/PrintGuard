@@ -24,7 +24,7 @@ from printguard.engine import vision
 from printguard.server.inference import load_assets
 from fakes import model_assets
 from printguard.engine.cameras import webrtc_endpoint, whep_endpoint
-from printguard.engine.integrations import INTEGRATIONS, DeviceAction, DeviceState, DeviceStatus, IntegrationAdapter
+from printguard.engine.integrations import INTEGRATIONS, DeviceAction, DeviceState, DeviceStatus, IntegrationAdapter, PrintOutcome
 from printguard.engine.integrations import bambu, creality, klipper, octoprint
 from printguard.engine.integrations.bambu import BambuAdapter
 from printguard.engine.integrations.creality import CrealityAdapter
@@ -580,18 +580,18 @@ async def test_ultimaker_camera_is_mjpeg_on_port_8080() -> None:
 
 
 @pytest.mark.parametrize(
-    ("text", "expected"),
+    ("text", "expected", "outcome"),
     [
-        ("printing", DeviceStatus.PRINTING),
-        ("paused", DeviceStatus.PAUSED),
-        ("standby", DeviceStatus.IDLE),
-        ("complete", DeviceStatus.IDLE),
-        ("cancelled", DeviceStatus.IDLE),
-        ("error", DeviceStatus.ERROR),
-        ("", DeviceStatus.UNKNOWN),
+        ("printing", DeviceStatus.PRINTING, None),
+        ("paused", DeviceStatus.PAUSED, None),
+        ("standby", DeviceStatus.IDLE, None),
+        ("complete", DeviceStatus.IDLE, PrintOutcome.FINISHED),
+        ("cancelled", DeviceStatus.IDLE, PrintOutcome.CANCELLED),
+        ("error", DeviceStatus.ERROR, PrintOutcome.ERROR),
+        ("", DeviceStatus.UNKNOWN, None),
     ],
 )
-async def test_klipper_normalises_states(text: str, expected: DeviceStatus) -> None:
+async def test_klipper_normalises_states(text: str, expected: DeviceStatus, outcome: PrintOutcome | None) -> None:
     body = {
         "result": {
             "status": {
@@ -605,7 +605,7 @@ async def test_klipper_normalises_states(text: str, expected: DeviceStatus) -> N
     http = RecordingHttp(body=body)
     state = await INTEGRATIONS["klipper"].fetch_state(http, {"base_url": "http://kl"})
     assert http.last["url"] == "http://kl/printer/objects/query?print_stats&virtual_sdcard&extruder&heater_bed"
-    assert state.status is expected
+    assert state.status is expected and state.outcome is outcome
     assert state.progress == 37.5
     assert state.job == "y.gcode"
     assert state.remaining_s == 1000, "the time left is projected from the run time against the file position"
@@ -617,6 +617,12 @@ async def test_klipper_without_progress_has_no_time_left() -> None:
     body = {"result": {"status": {"print_stats": {"state": "standby", "print_duration": 0.0}, "virtual_sdcard": {"progress": 0.0}}}}
     state = await INTEGRATIONS["klipper"].fetch_state(RecordingHttp(body=body), {"base_url": "http://kl"})
     assert state.remaining_s is None and state.nozzle is None
+
+
+async def test_klipper_reads_no_progress_until_the_first_extrusion() -> None:
+    body = {"result": {"status": {"print_stats": {"state": "printing", "print_duration": 0.0}, "virtual_sdcard": {"progress": 0.018}}}}
+    state = await INTEGRATIONS["klipper"].fetch_state(RecordingHttp(body=body), {"base_url": "http://kl"})
+    assert state.progress == 0.0, "the start code and thumbnails a printer reads while it heats and levels are not the print"
 
 
 async def test_klipper_heater_targets_go_through_gcode_script() -> None:
@@ -833,20 +839,22 @@ BAMBU_CONFIG = {"host": "192.168.1.70", "serial": "01S00A", "access_code": "1234
 
 
 @pytest.mark.parametrize(
-    ("gcode_state", "expected"),
+    ("gcode_state", "print_error", "expected", "outcome"),
     [
-        ("RUNNING", DeviceStatus.PRINTING),
-        ("PREPARE", DeviceStatus.PRINTING),
-        ("PAUSE", DeviceStatus.PAUSED),
-        ("IDLE", DeviceStatus.IDLE),
-        ("FINISH", DeviceStatus.IDLE),
-        ("FAILED", DeviceStatus.IDLE),
-        ("", DeviceStatus.UNKNOWN),
+        ("RUNNING", 0, DeviceStatus.PRINTING, None),
+        ("PREPARE", 0, DeviceStatus.PRINTING, None),
+        ("PAUSE", 0, DeviceStatus.PAUSED, None),
+        ("IDLE", 0, DeviceStatus.IDLE, None),
+        ("FINISH", 0, DeviceStatus.IDLE, PrintOutcome.FINISHED),
+        ("FAILED", 0x0300400C, DeviceStatus.IDLE, PrintOutcome.CANCELLED),
+        ("FAILED", 0x07008011, DeviceStatus.IDLE, None),
+        ("", 0, DeviceStatus.UNKNOWN, None),
     ],
 )
-async def test_bambu_normalises_states(monkeypatch, gcode_state: str, expected: DeviceStatus) -> None:
+async def test_bambu_normalises_states(monkeypatch, gcode_state: str, print_error: int, expected: DeviceStatus, outcome: PrintOutcome | None) -> None:
     report = {
         "gcode_state": gcode_state,
+        "print_error": print_error,
         "mc_percent": 42,
         "subtask_name": "z.3mf",
         "mc_remaining_time": 75,
@@ -857,7 +865,7 @@ async def test_bambu_normalises_states(monkeypatch, gcode_state: str, expected: 
     }
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_pull_report", lambda config: report)
     state = await INTEGRATIONS["bambu"].fetch_state(None, BAMBU_CONFIG)
-    assert state.status is expected
+    assert state.status is expected and state.outcome is outcome
     assert state.progress == 42.0
     assert state.job == "z.3mf"
     assert state.remaining_s == 75 * 60, "the report counts minutes"
@@ -1407,6 +1415,7 @@ async def test_creality_holds_one_connection_and_merges_what_changed(creality_pr
         "remaining_s": 1800,
         "nozzle": {"actual": 219.6, "target": 220.0},
         "bed": {"actual": 60.1, "target": 60.0},
+        "outcome": None,
     }
     await creality_printer.push({"printProgress": 50})
     await creality_heard(creality_adapter, lambda report: report["printProgress"] == 50)
@@ -1419,23 +1428,24 @@ async def test_creality_holds_one_connection_and_merges_what_changed(creality_pr
 
 
 @pytest.mark.parametrize(
-    ("code", "expected"),
+    ("code", "expected", "outcome"),
     [
-        (0, DeviceStatus.IDLE),
-        (1, DeviceStatus.PRINTING),
-        (2, DeviceStatus.IDLE),
-        (3, DeviceStatus.IDLE),
-        (4, DeviceStatus.IDLE),
-        (5, DeviceStatus.PAUSED),
-        (6, DeviceStatus.UNKNOWN),
-        (7, DeviceStatus.UNKNOWN),
-        (8, DeviceStatus.UNKNOWN),
-        (9, DeviceStatus.UNKNOWN),
+        (0, DeviceStatus.IDLE, None),
+        (1, DeviceStatus.PRINTING, None),
+        (2, DeviceStatus.IDLE, PrintOutcome.FINISHED),
+        (3, DeviceStatus.IDLE, PrintOutcome.ERROR),
+        (4, DeviceStatus.IDLE, PrintOutcome.CANCELLED),
+        (5, DeviceStatus.PAUSED, None),
+        (6, DeviceStatus.UNKNOWN, None),
+        (7, DeviceStatus.UNKNOWN, None),
+        (8, DeviceStatus.UNKNOWN, None),
+        (9, DeviceStatus.UNKNOWN, None),
     ],
 )
-async def test_creality_normalises_creality_prints_state_codes(creality_printer, creality_adapter, code: int, expected: DeviceStatus) -> None:
+async def test_creality_normalises_creality_prints_state_codes(creality_printer, creality_adapter, code: int, expected: DeviceStatus, outcome: PrintOutcome | None) -> None:
     creality_printer.report["state"] = code
-    assert (await creality_adapter.fetch_state(None, CREALITY_CONFIG)).status is expected
+    state = await creality_adapter.fetch_state(None, CREALITY_CONFIG)
+    assert state.status is expected and state.outcome is outcome
 
 
 async def test_creality_skips_what_is_not_state_and_answers_the_heartbeat(creality_printer, creality_adapter) -> None:
@@ -1644,22 +1654,23 @@ async def test_elegoo_centauri_past_its_estimate_has_no_negative_time_left(monke
 
 
 @pytest.mark.parametrize(
-    ("print_status", "expected"),
+    ("print_status", "expected", "outcome"),
     [
-        (13, DeviceStatus.PRINTING),
-        (27, DeviceStatus.PRINTING),
-        (6, DeviceStatus.PAUSED),
-        (0, DeviceStatus.IDLE),
-        (9, DeviceStatus.IDLE),
-        (14, DeviceStatus.ERROR),
-        (99, DeviceStatus.UNKNOWN),
+        (13, DeviceStatus.PRINTING, None),
+        (27, DeviceStatus.PRINTING, None),
+        (6, DeviceStatus.PAUSED, None),
+        (0, DeviceStatus.IDLE, None),
+        (8, DeviceStatus.IDLE, PrintOutcome.CANCELLED),
+        (9, DeviceStatus.IDLE, PrintOutcome.FINISHED),
+        (14, DeviceStatus.ERROR, PrintOutcome.ERROR),
+        (99, DeviceStatus.UNKNOWN, None),
     ],
 )
-async def test_elegoo_centauri_normalises_states(monkeypatch, print_status: int, expected: DeviceStatus) -> None:
+async def test_elegoo_centauri_normalises_states(monkeypatch, print_status: int, expected: DeviceStatus, outcome: PrintOutcome | None) -> None:
     client = FakeCentauri(print_status)
     monkeypatch.setattr(INTEGRATIONS["elegoo"], "_connect_centauri", _fake_centauri(client))
     state = await INTEGRATIONS["elegoo"].fetch_state(None, ELEGOO_CENTAURI_CONFIG)
-    assert state.status is expected
+    assert state.status is expected and state.outcome is outcome
     assert state.progress == 42.0
     assert state.job == "boat.gcode"
     assert state.remaining_s == 900
@@ -1951,7 +1962,7 @@ async def test_elegoo_moonraker_reuses_klipper_protocol() -> None:
     body = {
         "result": {
             "status": {
-                "print_stats": {"state": "printing", "filename": "part.gcode"},
+                "print_stats": {"state": "printing", "filename": "part.gcode", "print_duration": 60.0},
                 "virtual_sdcard": {"progress": 0.5},
             }
         }
@@ -1995,21 +2006,21 @@ def _prusa_read(job: Any, status: Any = PRUSA_STATUS):
 
 
 @pytest.mark.parametrize(
-    ("job_state", "expected"),
+    ("job_state", "expected", "outcome"),
     [
-        ("PRINTING", DeviceStatus.PRINTING),
-        ("PAUSED", DeviceStatus.PAUSED),
-        ("FINISHED", DeviceStatus.IDLE),
-        ("STOPPED", DeviceStatus.IDLE),
-        ("ERROR", DeviceStatus.ERROR),
-        ("", DeviceStatus.UNKNOWN),
+        ("PRINTING", DeviceStatus.PRINTING, None),
+        ("PAUSED", DeviceStatus.PAUSED, None),
+        ("FINISHED", DeviceStatus.IDLE, PrintOutcome.FINISHED),
+        ("STOPPED", DeviceStatus.IDLE, PrintOutcome.CANCELLED),
+        ("ERROR", DeviceStatus.ERROR, PrintOutcome.ERROR),
+        ("", DeviceStatus.UNKNOWN, None),
     ],
 )
-async def test_prusa_normalises_job_states(monkeypatch, job_state: str, expected: DeviceStatus) -> None:
+async def test_prusa_normalises_job_states(monkeypatch, job_state: str, expected: DeviceStatus, outcome: PrintOutcome | None) -> None:
     job = {"id": 3, "state": job_state, "progress": 42, "time_remaining": 1800, "file": {"display_name": "boat.gcode", "name": "BOAT~1.GCO"}}
     monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", _prusa_read(job))
     state = await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
-    assert state.status is expected
+    assert state.status is expected and state.outcome is outcome
     assert state.progress == 42.0
     assert state.job == "boat.gcode"
     assert state.remaining_s == 1800
@@ -2269,7 +2280,7 @@ async def test_an_adapter_without_uploads_says_so() -> None:
         await Bare().print_file(None, {}, "x.gcode", b"")
     with pytest.raises(RuntimeError, match="cannot set heater targets"):
         await Bare().heat(None, {}, "nozzle", 200.0)
-    assert DeviceState(DeviceStatus.IDLE).public() == {"status": "idle", "progress": 0.0, "job": None, "remaining_s": None, "nozzle": None, "bed": None}
+    assert DeviceState(DeviceStatus.IDLE).public() == {"status": "idle", "progress": 0.0, "job": None, "remaining_s": None, "nozzle": None, "bed": None, "outcome": None}
 
 
 async def test_octoprint_uploads_selected_and_printing() -> None:

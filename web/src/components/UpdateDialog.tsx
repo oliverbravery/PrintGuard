@@ -10,19 +10,22 @@ import { NewTab } from "./NewTab";
 const PULL_COMMAND = "docker compose pull && docker compose up -d";
 
 export function UpdateDialog() {
-  const { engine, releases, reconnecting, send, checking, openDialog } = useStore(
+  const { engine, releases, reconnecting, send, checking, installing, openDialog, updateSettings } = useStore(
     useShallow((s) => ({
       engine: s.engine,
       releases: s.releases,
       reconnecting: s.reconnecting,
       send: s.send,
       checking: s.isPending("update.check"),
+      installing: s.isPending("update.install"),
       openDialog: s.openDialog,
+      updateSettings: s.updateSettings,
     })),
   );
   const update = engine?.update ?? null;
   const current = engine?.version || update?.current;
   const available = update?.available ?? false;
+  const ready = update?.ready ?? null;
   const [selected, setSelected] = useState<string | null>(null);
 
   useEffect(() => {
@@ -98,7 +101,38 @@ export function UpdateDialog() {
         {available && (
           <div className="hairline pt-4 space-y-2">
             <span className="label block">Update the hub</span>
-            {downloadUrl ? (
+            {engine?.installs_updates && ready ? (
+              <>
+                <p className="text-sm text-text-1">
+                  v{ready} is downloaded. Restart now to install it, or PrintGuard installs it by itself once no monitor
+                  is watching a print.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button className="btn btn-primary" disabled={installing} onClick={() => send({ cmd: "update.install" })}>
+                    {installing ? "Restarting…" : "Restart now"}
+                  </button>
+                  <button className="btn" onClick={() => openDialog(null)}>
+                    Later
+                  </button>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      updateSettings({ skipped_version: ready }, "updates");
+                      openDialog(null);
+                    }}
+                  >
+                    Skip this version
+                  </button>
+                </div>
+              </>
+            ) : engine?.installs_updates ? (
+              <>
+                <button className="btn btn-primary" disabled={installing} onClick={() => send({ cmd: "update.install" })}>
+                  {installing ? "Downloading…" : `Update to v${update!.latest}`}
+                </button>
+                <p className="text-xs text-text-2">PrintGuard downloads it, then restarts to install it.</p>
+              </>
+            ) : downloadUrl ? (
               <>
                 <a className="btn btn-primary inline-block" href={downloadUrl} target="_blank" rel="noreferrer">
                   Download v{update!.latest} <NewTab />
