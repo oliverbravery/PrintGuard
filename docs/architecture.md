@@ -550,11 +550,12 @@ feedback-worker/     Cloudflare Worker + R2 training inbox and pull script
 plugins/             official plugins, catalogue.json, plugin.d.ts, schema.py and pin.py
 models/              legacy/, light/ and standard/ TFLite + ONNX models and metadata
 tests/               pytest suite (engine simulation, adapters, hub, plugin sandbox)
-packaging/           PyInstaller spec, build.sh (PyInstaller, then Velopack's vpk), notarise.sh, macOS entitlements and Windows config
+packaging/           PyInstaller spec, build.sh (PyInstaller, then Velopack's vpk), notarise.sh, macOS entitlements, Windows config and the SignPath artifact configuration
 templates/           Unraid Community Applications template
 ca_profile.xml       Unraid Community Applications maintainer profile
 docs/                documentation pages and generated screenshots
 .github/workflows/   CI, release automation and issue lifecycle workflows
+.github/actions/     SignPath signing, shared by CI and the release
 Dockerfile           multi-stage production image with MediaMTX and built UI
 docker-compose.yaml  default Docker Compose setup
 mediamtx.yml         bundled MediaMTX config

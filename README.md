@@ -63,7 +63,7 @@ If you want to run PrintGuard on the computer next to your printer without touch
 Turn on **Start at login** from the tray menu and you can leave it running in the background. The app keeps itself up to date. It asks before restarting to install a release, and if you don't answer it waits until no monitor is watching a print.
 
 > [!NOTE]
-> The macOS app is signed and notarised. The Windows build is unsigned for now, so Windows SmartScreen will warn you when you run the installer: click **More info** and then **Run anyway**. A portable `PrintGuard-windows-x64.zip` is on every [release](https://github.com/oliverbravery/PrintGuard/releases/latest) if you'd rather not install it. On Linux, use the [Docker hub](#docker-for-an-always-on-server-or-nas) instead.
+> The macOS app is signed and notarised, and the Windows installer and app are [signed](#code-signing-policy) by SignPath Foundation. A portable `PrintGuard-windows-x64.zip` is on every [release](https://github.com/oliverbravery/PrintGuard/releases/latest) if you'd rather not install it, but it starts through an unsigned launcher, so SmartScreen warns you the first time: click **More info** and then **Run anyway**. On Linux, use the [Docker hub](#docker-for-an-always-on-server-or-nas) instead.
 
 ### Docker for an always-on server or NAS
 
@@ -219,6 +219,15 @@ If you hit a bug, click the bug icon in the top bar to send me an anonymous repo
 ## Contributing
 
 If you want to run PrintGuard from source, run the test suite or add a new printer integration or notification channel, check out [CONTRIBUTING.md](CONTRIBUTING.md). Issues, bug reports and pull requests are always welcome.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). The Windows installer and app are built from this repository by the [release workflow](.github/workflows/release.yml), and I approve every signing request by hand.
+
+- Committers and reviewers: [Oliver Bravery](https://github.com/oliverbravery)
+- Approvers: [Oliver Bravery](https://github.com/oliverbravery)
+
+PrintGuard checks GitHub for a new release once a day, and the desktop app downloads it, which you can turn off under Settings, in Updates. Nothing else leaves your network unless you set up alerts or MQTT, send a bug report or share frames for training.
 
 ## Sponsor
 
